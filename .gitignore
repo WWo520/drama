@@ -1,0 +1,22 @@
+# 第三方参考代码（下载的 Toonflow 项目，非自研，含 node_modules）
+refer/
+
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+*.log
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# 环境与密钥
+.env
+.env.*
+!.env.example
+*.pem
+*.key

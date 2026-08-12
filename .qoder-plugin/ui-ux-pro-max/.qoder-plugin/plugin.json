@@ -1,0 +1,17 @@
+{
+  "name": "ui-ux-pro-max",
+  "displayName": "UI/UX Pro Max",
+  "version": "2.13.0",
+  "description": "UI/UX design intelligence with searchable database: 84 styles, 192 color palettes, 74 font pairings, 98 UX guidelines, 25 chart types across 22 tech stacks, plus brand/design-system/banner/slides/ui-styling skills.",
+  "descriptionZh": "UI/UX 设计智能技能集：可搜索设计数据库（84 种风格/192 套配色/74 组字体/98 条 UX 准则/25 种图表 × 22 个技术栈），附带品牌、设计系统、横幅、幻灯片、UI 样式等 7 个子技能。",
+  "author": {
+    "name": "nextlevelbuilder"
+  },
+  "homepage": "https://uupm.cc",
+  "repository": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
+  "logo": "./assets/avatar.svg",
+  "keywords": ["qoder-plugin", "skill", "ui", "ux", "design", "design-system", "typography", "color-palette"],
+  "category": "developer-tools",
+  "tags": ["skill", "design", "frontend"],
+  "skills": "./skills/"
+}

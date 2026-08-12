@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="40" fill="url(#bg)"/>
+  <rect x="40" y="40" width="120" height="120" rx="20" fill="none" stroke="#ffffff" stroke-width="6" opacity="0.35"/>
+  <rect x="58" y="58" width="84" height="84" rx="14" fill="#ffffff" opacity="0.9"/>
+  <circle cx="86" cy="92" r="14" fill="#6366f1"/>
+  <rect x="106" y="80" width="22" height="22" rx="4" fill="#8b5cf6"/>
+  <rect x="68" y="112" width="64" height="10" rx="5" fill="#a5b4fc"/>
+  <rect x="68" y="128" width="48" height="10" rx="5" fill="#c7d2fe"/>
+  <text x="100" y="178" font-family="Arial, sans-serif" font-size="13" fill="#ffffff" text-anchor="middle" font-weight="bold">UI/UX Pro Max</text>
+</svg>

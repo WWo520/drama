@@ -7,6 +7,16 @@ dist/
 build/
 *.log
 
+# Go 后端
+duanju-backend/bin/
+
+# 备份目录（B07 每日备份脚本产物）
+backups/
+
+# 临时文件
+cookies.txt
+*.tmp
+
 # 系统与编辑器
 .DS_Store
 Thumbs.db

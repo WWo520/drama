@@ -1,0 +1,4 @@
+-- 回滚（000021）
+DROP TABLE IF EXISTS hints;
+DROP TABLE IF EXISTS banners;
+DROP TABLE IF EXISTS announcements;

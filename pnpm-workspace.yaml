@@ -1,0 +1,7 @@
+packages:
+  - apps/*
+  - packages/*
+
+# pnpm 11：允许 esbuild 等必要依赖执行构建脚本
+onlyBuiltDependencies:
+  - esbuild

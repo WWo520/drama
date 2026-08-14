@@ -1,0 +1,7 @@
+-- 000010_billing.down.sql
+DROP TABLE IF EXISTS billing_records CASCADE;
+DROP TABLE IF EXISTS point_transactions CASCADE;
+DROP TABLE IF EXISTS orders CASCADE;
+DROP TABLE IF EXISTS user_memberships CASCADE;
+DROP TABLE IF EXISTS packages CASCADE;
+DROP TABLE IF EXISTS point_packages CASCADE;

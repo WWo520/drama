@@ -1,0 +1,5 @@
+# 应用配置基底（环境变量覆盖，.env.example 为模板）
+app:
+  env: dev
+  port: 8080
+  debug: false

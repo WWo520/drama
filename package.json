@@ -1,0 +1,16 @@
+{
+  "name": "duanju",
+  "version": "0.1.0",
+  "private": true,
+  "description": "短剧AI创作平台 Monorepo（apps/web-user + apps/web-admin + packages 共享层）",
+  "scripts": {
+    "dev:user": "pnpm --filter @duanju/web-user dev",
+    "build:user": "pnpm --filter @duanju/web-user build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "pnpm@11.18.0"
+}

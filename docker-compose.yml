@@ -1,0 +1,59 @@
+# 阶段 0 B07：Docker Compose 单机开发环境（PG16 + Redis7 + MinIO）
+# 用法：docker compose up -d
+# 对齐 01 系统架构技术栈总表 / 05 工程流程四章环境规范。
+name: duanju-dev
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: duanju-postgres
+    environment:
+      POSTGRES_USER: duanju
+      POSTGRES_PASSWORD: duanju_dev_pwd
+      POSTGRES_DB: duanju
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U duanju -d duanju"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: duanju-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: duanju-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: duanju
+      MINIO_ROOT_PASSWORD: duanju_dev_pwd
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

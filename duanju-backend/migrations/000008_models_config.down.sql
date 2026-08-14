@@ -1,0 +1,6 @@
+-- 000008_models_config.down.sql
+DROP TABLE IF EXISTS style_library CASCADE;
+DROP TABLE IF EXISTS agent_skills CASCADE;
+DROP TABLE IF EXISTS model_keys CASCADE;
+DROP TABLE IF EXISTS models CASCADE;
+DROP TABLE IF EXISTS model_providers CASCADE;

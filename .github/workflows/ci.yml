@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: duanju
+          POSTGRES_PASSWORD: duanju_dev_pwd
+          POSTGRES_DB: duanju
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U duanju"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://duanju:duanju_dev_pwd@localhost:5432/duanju?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: duanju-backend/go.sum
+      - name: Lint & Vet
+        working-directory: duanju-backend
+        run: |
+          go vet ./...
+          go build ./...
+      - name: Migrate
+        working-directory: duanju-backend
+        run: go run ./cmd/migrate up
+      - name: Test
+        working-directory: duanju-backend
+        run: go test ./... -count=1
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Contract check（api-client ↔ 后端路由 ↔ 05 接口文档）
+        run: go run ./duanju-backend/cmd/contract-check
+      - name: Typecheck
+        run: pnpm -r typecheck
+      - name: Build
+        run: pnpm --filter web-user build && pnpm --filter web-admin build

@@ -1,0 +1,31 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background-color: #0f0f23;
+  color: #f8fafc;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 聚焦环可见性（无障碍 P1：键盘导航） */
+:focus-visible {
+  outline: 2px solid #ca8a04;
+  outline-offset: 2px;
+}
+
+/* 玻璃卡片（Liquid Glass 风格，克制使用） */
+.glass-card {
+  background: rgba(27, 27, 48, 0.72);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}

@@ -1,4 +1,4 @@
--- 回滚（000019）
+ji'x-- 回滚（000019）
 DROP TABLE IF EXISTS hints;
 DROP TABLE IF EXISTS banners;
 DROP TABLE IF EXISTS announcements;

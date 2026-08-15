@@ -98,10 +98,11 @@ func (h *VideoHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 	}
 
 	out, _ := json.Marshal(map[string]any{
-		"video_url":   videoURL,
-		"shot_id":     shot.ShotID,
+		"video_url":     videoURL,
+		"shot_id":       shot.ShotID,
 		"shot_group_id": shot.ShotGroupID,
-		"progress_pct": 100,
+		"progress_pct":  100,
+		"is_mock":       true,
 	})
 	return out, nil
 }

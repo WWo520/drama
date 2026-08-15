@@ -95,20 +95,24 @@ func (s *MembershipService) Cancel(c *gin.Context) {
 	httpx.OK(c, nil)
 }
 
-// SSE 4.5 AI 对话流式输出（S2-B10）：mock 分段输出。
+// SSE 4.5 AI 对话流式输出（S2-B10）：开发期 mock 分段输出，带 is_mock 标记（生产接入真实 LLM 后移除）。
 func (s *MembershipService) AIDialogSSE(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 
-	segments := []string{"好的，我来帮你分析这段剧本…", "已提取 2 个核心角色与 3 个关键场景。", "建议在场景 2 增加冲突升级，戏剧张力提升 30%。"}
 	flusher, _ := c.Writer.(http.Flusher)
+	// meta 事件告知前端当前为开发期 mock 回复
+	c.SSEvent("meta", map[string]any{"is_mock": true})
+	flusher.Flush()
+
+	segments := []string{"好的，我来帮你分析这段剧本…", "已提取 2 个核心角色与 3 个关键场景。", "建议在场景 2 增加冲突升级，戏剧张力提升 30%。"}
 	for _, seg := range segments {
 		c.SSEvent("message", map[string]string{"text": seg})
 		flusher.Flush()
 		time.Sleep(300 * time.Millisecond)
 	}
-	c.SSEvent("done", map[string]string{"status": "ok"})
+	c.SSEvent("done", map[string]any{"status": "ok", "is_mock": true})
 	flusher.Flush()
 }
 

@@ -74,9 +74,10 @@ func (h *ExportHandler) Execute(ctx context.Context, t *task.Task) ([]byte, erro
 	log.Printf("export: 完成 export_id=%d url=%s size=%d", params.ExportID, outputURL, fileSize)
 
 	out, _ := json.Marshal(map[string]any{
-		"export_id": params.ExportID,
+		"export_id":  params.ExportID,
 		"output_url": outputURL,
 		"file_size":  fileSize,
+		"is_mock":    true,
 	})
 	return out, nil
 }

@@ -207,7 +207,7 @@ func TopoSort(nodeIDs []string, edges [][2]string) ([]string, error) {
 	return order, nil
 }
 
-// ExecuteNode 节点执行器（mock：按类型输出模拟结果）。
+// ExecuteNode 节点执行器（开发期 mock：按类型输出模拟结果；is_mock 标记告知前端，生产接入真实执行器后移除）。
 func ExecuteNode(nodeType string, config map[string]any) (map[string]any, error) {
 	if !nodeTypes[nodeType] {
 		return nil, fmt.Errorf("未知节点类型: %s", nodeType)
@@ -216,6 +216,7 @@ func ExecuteNode(nodeType string, config map[string]any) (map[string]any, error)
 		"node_type": nodeType,
 		"status":    "SUCCESS",
 		"output":    fmt.Sprintf("mock-%s-result-%d", nodeType, time.Now().UnixMilli()),
+		"is_mock":   true,
 	}, nil
 }
 

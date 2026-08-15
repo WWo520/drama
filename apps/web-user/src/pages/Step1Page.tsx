@@ -82,19 +82,23 @@ function BeatCard({ beat, episodeTitle }: { beat: BeatSummary; episodeTitle: str
         </div>
         <span className="text-xs text-slate-600">{episodeTitle}</span>
       </div>
-      {/* ② 按钮行（M0：历史版本/重新规划灰化+Tooltip；生成视频按状态变化） */}
+      {/* ② 按钮行（启用历史版本/重新规划功能） */}
       <div className="mt-3 flex items-center gap-2 px-5">
         <button
-          disabled
-          title="M1 上线"
-          className="cursor-not-allowed rounded-md border border-white/10 px-3 py-1 text-xs text-slate-600"
+          onClick={() => {
+            // TODO: 打开历史版本弹窗
+            console.log('查看历史版本', beat.beat_id);
+          }}
+          className="rounded-md border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition hover:border-amber-400/50 hover:bg-amber-400/10 hover:text-amber-300"
         >
-          历史版本
+          📜 历史版本
         </button>
         <button
-          disabled
-          title="M1 上线，不满意请全项目删除重建"
-          className="cursor-not-allowed rounded-md border border-white/10 px-3 py-1 text-xs text-slate-600"
+          onClick={() => {
+            // TODO: 打开重新规划弹窗（双 Tab）
+            console.log('重新规划视频任务', beat.beat_id);
+          }}
+          className="rounded-md border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition hover:border-amber-400/50 hover:bg-amber-400/10 hover:text-amber-300"
         >
           🔄 重新规划
         </button>

@@ -85,9 +85,10 @@ func (h *AssetHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 		return nil, err
 	}
 	out, _ := json.Marshal(map[string]any{
-		"image_url": imageURL,
+		"image_url":   imageURL,
 		"target_kind": params.TargetKind,
-		"target_id":  params.TargetID,
+		"target_id":   params.TargetID,
+		"is_mock":     true,
 	})
 	return out, nil
 }

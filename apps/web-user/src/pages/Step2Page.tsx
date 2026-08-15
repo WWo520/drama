@@ -270,6 +270,11 @@ export default function Step2Page() {
           </div>
           {/* 操作区：上传参考图 + 批量生成 */}
           <div className="flex items-center gap-3">
+            {/* 跨集复用免扣费提示（F03 - MCN 客户决策点） */}
+            <div className="flex-1 text-xs text-emerald-300 bg-emerald-400/10 border border-emerald-400/20 px-3 py-1.5 rounded-lg">
+              ✓ 跨集复用资产不重复扣积分
+            </div>
+            
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => void handleFile(e)} />
             <button
               onClick={() => fileRef.current?.click()}

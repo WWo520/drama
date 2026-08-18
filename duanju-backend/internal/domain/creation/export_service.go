@@ -9,16 +9,18 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/duanju/backend/internal/engine/asset"
+	"github.com/duanju/backend/internal/engine/billing"
 	"github.com/duanju/backend/internal/pkg/httpx"
 )
 
 // ExportTaskQueue 导出任务创建边界（由 repository.ExportStore 实现）。
 type ExportTaskQueue interface {
-	CreateExportTask(ctx context.Context, userID, spaceID, projectID int64, exportID int64, resolution string, watermark bool) (int64, error)
+	// CreateExportTask 创建导出任务（返回 exportID 与 taskID，计费冻结按 taskID 进行）。
+	CreateExportTask(ctx context.Context, userID, spaceID, projectID int64, exportID int64, resolution string, watermark bool) (int64, int64, error)
 	// ListExports 导出历史（3.4.3）。
 	ListExports(ctx context.Context, projectID int64, page, pageSize int) ([]map[string]any, int, error)
-	// GetExportByUUID 导出详情（3.4.2）。
-	GetExportByUUID(ctx context.Context, exportUUID string) (map[string]any, error)
+	// GetExportByUUID 导出详情（3.4.2；归属校验）。
+	GetExportByUUID(ctx context.Context, exportUUID string, userID int64) (map[string]any, error)
 }
 
 // ExportService 导出相关服务。
@@ -26,10 +28,11 @@ type ExportService struct {
 	repo      *Repo
 	asset     *asset.Client
 	exportOps ExportTaskQueue
+	billing   *billing.Engine // 计费引擎（导出冻结；nil 跳过）
 }
 
-func NewExportService(repo *Repo, ac *asset.Client, eq ExportTaskQueue) *ExportService {
-	return &ExportService{repo: repo, asset: ac, exportOps: eq}
+func NewExportService(repo *Repo, ac *asset.Client, eq ExportTaskQueue, b *billing.Engine) *ExportService {
+	return &ExportService{repo: repo, asset: ac, exportOps: eq, billing: b}
 }
 
 // Trigger 触发导出（3.4.1）：创建导出记录 + 导出任务 + Outbox。
@@ -51,11 +54,22 @@ func (s *ExportService) Trigger(c *gin.Context, projectUUID string) {
 	}
 
 	spaceID := proj.SpaceID
-	// 创建导出记录 + 任务
-	exportID, err := s.exportOps.CreateExportTask(c.Request.Context(), uid, spaceID, proj.ID, proj.ID, "P720", true)
+	// 创建导出记录 + 任务（返回 taskID 用于计费冻结）
+	exportID, taskID, err := s.exportOps.CreateExportTask(c.Request.Context(), uid, spaceID, proj.ID, proj.ID, "P720", true)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建导出任务失败")
 		return
+	}
+	// 计费冻结：成片时长 × 1 点/秒（LuxReal 分界：导出按时长计费）
+	if s.billing != nil && proj.TotalDurationSec > 0 {
+		cost := proj.TotalDurationSec * ExportPointsPerSec
+		if ferr := s.billing.Freeze(c.Request.Context(), "USER", uid, taskID, cost, &billing.TxnMeta{
+			SpaceID: spaceID, OperatorUserID: uid, ProjectID: &proj.ID, Description: "成片导出",
+		}); ferr != nil {
+			_ = s.repo.MarkTaskFailed(c.Request.Context(), taskID, "积分不足或冻结失败："+ferr.Error())
+			httpx.Fail(c, http.StatusBadRequest, httpx.CodeInsufficientPoints, "积分不足，无法导出")
+			return
+		}
 	}
 	httpx.OK(c, gin.H{"export_id": exportID, "status": "PENDING"})
 }
@@ -95,7 +109,7 @@ func (s *ExportService) Detail(c *gin.Context, exportUUID string) {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
 		return
 	}
-	item, err := s.exportOps.GetExportByUUID(c.Request.Context(), exportUUID)
+	item, err := s.exportOps.GetExportByUUID(c.Request.Context(), exportUUID, uid)
 	if err != nil {
 		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "导出记录不存在")
 		return

@@ -109,8 +109,26 @@ func (s *SpaceBillingStore) MemberConsumptionReport(ctx context.Context, spaceID
 	return out, rows.Err()
 }
 
-// CreateSpaceOrder 团队充值订单（2.14）：orders.space_id 标记 → 支付回调加 SPACE 账户。
+// CreateSpaceOrder 团队充值订单（2.14）：档位校验（point_packages 为唯一真源）→ orders.space_id 标记。
 func (s *SpaceBillingStore) CreateSpaceOrder(ctx context.Context, userID, spaceID int64, pkgCode, amountYuan string, points int) (string, error) {
+	// 档位校验（P0 修复：拒绝任意金额/积分组合）
+	var pkgPoints, bonusPoints int
+	var priceYuan, status string
+	if err := s.pool.QueryRow(ctx, `
+		SELECT points, COALESCE(bonus_points,0), price_yuan::text, status::text
+		FROM point_packages WHERE pkg_code=$1 AND deleted_at IS NULL`, pkgCode).
+		Scan(&pkgPoints, &bonusPoints, &priceYuan, &status); err != nil {
+		return "", fmt.Errorf("套餐不存在")
+	}
+	if status != "ON" {
+		return "", fmt.Errorf("套餐已下架")
+	}
+	if amountYuan != priceYuan {
+		return "", fmt.Errorf("金额与套餐价目不符")
+	}
+	if points != pkgPoints+bonusPoints {
+		return "", fmt.Errorf("积分与套餐价目不符")
+	}
 	orderNo := fmt.Sprintf("P%s%s", time.Now().Format("20060102150405"), uuid.NewString()[:6])
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO orders (order_no, user_id, space_id, order_type, plan_code, original_amount_yuan,
@@ -124,8 +142,8 @@ func (s *SpaceBillingStore) CreateSpaceOrder(ctx context.Context, userID, spaceI
 	return orderNo, nil
 }
 
-// PaySpaceOrder 团队订单支付回调：SPACE 账户加积分 + 流水（幂等）。
-func (s *SpaceBillingStore) PaySpaceOrder(ctx context.Context, orderNo string, points int) error {
+// PaySpaceOrder 团队订单支付回调：仅订单创建者可触发；SPACE 账户加积分 + 流水（幂等）。
+func (s *SpaceBillingStore) PaySpaceOrder(ctx context.Context, orderNo string, points int, requesterID int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -137,6 +155,10 @@ func (s *SpaceBillingStore) PaySpaceOrder(ctx context.Context, orderNo string, p
 		SELECT id, space_id, user_id, pay_status::text FROM orders WHERE order_no=$1::text FOR UPDATE`, orderNo).
 		Scan(&oid, &spaceID, &operatorID, &status); err != nil {
 		return err
+	}
+	// 归属校验（P0 修复：仅订单创建者可触发入账）
+	if operatorID != requesterID {
+		return fmt.Errorf("无权操作该订单")
 	}
 	if status == "PAID" {
 		return nil // 幂等

@@ -54,19 +54,25 @@ func scanFile(path string) {
 	if err != nil {
 		return
 	}
-	lines := strings.Split(string(b), "\n")
+	content := string(b)
+	lines := strings.Split(content, "\n")
 	sqlConcat := regexp.MustCompile(`(?i)query\([^)]*"\+|WHERE\s*"\+|SELECT[^"]*"\+`)
 	secretKeys := []string{"password", "secret", "api_key", "token"}
+	// admin 组鉴权声明检测：Group("/admin", adminMW/RequireRole/authMW/jwtMW) 视为已鉴权
+	adminGroupProtected := regexp.MustCompile(`Group\("/admin"[^)]*(adminMW|RequireRole|authMW|jwtMW|JWT)`).MatchString(content)
 	for i, line := range lines {
 		// 1. SQL 拼接注入
 		if sqlConcat.MatchString(line) && !strings.Contains(line, "--") {
 			add("HIGH", path, i+1, "SQL 字符串拼接（注入风险）: "+strings.TrimSpace(line)[:min(len(strings.TrimSpace(line)), 80)])
 		}
-		// 2. 硬编码密钥（排除测试文件与注释）
+		// 2. 硬编码密钥（排除测试文件、注释、结构体标签与 errors.New 声明行）
 		if !strings.HasSuffix(path, "_test.go") && !strings.HasPrefix(strings.TrimSpace(line), "//") {
 			low := strings.ToLower(line)
 			for _, k := range secretKeys {
 				if strings.Contains(low, k) && strings.Contains(low, "=") && strings.Contains(line, "\"") {
+					if strings.Contains(line, "json:\"") || strings.Contains(line, "errors.New") || strings.Contains(line, "binding:") {
+						continue
+					}
 					if !strings.Contains(low, "env") && !strings.Contains(low, "getenv") && !strings.Contains(low, "os.Getenv") {
 						add("MED", path, i+1, "疑似硬编码敏感值: "+strings.TrimSpace(line)[:min(len(strings.TrimSpace(line)), 70)])
 					}
@@ -77,8 +83,8 @@ func scanFile(path string) {
 		if strings.Contains(strings.ToLower(line), "password") && strings.Contains(line, "Print") && !strings.HasPrefix(strings.TrimSpace(line), "//") {
 			add("HIGH", path, i+1, "日志可能输出密码字段")
 		}
-		// 4. 未授权 admin 端点（路由注册行）
-		if strings.Contains(line, "admin") && strings.Contains(line, ".GET(") && !strings.Contains(line, "auth") {
+		// 4. 未授权 admin 端点（路由注册行；组声明已带 RBAC 中间件则跳过）
+		if strings.Contains(line, "admin") && strings.Contains(line, ".GET(") && !strings.Contains(line, "auth") && !adminGroupProtected {
 			add("MED", path, i+1, "admin 路由可能缺少鉴权: "+strings.TrimSpace(line)[:min(len(strings.TrimSpace(line)), 70)])
 		}
 	}

@@ -41,6 +41,8 @@ type TaskBill struct {
 type BillStore interface {
 	// GetAccountForUpdate 锁定账户（FOR UPDATE）。
 	GetAccountForUpdate(ctx context.Context, ownerType string, ownerID int64) (*Account, error)
+	// GetAccount 无锁查询账户（只读场景，避免行锁阻塞扣费）。
+	GetAccount(ctx context.Context, ownerType string, ownerID int64) (*Account, error)
 	// Freeze 冻结：current−=N, frozen+=N + FROZEN 流水（事务内）。
 	Freeze(ctx context.Context, a *Account, amount int, taskID int64, meta *TxnMeta) error
 	// Deduct 扣费：frozen−=N + DEBIT 流水 + billing_records（事务内；UNIQUE 防重）。

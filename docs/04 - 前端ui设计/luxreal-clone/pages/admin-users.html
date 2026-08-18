@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>用户管理 - 管理后台</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          'bg-deep': '#0B0B1A',
+          'bg-card': '#151525',
+          'bg-card-light': '#1A1A2E',
+          'border-dark': '#2A2A3E',
+          'amber-gold': '#fbbf24',
+          'amber-dim': '#d97706',
+          'text-primary': '#ffffff',
+          'text-secondary': '#9ca3af',
+          'text-muted': '#6b7280',
+        },
+        fontFamily: {
+          sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        },
+      }
+    }
+  }
+</script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    background: #0B0B1A;
+    color: #fff;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #151525; }
+  ::-webkit-scrollbar-thumb { background: #2A2A3E; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3a4e; }
+
+  /* Sidebar menu item active */
+  .menu-item.active {
+    background: linear-gradient(90deg, rgba(251, 191, 36, 0.15) 0%, rgba(251, 191, 36, 0.05) 100%);
+    color: #fbbf24;
+    border-left: 3px solid #fbbf24;
+  }
+  .menu-item.active svg { color: #fbbf24; }
+
+  .menu-item:hover {
+    background: rgba(255,255,255,0.05);
+  }
+
+  /* Notification dot */
+  .notif-dot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    background: #ef4444;
+    border-radius: 50%;
+    border: 2px solid #0D0D0D;
+  }
+
+  /* Table row hover */
+  .table-row:hover {
+    background: rgba(251, 191, 36, 0.03);
+  }
+
+  /* Status tags */
+  .tag-normal {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+  .tag-banned {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+  .tag-pending {
+    background: rgba(234, 179, 8, 0.15);
+    color: #eab308;
+    border: 1px solid rgba(234, 179, 8, 0.3);
+  }
+
+  /* VIP gradient bars */
+  .vip-free { background: linear-gradient(90deg, #4b5563, #6b7280); }
+  .vip-basic { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+  .vip-advanced { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+  .vip-premium { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+  .vip-flagship { background: linear-gradient(90deg, #ec4899, #8b5cf6, #3b82f6, #10b981); }
+
+  /* Checkbox custom */
+  .custom-checkbox {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid #2A2A3E;
+    border-radius: 4px;
+    background: #0B0B1A;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.15s ease;
+  }
+  .custom-checkbox:checked {
+    background: #fbbf24;
+    border-color: #fbbf24;
+  }
+  .custom-checkbox:checked::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 5px;
+    height: 9px;
+    border: solid #0B0B1A;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+  .custom-checkbox:hover {
+    border-color: #fbbf24;
+  }
+
+  /* Select dropdown custom */
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 32px;
+  }
+
+  /* Action link */
+  .action-link {
+    color: #9ca3af;
+    transition: color 0.15s ease;
+  }
+  .action-link:hover {
+    color: #fbbf24;
+  }
+  .action-link-danger {
+    color: #9ca3af;
+    transition: color 0.15s ease;
+  }
+  .action-link-danger:hover {
+    color: #ef4444;
+  }
+
+  /* Pagination button */
+  .page-btn {
+    min-width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #2A2A3E;
+    border-radius: 6px;
+    background: #151525;
+    color: #9ca3af;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .page-btn:hover:not(:disabled) {
+    border-color: #fbbf24;
+    color: #fbbf24;
+  }
+  .page-btn.active {
+    background: #fbbf24;
+    border-color: #fbbf24;
+    color: #0B0B1A;
+    font-weight: 600;
+  }
+  .page-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* Glow effect for gold text */
+  .glow-gold {
+    text-shadow: 0 0 20px rgba(251, 191, 36, 0.3);
+  }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="flex min-h-screen">
+
+  <!-- ========== SIDEBAR ========== -->
+  <aside class="w-[240px] bg-[#0D0D0D] border-r border-[#2A2A3E] flex flex-col flex-shrink-0 fixed h-full z-20">
+    <!-- Logo -->
+    <div class="h-[60px] flex items-center px-5 border-b border-[#2A2A3E]">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center mr-3">
+        <svg class="w-5 h-5 text-[#0B0B1A]" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M8 5v14l11-7z"/>
+        </svg>
+      </div>
+      <span class="text-white font-bold text-lg tracking-wide">Empty Broken <span class="text-amber-gold">Admin</span></span>
+    </div>
+
+    <!-- Menu -->
+    <nav class="flex-1 py-4 overflow-y-auto">
+      <div class="px-3 mb-2 text-[11px] text-text-muted uppercase tracking-wider font-medium">主菜单</div>
+
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="layout-dashboard" class="w-[18px] h-[18px] mr-3"></i>
+        <span>工作台</span>
+      </a>
+      <a href="#" class="menu-item active flex items-center px-5 py-3 text-sm cursor-pointer">
+        <i data-lucide="users" class="w-[18px] h-[18px] mr-3"></i>
+        <span>用户管理</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="shield-check" class="w-[18px] h-[18px] mr-3"></i>
+        <span>内容审核</span>
+        <span class="ml-auto text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">12</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="film" class="w-[18px] h-[18px] mr-3"></i>
+        <span>作品管理</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="wallet" class="w-[18px] h-[18px] mr-3"></i>
+        <span>计费财务</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="cpu" class="w-[18px] h-[18px] mr-3"></i>
+        <span>算力任务</span>
+        <span class="ml-auto text-[10px] bg-amber-gold/20 text-amber-gold px-2 py-0.5 rounded-full">34</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="settings" class="w-[18px] h-[18px] mr-3"></i>
+        <span>平台配置</span>
+      </a>
+    </nav>
+
+    <!-- Bottom user -->
+    <div class="p-4 border-t border-[#2A2A3E]">
+      <div class="flex items-center">
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center text-[#0B0B1A] font-bold text-sm">
+          A
+        </div>
+        <div class="ml-3 flex-1 min-w-0">
+          <div class="text-sm font-medium text-white truncate">Admin</div>
+          <div class="text-xs text-text-muted truncate">超级管理员</div>
+        </div>
+        <i data-lucide="chevron-up" class="w-4 h-4 text-text-muted"></i>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ========== MAIN WRAPPER ========== -->
+  <div class="flex-1 ml-[240px] flex flex-col min-w-0">
+
+    <!-- ========== TOP BAR ========== -->
+    <header class="h-[60px] bg-[#0D0D0D]/80 backdrop-blur-sm border-b border-[#2A2A3E] flex items-center justify-between px-6 sticky top-0 z-10">
+      <!-- Left: breadcrumb -->
+      <div class="flex items-center">
+        <i data-lucide="home" class="w-4 h-4 text-text-muted mr-2"></i>
+        <span class="text-text-muted text-sm">管理后台</span>
+        <i data-lucide="chevron-right" class="w-4 h-4 text-text-muted mx-2"></i>
+        <span class="text-white text-sm font-medium">用户管理</span>
+      </div>
+
+      <!-- Right: search + notif + avatar -->
+      <div class="flex items-center gap-4">
+        <!-- Search -->
+        <div class="relative">
+          <i data-lucide="search" class="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input type="text" placeholder="搜索..." class="bg-bg-card border border-[#2A2A3E] rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-text-muted focus:outline-none focus:border-amber-gold/50 w-56 transition-colors">
+        </div>
+
+        <!-- Notification -->
+        <button class="relative w-9 h-9 rounded-lg bg-bg-card border border-[#2A2A3E] flex items-center justify-center hover:border-[#3A3A4E] transition-colors">
+          <i data-lucide="bell" class="w-4 h-4 text-text-secondary"></i>
+          <span class="notif-dot"></span>
+        </button>
+
+        <!-- Divider -->
+        <div class="w-px h-6 bg-[#2A2A3E]"></div>
+
+        <!-- Avatar -->
+        <div class="flex items-center cursor-pointer">
+          <div class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center text-[#0B0B1A] font-bold text-sm">
+            A
+          </div>
+          <span class="ml-2 text-sm text-white">Admin</span>
+          <i data-lucide="chevron-down" class="w-4 h-4 text-text-muted ml-1"></i>
+        </div>
+      </div>
+    </header>
+
+    <!-- ========== MAIN CONTENT ========== -->
+    <main class="flex-1 p-6 overflow-auto">
+      <!-- Page title -->
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white mb-1">用户管理</h1>
+          <p class="text-sm text-text-muted">管理平台所有注册用户，查看用户详情，调整用户权限与积分</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <!-- 导出 Excel -->
+          <button class="flex items-center px-4 py-2 bg-bg-card border border-[#2A2A3E] rounded-lg text-sm text-text-secondary hover:border-amber-gold/50 hover:text-white transition-colors">
+            <i data-lucide="download" class="w-4 h-4 mr-2"></i>
+            导出 Excel
+          </button>
+          <!-- 调整积分 -->
+          <button class="flex items-center px-4 py-2 bg-bg-card border border-[#2A2A3E] rounded-lg text-sm text-text-secondary hover:border-amber-gold/50 hover:text-white transition-colors">
+            <i data-lucide="coins" class="w-4 h-4 mr-2"></i>
+            调整积分
+          </button>
+          <!-- 新增用户 -->
+          <button class="flex items-center px-4 py-2 bg-gradient-to-r from-amber-gold to-amber-dim rounded-lg text-sm text-[#0B0B1A] font-semibold hover:shadow-lg hover:shadow-amber-gold/20 transition-all">
+            <i data-lucide="plus" class="w-4 h-4 mr-2"></i>
+            新增用户
+          </button>
+        </div>
+      </div>
+
+      <!-- ====== FILTER SECTION ====== -->
+      <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-4 mb-4">
+        <div class="flex items-center gap-3 flex-wrap">
+          <!-- 关键词搜索 -->
+          <div class="relative flex-1 min-w-[200px]">
+            <i data-lucide="search" class="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2"></i>
+            <input type="text" placeholder="输入昵称 / 邮箱 / 手机号搜索" class="w-full bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-text-muted focus:outline-none focus:border-amber-gold/50 transition-colors">
+          </div>
+
+          <!-- 状态下拉 -->
+          <div class="relative">
+            <select class="bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-gold/50 transition-colors w-[120px]">
+              <option>全部状态</option>
+              <option>正常</option>
+              <option>封禁</option>
+              <option>待实名</option>
+            </select>
+          </div>
+
+          <!-- VIP等级下拉 -->
+          <div class="relative">
+            <select class="bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-gold/50 transition-colors w-[130px]">
+              <option>全部等级</option>
+              <option>免费用户</option>
+              <option>基础会员</option>
+              <option>进阶会员</option>
+              <option>高级会员</option>
+              <option>旗舰会员</option>
+            </select>
+          </div>
+
+          <!-- 注册时间范围 -->
+          <div class="flex items-center gap-2">
+            <div class="relative">
+              <input type="date" class="bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-gold/50 transition-colors">
+            </div>
+            <span class="text-text-muted text-sm">至</span>
+            <div class="relative">
+              <input type="date" class="bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-gold/50 transition-colors">
+            </div>
+          </div>
+
+          <!-- 搜索按钮 -->
+          <button class="flex items-center px-4 py-2 bg-gradient-to-r from-amber-gold to-amber-dim rounded-lg text-sm text-[#0B0B1A] font-semibold hover:shadow-lg hover:shadow-amber-gold/20 transition-all">
+            <i data-lucide="search" class="w-4 h-4 mr-2"></i>
+            搜索
+          </button>
+
+          <!-- 重置按钮 -->
+          <button class="flex items-center px-4 py-2 bg-bg-card border border-[#2A2A3E] rounded-lg text-sm text-text-secondary hover:border-[#3A3A4E] hover:text-white transition-colors">
+            <i data-lucide="rotate-ccw" class="w-4 h-4 mr-2"></i>
+            重置
+          </button>
+        </div>
+      </div>
+
+      <!-- ====== TABLE TOOLBAR ====== -->
+      <div class="flex items-center justify-between mb-3 px-1">
+        <div class="flex items-center gap-4">
+          <span class="text-sm text-text-secondary">已选 <span class="text-amber-gold font-semibold">0</span> 项</span>
+          <div class="flex items-center gap-2">
+            <button class="flex items-center px-3 py-1.5 bg-bg-card border border-[#2A2A3E] rounded-md text-xs text-text-secondary hover:border-red-500/50 hover:text-red-400 transition-colors">
+              <i data-lucide="ban" class="w-3.5 h-3.5 mr-1.5"></i>
+              批量封禁
+            </button>
+            <button class="flex items-center px-3 py-1.5 bg-bg-card border border-[#2A2A3E] rounded-md text-xs text-text-secondary hover:border-amber-gold/50 hover:text-amber-gold transition-colors">
+              <i data-lucide="coins" class="w-3.5 h-3.5 mr-1.5"></i>
+              批量调整积分
+            </button>
+            <button class="flex items-center px-3 py-1.5 bg-bg-card border border-[#2A2A3E] rounded-md text-xs text-text-secondary hover:border-green-500/50 hover:text-green-400 transition-colors">
+              <i data-lucide="download" class="w-3.5 h-3.5 mr-1.5"></i>
+              批量导出
+            </button>
+          </div>
+        </div>
+        <div class="text-sm text-text-muted">
+          共 <span class="text-white font-medium">12,847</span> 条记录
+        </div>
+      </div>
+
+      <!-- ====== USER TABLE ====== -->
+      <div class="bg-bg-card border border-[#2A2A3E] rounded-xl overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead>
+              <tr class="bg-bg-card-light border-b border-[#2A2A3E]">
+                <th class="px-4 py-3 text-left w-12">
+                  <input type="checkbox" class="custom-checkbox" id="selectAll">
+                </th>
+                <th class="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">用户</th>
+                <th class="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">用户ID</th>
+                <th class="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">邮箱</th>
+                <th class="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">手机号</th>
+                <th class="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">注册时间</th>
+                <th class="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">最后登录</th>
+                <th class="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">VIP等级</th>
+                <th class="px-3 py-3 text-right text-xs font-medium text-text-muted uppercase tracking-wider">积分余额</th>
+                <th class="px-3 py-3 text-center text-xs font-medium text-text-muted uppercase tracking-wider">状态</th>
+                <th class="px-3 py-3 text-center text-xs font-medium text-text-muted uppercase tracking-wider">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-[#2A2A3E]">
+              <!-- Row 1 -->
+              <tr class="table-row transition-colors h-12">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check">
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">L</div>
+                    <span class="ml-3 text-sm text-white">李逍遥</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">U100001</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">lixiaoyao@email.com</td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">138****8888</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2024-03-15 14:32</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-20 09:15</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-1.5 h-5 rounded-full vip-flagship mr-2"></div>
+                    <span class="text-xs text-white">旗舰会员</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-right text-amber-gold font-semibold font-mono">128,500</td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-normal">正常</span>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-3 text-xs">
+                    <a href="#" class="action-link">查看详情</a>
+                    <a href="#" class="action-link">调整积分</a>
+                    <a href="#" class="action-link-danger">封禁</a>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 2 -->
+              <tr class="table-row transition-colors h-12">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check">
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">Z</div>
+                    <span class="ml-3 text-sm text-white">周芷若</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">U100002</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">zhouzhiruo@email.com</td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">139****6666</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2024-04-02 10:18</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-20 08:42</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-1.5 h-5 rounded-full vip-premium mr-2"></div>
+                    <span class="text-xs text-white">高级会员</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-right text-amber-gold font-semibold font-mono">56,200</td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-normal">正常</span>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-3 text-xs">
+                    <a href="#" class="action-link">查看详情</a>
+                    <a href="#" class="action-link">调整积分</a>
+                    <a href="#" class="action-link-danger">封禁</a>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 3 -->
+              <tr class="table-row transition-colors h-12">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check">
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">W</div>
+                    <span class="ml-3 text-sm text-white">王语嫣</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">U100003</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">wangyuyan@email.com</td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">137****5555</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2024-05-20 16:45</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-19 22:10</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-1.5 h-5 rounded-full vip-premium mr-2"></div>
+                    <span class="text-xs text-white">高级会员</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-right text-amber-gold font-semibold font-mono">42,800</td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-normal">正常</span>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-3 text-xs">
+                    <a href="#" class="action-link">查看详情</a>
+                    <a href="#" class="action-link">调整积分</a>
+                    <a href="#" class="action-link-danger">封禁</a>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 4 -->
+              <tr class="table-row transition-colors h-12">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check">
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">C</div>
+                    <span class="ml-3 text-sm text-white">陈长生</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">U100004</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">chenchangsheng@email.com</td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">136****4444</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2024-06-10 09:22</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-20 07:30</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-1.5 h-5 rounded-full vip-advanced mr-2"></div>
+                    <span class="text-xs text-white">进阶会员</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-right text-amber-gold font-semibold font-mono">18,600</td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-normal">正常</span>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-3 text-xs">
+                    <a href="#" class="action-link">查看详情</a>
+                    <a href="#" class="action-link">调整积分</a>
+                    <a href="#" class="action-link-danger">封禁</a>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 5 -->
+              <tr class="table-row transition-colors h-12">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check">
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-violet-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">H</div>
+                    <span class="ml-3 text-sm text-white">黄蓉</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">U100005</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">huangrong@email.com</td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">135****3333</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2024-07-08 11:56</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-18 15:20</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-1.5 h-5 rounded-full vip-advanced mr-2"></div>
+                    <span class="text-xs text-white">进阶会员</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-right text-amber-gold font-semibold font-mono">15,400</td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-pending">待实名</span>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-3 text-xs">
+                    <a href="#" class="action-link">查看详情</a>
+                    <a href="#" class="action-link">调整积分</a>
+                    <a href="#" class="action-link-danger">封禁</a>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 6 -->
+              <tr class="table-row transition-colors h-12">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check">
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-red-400 to-orange-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">G</div>
+                    <span class="ml-3 text-sm text-white">郭靖</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">U100006</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">guojing@email.com</td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">134****2222</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2024-08-15 13:40</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-19 18:05</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-1.5 h-5 rounded-full vip-basic mr-2"></div>
+                    <span class="text-xs text-white">基础会员</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-right text-amber-gold font-semibold font-mono">6,800</td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-normal">正常</span>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-3 text-xs">
+                    <a href="#" class="action-link">查看详情</a>
+                    <a href="#" class="action-link">调整积分</a>
+                    <a href="#" class="action-link-danger">封禁</a>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 7 -->
+              <tr class="table-row transition-colors h-12">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check">
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">Y</div>
+                    <span class="ml-3 text-sm text-white">杨过</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">U100007</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">yangguo@email.com</td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">133****1111</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2024-09-03 08:15</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-17 20:45</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-1.5 h-5 rounded-full vip-basic mr-2"></div>
+                    <span class="text-xs text-white">基础会员</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-right text-amber-gold font-semibold font-mono">4,200</td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-banned">封禁</span>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-3 text-xs">
+                    <a href="#" class="action-link">查看详情</a>
+                    <a href="#" class="action-link">调整积分</a>
+                    <a href="#" class="action-link" style="color:#22c55e;">解封</a>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 8 -->
+              <tr class="table-row transition-colors h-12">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check">
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-teal-400 to-cyan-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">X</div>
+                    <span class="ml-3 text-sm text-white">小龙女</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">U100008</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">xiaolongnv@email.com</td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">132****9999</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2024-10-22 17:28</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-20 06:50</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-1.5 h-5 rounded-full vip-free mr-2"></div>
+                    <span class="text-xs text-text-secondary">免费用户</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-right text-text-secondary font-mono">500</td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-normal">正常</span>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-3 text-xs">
+                    <a href="#" class="action-link">查看详情</a>
+                    <a href="#" class="action-link">调整积分</a>
+                    <a href="#" class="action-link-danger">封禁</a>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 9 -->
+              <tr class="table-row transition-colors h-12">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check">
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-rose-400 to-pink-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">Q</div>
+                    <span class="ml-3 text-sm text-white">乔峰</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">U100009</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">qiaofeng@email.com</td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">131****7777</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2024-11-30 20:10</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-16 11:30</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-1.5 h-5 rounded-full vip-free mr-2"></div>
+                    <span class="text-xs text-text-secondary">免费用户</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-right text-text-secondary font-mono">200</td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-pending">待实名</span>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-3 text-xs">
+                    <a href="#" class="action-link">查看详情</a>
+                    <a href="#" class="action-link">调整积分</a>
+                    <a href="#" class="action-link-danger">封禁</a>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 10 -->
+              <tr class="table-row transition-colors h-12">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check">
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-yellow-400 to-amber-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">D</div>
+                    <span class="ml-3 text-sm text-white">段誉</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">U100010</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">duanyu@email.com</td>
+                <td class="px-3 py-0 text-sm text-text-secondary font-mono">130****6666</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2024-12-18 12:05</td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-19 09:55</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-1.5 h-5 rounded-full vip-flagship mr-2"></div>
+                    <span class="text-xs text-white">旗舰会员</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-right text-amber-gold font-semibold font-mono">99,999</td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-normal">正常</span>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-3 text-xs">
+                    <a href="#" class="action-link">查看详情</a>
+                    <a href="#" class="action-link">调整积分</a>
+                    <a href="#" class="action-link-danger">封禁</a>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- ====== PAGINATION ====== -->
+        <div class="flex items-center justify-between px-4 py-3 border-t border-[#2A2A3E]">
+          <div class="text-sm text-text-muted">
+            显示第 <span class="text-white">1-10</span> 条，共 <span class="text-white">12,847</span> 条
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="page-btn" disabled>
+              <i data-lucide="chevron-left" class="w-4 h-4"></i>
+            </button>
+            <button class="page-btn active">1</button>
+            <button class="page-btn">2</button>
+            <button class="page-btn">3</button>
+            <button class="page-btn">4</button>
+            <button class="page-btn">5</button>
+            <span class="text-text-muted text-sm px-1">...</span>
+            <button class="page-btn">1285</button>
+            <button class="page-btn">
+              <i data-lucide="chevron-right" class="w-4 h-4"></i>
+            </button>
+            <div class="flex items-center gap-2 ml-3">
+              <span class="text-xs text-text-muted">跳至</span>
+              <input type="number" value="1" class="w-12 h-8 bg-bg-card border border-[#2A2A3E] rounded-md text-center text-sm text-white focus:outline-none focus:border-amber-gold/50">
+              <span class="text-xs text-text-muted">页</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="mt-8 pt-4 border-t border-[#2A2A3E] text-center">
+        <p class="text-xs text-text-muted">Empty Broken Admin v1.0 · © 2025 Empty Broken 创作平台</p>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+  // Initialize Lucide icons
+  lucide.createIcons();
+
+  // Select all checkbox logic
+  const selectAll = document.getElementById('selectAll');
+  const rowChecks = document.querySelectorAll('.row-check');
+  const selectedCountEl = document.querySelector('.text-amber-gold.font-semibold');
+
+  function updateSelectedCount() {
+    const checked = document.querySelectorAll('.row-check:checked').length;
+    selectedCountEl.textContent = checked;
+  }
+
+  selectAll.addEventListener('change', function() {
+    rowChecks.forEach(cb => cb.checked = this.checked);
+    updateSelectedCount();
+  });
+
+  rowChecks.forEach(cb => {
+    cb.addEventListener('change', function() {
+      const allChecked = Array.from(rowChecks).every(c => c.checked);
+      selectAll.checked = allChecked;
+      updateSelectedCount();
+    });
+  });
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1800 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark" style="height:100vh; overflow:hidden;">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的作品 - LuxReal</title>
+    <style id="theme-vars">
+/* LuxReal Clone - Design Tokens */
+/* Dark cinematic theme inspired by LuxReal AI Short Drama platform */
+
+:root {
+  /* Brand prefix: luxreal */
+  --luxreal-background: #030911;
+  --luxreal-foreground: #F0F0F5;
+  --luxreal-card: #0D1119;
+  --luxreal-card-foreground: #E8E8F0;
+  --luxreal-popover: #111525;
+  --luxreal-popover-foreground: #F0F0F5;
+  --luxreal-primary: #4C7FF8;
+  --luxreal-primary-foreground: #FFFFFF;
+  --luxreal-muted: #0F1420;
+  --luxreal-muted-foreground: #6B7088;
+  --luxreal-border: #1A1F2E;
+  --luxreal-input: #0F1420;
+  --luxreal-ring: #4C7FF8;
+  --luxreal-accent: #131828;
+  --luxreal-accent-foreground: #F0F0F5;
+  --luxreal-destructive: #EF4444;
+  --luxreal-destructive-foreground: #FFFFFF;
+  --luxreal-success: #10B981;
+  --luxreal-warning: #F59E0B;
+
+  /* Radius scale */
+  --luxreal-radius-sm: 6px;
+  --luxreal-radius-md: 10px;
+  --luxreal-radius-lg: 16px;
+  --luxreal-radius-xl: 24px;
+  --luxreal-radius-full: 9999px;
+
+  /* Gradient accents */
+  --luxreal-gradient-neon: linear-gradient(135deg, #8B5CF6 0%, #4C7FF8 50%, #06B6D4 100%);
+  --luxreal-gradient-glow: linear-gradient(180deg, rgba(76,127,248,0.15) 0%, rgba(139,92,246,0.05) 100%);
+  --luxreal-gradient-card: linear-gradient(145deg, rgba(22,25,38,0.85) 0%, rgba(17,19,24,0.95) 100%);
+  --luxreal-gradient-banner1: linear-gradient(135deg, #0F2E2A 0%, #134E4A 40%, #0F2E2A 100%);
+  --luxreal-gradient-banner2: linear-gradient(135deg, #2A1506 0%, #5C3A1E 40%, #2A1506 100%);
+  --luxreal-gradient-banner3: linear-gradient(135deg, #1A1F3A 0%, #243060 40%, #1A1F3A 100%);
+  --luxreal-gradient-banner4: linear-gradient(135deg, #1E1B4B 0%, #312E81 40%, #1E1B4B 100%);
+
+  /* Shadows */
+  --luxreal-shadow-glow: 0 0 30px rgba(76,127,248,0.15);
+  --luxreal-shadow-card: 0 4px 24px rgba(0,0,0,0.4);
+  --luxreal-shadow-elevated: 0 8px 40px rgba(0,0,0,0.5);
+
+  /* Sidebar */
+  --luxreal-sidebar: #0A0A14;
+  --luxreal-sidebar-foreground: #B0B0C8;
+  --luxreal-sidebar-accent: #4C7FF8;
+  --luxreal-sidebar-width: 72px;
+
+  /* Top banner */
+  --luxreal-banner-height: 36px;
+}
+
+/* Base typography */
+html {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--luxreal-background);
+  color: var(--luxreal-foreground);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--luxreal-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--luxreal-muted-foreground);
+}
+
+/* Glass card effect */
+.luxreal-glass {
+  background: var(--luxreal-gradient-card);
+  border: 1px solid var(--luxreal-border);
+  backdrop-filter: blur(12px);
+}
+
+/* Neon glow effect for primary elements */
+.luxreal-glow {
+  box-shadow: var(--luxreal-shadow-glow);
+}
+
+/* Gradient text */
+.luxreal-gradient-text {
+  background: var(--luxreal-gradient-neon);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Tab capsule style */
+.luxreal-tab-capsule {
+  border-radius: var(--luxreal-radius-full);
+  padding: 6px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--luxreal-muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.luxreal-tab-capsule.active {
+  background: var(--luxreal-primary);
+  color: var(--luxreal-primary-foreground);
+}
+.luxreal-tab-capsule:hover:not(.active) {
+  color: var(--luxreal-foreground);
+  background: var(--luxreal-muted);
+}
+
+/* Button styles */
+.luxreal-btn-primary {
+  background: var(--luxreal-primary);
+  color: var(--luxreal-primary-foreground);
+  border: none;
+  border-radius: var(--luxreal-radius-full);
+  padding: 10px 28px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.luxreal-btn-primary:hover {
+  background: #2563EB;
+  box-shadow: 0 0 24px rgba(59,130,246,0.35);
+}
+.luxreal-btn-secondary {
+  background: transparent;
+  color: var(--luxreal-foreground);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-full);
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.luxreal-btn-secondary:hover {
+  border-color: var(--luxreal-primary);
+  color: var(--luxreal-primary);
+}
+.luxreal-btn-ghost {
+  background: transparent;
+  color: var(--luxreal-muted-foreground);
+  border: none;
+  border-radius: var(--luxreal-radius-md);
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.luxreal-btn-ghost:hover {
+  color: var(--luxreal-foreground);
+  background: var(--luxreal-muted);
+}
+
+/* Input styles */
+.luxreal-input {
+  background: var(--luxreal-input);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-md);
+  padding: 10px 14px;
+  color: var(--luxreal-foreground);
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+.luxreal-input:focus {
+  border-color: var(--luxreal-primary);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+}
+.luxreal-input::placeholder {
+  color: var(--luxreal-muted-foreground);
+}
+
+/* Select/Dropdown trigger style */
+.luxreal-select {
+  background: var(--luxreal-input);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-full);
+  padding: 6px 14px;
+  color: var(--luxreal-foreground);
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.luxreal-select:hover {
+  border-color: var(--luxreal-primary);
+}
+
+/* Sidebar navigation item */
+.luxreal-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--luxreal-radius-md);
+  color: var(--luxreal-sidebar-foreground);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  gap: 3px;
+  text-decoration: none;
+  font-size: 11px;
+  position: relative;
+}
+.luxreal-nav-item:hover {
+  color: var(--luxreal-foreground);
+  background: rgba(255,255,255,0.05);
+}
+.luxreal-nav-item.active {
+  color: var(--luxreal-primary);
+  background: rgba(59,130,246,0.12);
+}
+.luxreal-nav-item.nav-recharge {
+  color: #A78BFA;
+  background: rgba(139,92,246,0.08);
+}
+.luxreal-nav-item.nav-recharge:hover {
+  color: #C4B5FD;
+  background: rgba(139,92,246,0.14);
+}
+
+/* Sidebar Avatar */
+.sidebar-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+.sidebar-avatar:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 12px rgba(76, 127, 248, 0.4);
+}
+
+/* Sidebar Credits & Recharge */
+.sidebar-credits {
+    font-size: 13px;
+    font-weight: 500;
+    color: #F0F0F5;
+    line-height: 1.2;
+    margin: 4px 0 2px;
+    flex-shrink: 0;
+}
+.sidebar-recharge {
+    font-size: 12px;
+    font-weight: 500;
+    color: #fff;
+    background: linear-gradient(135deg, #A78BFA, #8B5CF6);
+    padding: 4px 12px;
+    border-radius: 9999px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+.sidebar-recharge:hover {
+    background: linear-gradient(135deg, #C4B5FD, #A78BFA);
+    transform: translateY(-1px);
+}
+
+/* Profile Panel */
+.profile-panel {
+    position: fixed;
+    top: 0;
+    left: 84px;
+    width: 240px;
+    background: #1A1A2E;
+    border: 1px solid #2A2A3E;
+    border-radius: 20px;
+    padding: 16px;
+    z-index: 100;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03) inset;
+}
+.profile-panel::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 50%;
+    transform: translateY(-50%) rotate(45deg);
+    width: 10px;
+    height: 10px;
+    background: #1A1A2E;
+    border-left: 1px solid #2A2A3E;
+    border-bottom: 1px solid #2A2A3E;
+}
+.profile-panel.hidden {
+    display: none;
+}
+.profile-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+.profile-avatar-lg {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 18px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+.profile-avatar-lg::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 12px;
+    height: 12px;
+    background: #22C55E;
+    border: 2px solid #1A1A2E;
+    border-radius: 50%;
+}
+.profile-info {
+    flex: 1;
+    min-width: 0;
+}
+.profile-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 2px;
+}
+.profile-id {
+    font-size: 12px;
+    color: #6B7088;
+}
+.profile-panel-divider {
+    height: 1px;
+    background: rgba(255,255,255,0.06);
+    margin: 12px 0;
+}
+.profile-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.profile-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    color: #C0C0CC;
+    font-size: 13px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.profile-menu-item:hover {
+    background: rgba(255,255,255,0.05);
+    color: #fff;
+}
+.profile-menu-item:hover .profile-menu-arrow {
+    color: #4C7FF8;
+    transform: translateX(2px);
+}
+.profile-menu-arrow {
+    margin-left: auto;
+    color: #4A4A5A;
+    transition: all 0.2s;
+}
+.profile-logout {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 10px;
+    color: #EF4444;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.profile-logout:hover {
+    background: rgba(239,68,68,0.1);
+}
+
+/* Nav badge */
+.nav-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--luxreal-destructive);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  line-height: 1;
+}
+
+/* Badge */
+.luxreal-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--luxreal-radius-full);
+  font-size: 11px;
+  font-weight: 500;
+}
+.luxreal-badge-beta {
+  background: linear-gradient(135deg, #8B5CF6, #3B82F6);
+  color: white;
+}
+.luxreal-badge-vip {
+  background: linear-gradient(135deg, #F59E0B, #EF4444);
+  color: white;
+}
+
+/* Card hover effect */
+.luxreal-card-hover {
+  transition: all 0.3s ease;
+}
+.luxreal-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--luxreal-shadow-elevated);
+  border-color: rgba(59,130,246,0.3);
+}
+
+/* Announcement banner */
+.announcement-gradient {
+  background: linear-gradient(90deg, #7C3AED 0%, #3B82F6 35%, #06B6D4 70%, #8B5CF6 100%);
+  background-size: 200% 100%;
+  animation: bannerShift 8s ease infinite;
+}
+@keyframes bannerShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Drag & drop zone */
+.luxreal-dropzone {
+  border: 2px dashed var(--luxreal-border);
+  border-radius: var(--luxreal-radius-lg);
+  transition: all 0.3s ease;
+  background: rgba(59,130,246,0.02);
+}
+.luxreal-dropzone:hover, .luxreal-dropzone.dragover {
+  border-color: var(--luxreal-primary);
+  background: rgba(59,130,246,0.06);
+}
+
+/* Divider */
+.luxreal-divider {
+  height: 1px;
+  background: var(--luxreal-border);
+  margin: 16px 0;
+}
+.v-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--luxreal-border);
+  flex-shrink: 0;
+}
+
+/* Section title */
+.luxreal-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--luxreal-foreground);
+  margin-bottom: 12px;
+}
+
+/* Segmented control */
+.segmented-group {
+  display: inline-flex;
+  background: var(--luxreal-input);
+  border-radius: var(--luxreal-radius-full);
+  padding: 3px;
+  gap: 2px;
+}
+.segmented-btn {
+  background: transparent;
+  border: none;
+  color: var(--luxreal-muted-foreground);
+  font-size: 13px;
+  padding: 5px 14px;
+  border-radius: var(--luxreal-radius-full);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.segmented-btn:hover:not(.active) {
+  color: var(--luxreal-foreground);
+}
+.segmented-btn.active {
+  background: var(--luxreal-primary);
+  color: white;
+}
+
+/* Model sub-tabs */
+.model-subtab {
+  background: transparent;
+  border: none;
+  color: var(--luxreal-muted-foreground);
+  font-size: 13px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-bottom: 2px solid transparent;
+  font-weight: 500;
+}
+.model-subtab:hover:not(.active) {
+  color: var(--luxreal-foreground);
+}
+.model-subtab.active {
+  color: var(--luxreal-primary);
+  border-bottom-color: var(--luxreal-primary);
+}
+
+/* Model tab panel */
+.model-tab-panel {
+  animation: fadeIn 0.2s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Project cover gradients */
+.cover-1 {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 40%, #0f3460 100%);
+  position: relative;
+}
+.cover-1::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(239,68,68,0.25) 0%, transparent 60%);
+}
+.cover-2 {
+  background: linear-gradient(135deg, #1a1a0e 0%, #2d2a15 40%, #4a3f1a 100%);
+  position: relative;
+}
+.cover-2::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(245,158,11,0.2) 0%, transparent 60%);
+}
+.cover-3 {
+  background: linear-gradient(135deg, #1a0e1e 0%, #2d1530 40%, #4a1a3a 100%);
+  position: relative;
+}
+.cover-3::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(236,72,153,0.2) 0%, transparent 60%);
+}
+.cover-4 {
+  background: linear-gradient(135deg, #0e1a1e 0%, #152d30 40%, #1a4a4a 100%);
+  position: relative;
+}
+.cover-4::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(6,182,212,0.2) 0%, transparent 60%);
+}
+
+/* Decorative tilted block for upload zone */
+.upload-deco-block {
+  width: 120px;
+  height: 120px;
+  background: linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(139,92,246,0.08) 100%);
+  border: 1px solid rgba(59,130,246,0.2);
+  border-radius: 16px;
+  transform: rotate(-8deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* Play button overlay */
+.play-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.2);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.project-card:hover .play-overlay {
+  opacity: 1;
+}
+.play-btn-circle {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255,255,255,0.3);
+}
+
+/* Avatar circle */
+.avatar-circle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+  border: 2px solid rgba(255,255,255,0.1);
+  transition: all 0.2s ease;
+}
+.avatar-circle:hover {
+  border-color: rgba(59,130,246,0.5);
+}
+
+/* Logo text vertical */
+.logo-text {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  background: var(--luxreal-gradient-neon);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+}
+
+/* Quick config bar */
+.config-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--luxreal-card);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-full);
+  padding: 6px 8px;
+  overflow-x: auto;
+}
+
+/* Banner cards */
+.rec-banner {
+  border-radius: var(--luxreal-radius-lg);
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--luxreal-border);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.rec-banner:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--luxreal-shadow-elevated);
+}
+.rec-banner-teal {
+  background: var(--luxreal-gradient-banner1);
+}
+.rec-banner-gold {
+  background: var(--luxreal-gradient-banner2);
+}
+.rec-banner-blue {
+  background: var(--luxreal-gradient-banner3);
+}
+
+/* Footer */
+.site-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 24px 0;
+  margin-top: 32px;
+  border-top: 1px solid var(--luxreal-border);
+  font-size: 12px;
+  color: var(--luxreal-muted-foreground);
+  flex-wrap: wrap;
+}
+.site-footer a {
+  color: var(--luxreal-muted-foreground);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.site-footer a:hover {
+  color: var(--luxreal-foreground);
+}
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-background: var(--luxreal-background);
+    --color-foreground: var(--luxreal-foreground);
+    --color-card: var(--luxreal-card);
+    --color-card-foreground: var(--luxreal-card-foreground);
+    --color-popover: var(--luxreal-popover);
+    --color-popover-foreground: var(--luxreal-popover-foreground);
+    --color-primary: var(--luxreal-primary);
+    --color-primary-foreground: var(--luxreal-primary-foreground);
+    --color-muted: var(--luxreal-muted);
+    --color-muted-foreground: var(--luxreal-muted-foreground);
+    --color-accent: var(--luxreal-accent);
+    --color-accent-foreground: var(--luxreal-accent-foreground);
+    --color-destructive: var(--luxreal-destructive);
+    --color-destructive-foreground: var(--luxreal-destructive-foreground);
+    --color-border: var(--luxreal-border);
+    --color-input: var(--luxreal-input);
+    --color-ring: var(--luxreal-ring);
+    --color-sidebar: var(--luxreal-sidebar);
+    --color-sidebar-foreground: var(--luxreal-sidebar-foreground);
+    --color-sidebar-accent: var(--luxreal-sidebar-accent);
+    --radius-sm: var(--luxreal-radius-sm);
+    --radius-md: var(--luxreal-radius-md);
+    --radius-lg: var(--luxreal-radius-lg);
+    --radius-xl: var(--luxreal-radius-xl);
+  }
+  @layer base {
+    body { background: var(--luxreal-background); color: var(--luxreal-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style id="semantic-token-fallback">
+      .bg-background { background-color: var(--luxreal-background); }
+      .text-background { color: var(--luxreal-background); }
+      .border-background { border-color: var(--luxreal-background); }
+      .ring-background { --tw-ring-color: var(--luxreal-background); }
+      .bg-foreground { background-color: var(--luxreal-foreground); }
+      .text-foreground { color: var(--luxreal-foreground); }
+      .border-foreground { border-color: var(--luxreal-foreground); }
+      .ring-foreground { --tw-ring-color: var(--luxreal-foreground); }
+      .bg-card { background-color: var(--luxreal-card); }
+      .text-card { color: var(--luxreal-card); }
+      .border-card { border-color: var(--luxreal-card); }
+      .ring-card { --tw-ring-color: var(--luxreal-card); }
+      .bg-card-foreground { background-color: var(--luxreal-card-foreground); }
+      .text-card-foreground { color: var(--luxreal-card-foreground); }
+      .border-card-foreground { border-color: var(--luxreal-card-foreground); }
+      .ring-card-foreground { --tw-ring-color: var(--luxreal-card-foreground); }
+      .bg-popover { background-color: var(--luxreal-popover); }
+      .text-popover { color: var(--luxreal-popover); }
+      .border-popover { border-color: var(--luxreal-popover); }
+      .ring-popover { --tw-ring-color: var(--luxreal-popover); }
+      .bg-popover-foreground { background-color: var(--luxreal-popover-foreground); }
+      .text-popover-foreground { color: var(--luxreal-popover-foreground); }
+      .border-popover-foreground { border-color: var(--luxreal-popover-foreground); }
+      .ring-popover-foreground { --tw-ring-color: var(--luxreal-popover-foreground); }
+      .bg-primary { background-color: var(--luxreal-primary); }
+      .text-primary { color: var(--luxreal-primary); }
+      .border-primary { border-color: var(--luxreal-primary); }
+      .ring-primary { --tw-ring-color: var(--luxreal-primary); }
+      .bg-primary-foreground { background-color: var(--luxreal-primary-foreground); }
+      .text-primary-foreground { color: var(--luxreal-primary-foreground); }
+      .border-primary-foreground { border-color: var(--luxreal-primary-foreground); }
+      .ring-primary-foreground { --tw-ring-color: var(--luxreal-primary-foreground); }
+      .bg-muted { background-color: var(--luxreal-muted); }
+      .text-muted { color: var(--luxreal-muted); }
+      .border-muted { border-color: var(--luxreal-muted); }
+      .ring-muted { --tw-ring-color: var(--luxreal-muted); }
+      .bg-muted-foreground { background-color: var(--luxreal-muted-foreground); }
+      .text-muted-foreground { color: var(--luxreal-muted-foreground); }
+      .border-muted-foreground { border-color: var(--luxreal-muted-foreground); }
+      .ring-muted-foreground { --tw-ring-color: var(--luxreal-muted-foreground); }
+      .bg-accent { background-color: var(--luxreal-accent); }
+      .text-accent { color: var(--luxreal-accent); }
+      .border-accent { border-color: var(--luxreal-accent); }
+      .ring-accent { --tw-ring-color: var(--luxreal-accent); }
+      .bg-accent-foreground { background-color: var(--luxreal-accent-foreground); }
+      .text-accent-foreground { color: var(--luxreal-accent-foreground); }
+      .border-accent-foreground { border-color: var(--luxreal-accent-foreground); }
+      .ring-accent-foreground { --tw-ring-color: var(--luxreal-accent-foreground); }
+      .bg-destructive { background-color: var(--luxreal-destructive); }
+      .text-destructive { color: var(--luxreal-destructive); }
+      .border-destructive { border-color: var(--luxreal-destructive); }
+      .ring-destructive { --tw-ring-color: var(--luxreal-destructive); }
+      .bg-destructive-foreground { background-color: var(--luxreal-destructive-foreground); }
+      .text-destructive-foreground { color: var(--luxreal-destructive-foreground); }
+      .border-destructive-foreground { border-color: var(--luxreal-destructive-foreground); }
+      .ring-destructive-foreground { --tw-ring-color: var(--luxreal-destructive-foreground); }
+      .bg-border { background-color: var(--luxreal-border); }
+      .text-border { color: var(--luxreal-border); }
+      .border-border { border-color: var(--luxreal-border); }
+      .ring-border { --tw-ring-color: var(--luxreal-border); }
+      .bg-input { background-color: var(--luxreal-input); }
+      .text-input { color: var(--luxreal-input); }
+      .border-input { border-color: var(--luxreal-input); }
+      .ring-input { --tw-ring-color: var(--luxreal-input); }
+      .bg-ring { background-color: var(--luxreal-ring); }
+      .text-ring { color: var(--luxreal-ring); }
+      .border-ring { border-color: var(--luxreal-ring); }
+      .ring-ring { --tw-ring-color: var(--luxreal-ring); }
+      .bg-sidebar { background-color: var(--luxreal-sidebar); }
+      .text-sidebar { color: var(--luxreal-sidebar); }
+      .border-sidebar { border-color: var(--luxreal-sidebar); }
+      .ring-sidebar { --tw-ring-color: var(--luxreal-sidebar); }
+      .bg-sidebar-foreground { background-color: var(--luxreal-sidebar-foreground); }
+      .text-sidebar-foreground { color: var(--luxreal-sidebar-foreground); }
+      .border-sidebar-foreground { border-color: var(--luxreal-sidebar-foreground); }
+      .ring-sidebar-foreground { --tw-ring-color: var(--luxreal-sidebar-foreground); }
+      .bg-sidebar-accent { background-color: var(--luxreal-sidebar-accent); }
+      .text-sidebar-accent { color: var(--luxreal-sidebar-accent); }
+      .border-sidebar-accent { border-color: var(--luxreal-sidebar-accent); }
+      .ring-sidebar-accent { --tw-ring-color: var(--luxreal-sidebar-accent); }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="font-sans antialiased" style="height:100vh; overflow:hidden;">
+
+    <!-- App Shell -->
+    <div data-viewport-mode="app-shell" class="flex flex-col h-screen w-screen overflow-hidden">
+
+        <!-- Spotlight overlay -->
+        <div class="spotlight-overlay"></div>
+
+        <!-- Main row: sidebar + content -->
+        <div class="flex flex-1 min-h-0 min-w-0">
+
+            <!-- Sidebar (72px, fixed dark bg #0A0A14, right border) -->
+            <aside id="sidebar-nav" class="flex flex-col items-center py-3 gap-1 flex-shrink-0 z-10" style="width:72px; background: var(--luxreal-sidebar); border-right: 1px solid var(--luxreal-border);">
+
+                <!-- Top: Logo mark -->
+                <div class="flex items-center justify-center flex-shrink-0" style="height:56px; margin-bottom: 4px;">
+                    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M6 4H22V8H10V24H6V4Z" fill="white"/>
+                        <path d="M14 12H22V16H18V24H14V12Z" fill="white" opacity="0.7"/>
+                    </svg>
+                </div>
+
+                <!-- Spacer to push main nav down -->
+                <div class="flex-1" style="min-height: 20px;"></div>
+
+                <!-- Center nav (创作 active blue, 发现, 作品) - vertically centered -->
+                <nav class="flex flex-col items-center gap-2 flex-shrink-0">
+                    <a id="nav-create" href="create-video.html" class="luxreal-nav-item" title="创作">
+                        <i data-lucide="sparkles" class="w-[22px] h-[22px]"></i>
+                        <span>创作</span>
+                    </a>
+                    <a id="nav-discover" href="discover.html" class="luxreal-nav-item" title="发现">
+                        <i data-lucide="compass" class="w-[22px] h-[22px]"></i>
+                        <span>发现</span>
+                    </a>
+                    <a id="nav-projects" href="works.html" class="luxreal-nav-item active" title="作品">
+                        <i data-lucide="folder" class="w-[22px] h-[22px]"></i>
+                        <span>作品</span>
+                    </a>
+                </nav>
+
+                <!-- Spacer to push lower nav down -->
+                <div class="flex-1" style="min-height: 20px;"></div>
+
+                <!-- Avatar (click to show profile panel) -->
+                <div id="sidebarAvatar" class="sidebar-avatar" style="margin-bottom: 4px;">
+                    Y
+                </div>
+
+                <!-- Credits number -->
+                <span class="sidebar-credits">2,580</span>
+                <!-- Recharge link -->
+                <a href="recharge.html" class="sidebar-recharge" title="充值">充值</a>
+
+                <!-- Profile Panel (popup from avatar) -->
+                <div id="profilePanel" class="profile-panel hidden">
+                    <div class="profile-panel-header">
+                        <div class="profile-avatar-lg">Y</div>
+                        <div class="profile-info">
+                            <div class="profile-name">夜行者</div>
+                            <div class="profile-id">ID: 10086520</div>
+                        </div>
+                    </div>
+                    <div class="profile-panel-divider"></div>
+                    <div class="profile-menu">
+                        <a href="works.html" class="profile-menu-item">
+                            <i data-lucide="folder" class="w-4 h-4"></i>
+                            <span>我的作品</span>
+                            <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                        </a>
+                        <a href="recharge.html" class="profile-menu-item">
+                            <i data-lucide="gem" class="w-4 h-4"></i>
+                            <span>充值中心</span>
+                            <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                        </a>
+                        <a href="#" class="profile-menu-item">
+                            <i data-lucide="settings" class="w-4 h-4"></i>
+                            <span>账号设置</span>
+                            <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                        </a>
+                        <a href="#" class="profile-menu-item">
+                            <i data-lucide="help-circle" class="w-4 h-4"></i>
+                            <span>帮助中心</span>
+                            <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                        </a>
+                    </div>
+                    <div class="profile-panel-divider"></div>
+                    <div class="profile-logout">
+                        <i data-lucide="log-out" class="w-4 h-4"></i>
+                        <span>退出登录</span>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main content area -->
+            <div class="flex-1 flex flex-col min-w-0 min-h-0">
+
+                <!-- Top Bar (h-14 / 56px) -->
+                <header class="flex items-center justify-between px-6 flex-shrink-0 z-10" style="height:56px; background: transparent;">
+                    <!-- Left: Page title -->
+                    <h1 class="text-lg font-semibold text-white">我的作品</h1>
+
+                    <!-- Right: New Project button only -->
+                    <div class="flex items-center">
+                        <button class="btn-new-project">
+                            <i data-lucide="plus" class="w-4 h-4"></i>
+                            <span>新建项目</span>
+                        </button>
+                    </div>
+                </header>
+
+                <!-- Scrollable content area -->
+                <main data-scroll-region="primary" class="overflow-y-auto flex-1 px-6">
+
+                    <!-- Type Tabs: 项目 / 画布 / 视频成片 -->
+                    <div>
+                        <nav class="flex items-center border-b border-[var(--luxreal-border)]">
+                            <button class="type-tab" data-type="project">项目</button>
+                            <button class="type-tab" data-type="canvas">画布</button>
+                            <button class="type-tab active" data-type="video">视频成片</button>
+                        </nav>
+                    </div>
+
+                    <!-- Project Grid (4 columns) -->
+                    <div class="grid grid-cols-4 gap-5 mt-6">
+
+                        <!-- Card 1: Completed video -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-1"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-completed">已完成</span>
+                                <span class="duration-badge">00:45</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn">
+                                        <i data-lucide="play" class="w-5 h-5 text-white ml-0.5"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">星际迷航：深空觉醒</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">视频成片</span>
+                                    <span>2026-08-12</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 2: Generating video with progress -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-4"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-generating">生成中</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn" style="opacity:0.5;">
+                                        <i data-lucide="loader-2" class="w-5 h-5 text-white animate-spin"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">紫水晶传说：魔法觉醒</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">视频成片</span>
+                                    <span>3小时前</span>
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" style="width:65%;"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 3: Completed video -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-2"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-completed">已完成</span>
+                                <span class="duration-badge">01:12</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn">
+                                        <i data-lucide="play" class="w-5 h-5 text-white ml-0.5"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">末日黄昏：最后一吻</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">视频成片</span>
+                                    <span>2026-08-11</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 4: Completed video -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-3"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-completed">已完成</span>
+                                <span class="duration-badge">00:32</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn">
+                                        <i data-lucide="play" class="w-5 h-5 text-white ml-0.5"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">赛博雨林：数字绿洲</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">视频成片</span>
+                                    <span>2026-08-11</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 5: Failed video -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-14"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-failed">失败</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn" style="border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.15);">
+                                        <i data-lucide="refresh-cw" class="w-5 h-5 text-white"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">血色黎明：围城之战</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">视频成片</span>
+                                    <span>2026-08-10</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 6: Completed video -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-5"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-completed">已完成</span>
+                                <span class="duration-badge">00:58</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn">
+                                        <i data-lucide="play" class="w-5 h-5 text-white ml-0.5"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">玫瑰战争：血色婚礼</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">视频成片</span>
+                                    <span>2026-08-10</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 7: Completed canvas -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-8"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-completed">已完成</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn">
+                                        <i data-lucide="image" class="w-5 h-5 text-white"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">翡翠森林：精灵秘境</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">画布</span>
+                                    <span>2026-08-09</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 8: Generating video with progress -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-11"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-generating">生成中</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn" style="opacity:0.5;">
+                                        <i data-lucide="loader-2" class="w-5 h-5 text-white animate-spin"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">蔚蓝海岸：夏日恋歌</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">视频成片</span>
+                                    <span>30分钟前</span>
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" style="width:32%;"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 9: Completed video -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-6"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-completed">已完成</span>
+                                <span class="duration-badge">00:28</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn">
+                                        <i data-lucide="play" class="w-5 h-5 text-white ml-0.5"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">深海巨兽：深渊回响</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">视频成片</span>
+                                    <span>2026-08-09</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 10: Completed video -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-9"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-completed">已完成</span>
+                                <span class="duration-badge">01:05</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn">
+                                        <i data-lucide="play" class="w-5 h-5 text-white ml-0.5"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">霓虹都市：赛博朋克2099</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">视频成片</span>
+                                    <span>2026-08-08</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 11: Completed canvas -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-7"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-completed">已完成</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn">
+                                        <i data-lucide="image" class="w-5 h-5 text-white"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">金色沙暴：法老之墓</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">画布</span>
+                                    <span>2026-08-08</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 12: Completed video -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-15"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-completed">已完成</span>
+                                <span class="duration-badge">00:38</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn">
+                                        <i data-lucide="play" class="w-5 h-5 text-white ml-0.5"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">幻境之门：紫雾迷踪</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">视频成片</span>
+                                    <span>2026-08-07</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 13: Completed video -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-10"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-completed">已完成</span>
+                                <span class="duration-badge">00:52</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn">
+                                        <i data-lucide="play" class="w-5 h-5 text-white ml-0.5"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">黑白记忆：时光倒流</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">视频成片</span>
+                                    <span>2026-08-07</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 14: Completed video -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-13"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-completed">已完成</span>
+                                <span class="duration-badge">01:20</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn">
+                                        <i data-lucide="play" class="w-5 h-5 text-white ml-0.5"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">青釉古城：千年瓷韵</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">视频成片</span>
+                                    <span>2026-08-06</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 15: Completed canvas -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-12"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-completed">已完成</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn">
+                                        <i data-lucide="image" class="w-5 h-5 text-white"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">水墨山水：烟雨江南</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">画布</span>
+                                    <span>2026-08-05</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 16: Completed video -->
+                        <div class="project-card">
+                            <div class="project-thumb">
+                                <div class="project-thumb-gradient thumb-16"></div>
+                                <div class="card-highlight"></div>
+                                <span class="status-badge status-completed">已完成</span>
+                                <span class="duration-badge">00:41</span>
+                                <button class="card-menu-btn">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                                <div class="play-overlay">
+                                    <div class="play-btn">
+                                        <i data-lucide="play" class="w-5 h-5 text-white ml-0.5"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="project-info">
+                                <div class="project-title">极寒冰原：极光之恋</div>
+                                <div class="project-meta">
+                                    <span class="project-type-tag">视频成片</span>
+                                    <span>2026-08-05</span>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- Pagination -->
+                    <div class="flex items-center justify-center gap-1 mt-8 pb-8">
+                        <button class="page-btn" title="上一页">
+                            <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                        </button>
+                        <button class="page-btn active">1</button>
+                        <button class="page-btn">2</button>
+                        <button class="page-btn">3</button>
+                        <span class="page-ellipsis">...</span>
+                        <button class="page-btn">12</button>
+                        <button class="page-btn" title="下一页">
+                            <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+
+                </main>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // ===== Profile Panel (sidebar avatar) =====
+        const profilePanel = document.getElementById('profilePanel');
+        const sidebarAvatar = document.getElementById('sidebarAvatar');
+
+        function positionProfilePanel() {
+            if (!profilePanel || !sidebarAvatar) return;
+            const avatarRect = sidebarAvatar.getBoundingClientRect();
+            const panelRect = profilePanel.getBoundingClientRect();
+            
+            // 优先：面板顶部与头像顶部对齐（向下展开）
+            let top = avatarRect.top - 8;
+            
+            // 如果下方空间不够（面板底部超出视口），改为从头像底部向上展开
+            if (top + panelRect.height > window.innerHeight - 12) {
+                top = avatarRect.bottom - panelRect.height + 8;
+            }
+            
+            // 上方也不够的话，贴顶
+            if (top < 12) top = 12;
+            
+            profilePanel.style.top = top + 'px';
+        }
+
+        function toggleProfilePanel() {
+            if (!profilePanel) return;
+            if (profilePanel.classList.contains('hidden')) {
+                profilePanel.classList.remove('hidden');
+                positionProfilePanel();
+                lucide.createIcons();
+            } else {
+                profilePanel.classList.add('hidden');
+            }
+        }
+
+        if (sidebarAvatar) {
+            sidebarAvatar.addEventListener('click', function(e) {
+                e.stopPropagation();
+                toggleProfilePanel();
+            });
+        }
+
+        // Close profile panel when clicking outside
+        document.addEventListener('click', function(e) {
+            if (profilePanel && !profilePanel.classList.contains('hidden')) {
+                if (!profilePanel.contains(e.target) && 
+                    e.target !== sidebarAvatar && !sidebarAvatar.contains(e.target)) {
+                    profilePanel.classList.add('hidden');
+                }
+            }
+        });
+
+        // Reposition on resize
+        window.addEventListener('resize', function() {
+            if (profilePanel && !profilePanel.classList.contains('hidden')) {
+                positionProfilePanel();
+            }
+        });
+
+        // Project card click → navigate to workbench
+        document.querySelectorAll('.project-card').forEach(function(card) {
+            card.addEventListener('click', function(e) {
+                if (e.target.closest('.card-menu-btn')) return;
+                window.location.href = 'workbench-script.html';
+            });
+        });
+
+        // Type tab switching (项目/画布/视频成片)
+        document.querySelectorAll('.type-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.type-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+            });
+        });
+
+        // Page number switching
+        document.querySelectorAll('.page-btn').forEach(btn => {
+            if (!btn.title && btn.textContent.trim() !== '') {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.page-btn').forEach(b => {
+                        if (!b.title) b.classList.remove('active');
+                    });
+                    btn.classList.add('active');
+                });
+            }
+        });
+    </script>
+
+    <style>
+      /* Spotlight effect */
+      .spotlight-overlay {
+        position: fixed;
+        top: 0;
+        left: 72px;
+        right: 0;
+        height: 700px;
+        pointer-events: none;
+        z-index: 1;
+        background:
+          radial-gradient(ellipse 65% 45% at 50% 0%, rgba(76,127,248,0.12) 0%, rgba(100,80,255,0.06) 25%, rgba(6,182,212,0.03) 45%, transparent 70%),
+          radial-gradient(ellipse 40% 30% at 35% 5%, rgba(76,127,248,0.06) 0%, transparent 50%),
+          radial-gradient(ellipse 30% 25% at 65% 8%, rgba(139,92,246,0.05) 0%, transparent 50%);
+      }
+      /* Sidebar logo */
+      .sidebar-logo-mark {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #4C7FF8, #7C3AED);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 16px rgba(76,127,248,0.3);
+      }
+      /* New project button */
+      .btn-new-project {
+        height: 36px;
+        padding: 0 16px;
+        background: #4C7FF8;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      .btn-new-project:hover { background: #3B6EE0; }
+      /* Type tabs */
+      .type-tab {
+        padding: 10px 0;
+        font-size: 15px;
+        font-weight: 500;
+        color: #6B7088;
+        cursor: pointer;
+        border: none;
+        background: none;
+        position: relative;
+        transition: color 0.2s;
+        margin-right: 32px;
+      }
+      .type-tab:hover { color: #E8E8F0; }
+      .type-tab.active { color: white; }
+      .type-tab.active::after {
+        content: '';
+        position: absolute;
+        bottom: -1px;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: #4C7FF8;
+        border-radius: 1px;
+      }
+      /* Project cards */
+      .project-card {
+        border-radius: 12px;
+        overflow: hidden;
+        background: #0D1119;
+        border: 1px solid #1A1F2E;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        position: relative;
+      }
+      .project-card:hover {
+        border-color: rgba(76,127,248,0.4);
+        transform: translateY(-4px);
+        box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 0 20px rgba(76,127,248,0.1);
+      }
+      .project-thumb {
+        position: relative;
+        aspect-ratio: 16/10;
+        overflow: hidden;
+      }
+      .project-thumb-gradient {
+        position: absolute;
+        inset: 0;
+      }
+      .card-highlight {
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 60%;
+        background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, transparent 100%);
+        pointer-events: none;
+      }
+      .play-overlay {
+        position: absolute;
+        inset: 0;
+        background: rgba(0,0,0,0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        transition: opacity 0.3s;
+      }
+      .project-card:hover .play-overlay { opacity: 1; }
+      .play-btn {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.15);
+        backdrop-filter: blur(8px);
+        border: 2px solid rgba(255,255,255,0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+      }
+      .card-menu-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: rgba(0,0,0,0.5);
+        backdrop-filter: blur(8px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        opacity: 0;
+        transition: opacity 0.2s;
+        z-index: 5;
+        border: 1px solid rgba(255,255,255,0.1);
+        cursor: pointer;
+        pointer-events: auto;
+      }
+      .project-card:hover .card-menu-btn { opacity: 1; }
+      .status-badge {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-size: 10px;
+        font-weight: 500;
+        backdrop-filter: blur(4px);
+      }
+      .status-completed { background: rgba(16,185,129,0.2); color: #10B981; border: 1px solid rgba(16,185,129,0.3); }
+      .status-generating { background: rgba(76,127,248,0.2); color: #4C7FF8; border: 1px solid rgba(76,127,248,0.3); }
+      .status-failed { background: rgba(239,68,68,0.2); color: #EF4444; border: 1px solid rgba(239,68,68,0.3); }
+      .duration-badge {
+        position: absolute;
+        bottom: 8px;
+        right: 8px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 10px;
+        background: rgba(0,0,0,0.7);
+        color: white;
+      }
+      .project-info {
+        padding: 10px 12px 12px;
+      }
+      .project-title {
+        font-size: 13px;
+        font-weight: 500;
+        color: #E8E8F0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-bottom: 6px;
+      }
+      .project-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        color: #6B7088;
+      }
+      .project-type-tag {
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: rgba(255,255,255,0.05);
+        color: #6B7088;
+        font-size: 10px;
+      }
+      .progress-bar {
+        height: 3px;
+        background: #1A1F2E;
+        border-radius: 2px;
+        overflow: hidden;
+        margin-top: 8px;
+      }
+      .progress-fill {
+        height: 100%;
+        background: #4C7FF8;
+        border-radius: 2px;
+        transition: width 0.5s;
+      }
+      /* Thumbnail gradients */
+      .thumb-1 { background: linear-gradient(135deg, #1a1a3e 0%, #2d1b69 40%, #1e3a5f 100%); }
+      .thumb-2 { background: linear-gradient(135deg, #2d1b4e 0%, #4a1942 50%, #1a0a2e 100%); }
+      .thumb-3 { background: linear-gradient(135deg, #0c2340 0%, #1e3a5f 40%, #0a1628 100%); }
+      .thumb-4 { background: linear-gradient(135deg, #3b1a4a 0%, #5c2070 40%, #1a0a30 100%); }
+      .thumb-5 { background: linear-gradient(135deg, #1a3a2a 0%, #0d4a3a 40%, #0a1f18 100%); }
+      .thumb-6 { background: linear-gradient(135deg, #0a1a3a 0%, #1a3a7a 50%, #050d20 100%); }
+      .thumb-7 { background: linear-gradient(135deg, #2a1a0a 0%, #5c3a1a 40%, #1f1508 100%); }
+      .thumb-8 { background: linear-gradient(135deg, #0a2a3a 0%, #1a5a6a 40%, #081820 100%); }
+      .thumb-9 { background: linear-gradient(135deg, #3a1a2a 0%, #6a2a4a 50%, #1f0d18 100%); }
+      .thumb-10 { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 40%, #0f3460 100%); }
+      .thumb-11 { background: linear-gradient(135deg, #1a2a4a 0%, #2a4a7a 40%, #0a1a30 100%); }
+      .thumb-12 { background: linear-gradient(135deg, #1a2a1a 0%, #2a5a2a 40%, #0d1f0d 100%); }
+      .thumb-13 { background: linear-gradient(135deg, #1a3a3a 0%, #2a6a6a 40%, #0d1f1f 100%); }
+      .thumb-14 { background: linear-gradient(135deg, #3b1a1a 0%, #5c2020 40%, #1a0a0a 100%); }
+      .thumb-15 { background: linear-gradient(135deg, #1a1a4e 0%, #3b2f7a 50%, #0f0f3a 100%); }
+      .thumb-16 { background: linear-gradient(135deg, #0a2040 0%, #1a4060 40%, #051020 100%); }
+      /* Pagination */
+      .page-btn {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: transparent;
+        border: 1px solid #1A1F2E;
+        color: #6B7088;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 13px;
+      }
+      .page-btn:hover { color: white; border-color: rgba(76,127,248,0.3); }
+      .page-btn.active {
+        background: #4C7FF8;
+        border-color: #4C7FF8;
+        color: white;
+      }
+      .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+      .page-ellipsis {
+        color: #6B7088;
+        font-size: 13px;
+        padding: 0 4px;
+      }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</body>
+</html>

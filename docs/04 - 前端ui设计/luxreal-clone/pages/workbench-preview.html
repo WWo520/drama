@@ -1,0 +1,1955 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>成片预览 - LuxReal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+            overflow: hidden;
+        }
+        .workflow-active {
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            box-shadow: 0 0 20px rgba(76, 127, 248, 0.4), 0 0 40px rgba(139, 92, 246, 0.2);
+        }
+        .nav-active {
+            background: linear-gradient(135deg, #1a1a3e, #252550);
+        }
+        .scrollbar-thin::-webkit-scrollbar {
+            width: 4px;
+        }
+        .scrollbar-thin::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .scrollbar-thin::-webkit-scrollbar-thumb {
+            background: #2A2A35;
+            border-radius: 2px;
+        }
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+            background: #3A3A4A;
+        }
+        .tooltip {
+            position: relative;
+        }
+        .tooltip::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: calc(100% + 12px);
+            top: 50%;
+            transform: translateY(-50%);
+            background: #1A1A2E;
+            color: #fff;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s;
+            z-index: 100;
+            border: 1px solid #2A2A3E;
+        }
+        .tooltip::before {
+            content: '';
+            position: absolute;
+            left: calc(100% + 6px);
+            top: 50%;
+            transform: translateY(-50%);
+            border: 5px solid transparent;
+            border-right-color: #1A1A2E;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s;
+            z-index: 100;
+        }
+        .tooltip:hover::after,
+        .tooltip:hover::before {
+            opacity: 1;
+        }
+
+        /* Preview-specific styles */
+        .toggle {
+            position: relative;
+            width: 36px;
+            height: 20px;
+            background: #2A2A35;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: background 0.2s;
+            flex-shrink: 0;
+        }
+        .toggle.on {
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+        }
+        .toggle::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform 0.2s;
+        }
+        .toggle.on::after {
+            transform: translateX(16px);
+        }
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.1); }
+            50% { box-shadow: 0 0 0 12px rgba(255,255,255,0); }
+        }
+        .play-btn {
+            animation: pulse-glow 2s infinite;
+        }
+        .video-bg {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 30%, #0f3460 60%, #1a1a2e 100%);
+        }
+        .seg-btn {
+            transition: all 0.15s;
+        }
+        .seg-btn.active {
+            background: #2A2A4A;
+            color: #4C7FF8;
+        }
+        .version-active {
+            border: 1px solid #2A3A5A !important;
+        }
+        /* Sidebar design tokens */
+        :root {
+            --luxreal-sidebar: #0A0A14;
+            --luxreal-sidebar-foreground: #B0B0C8;
+            --luxreal-border: #1A1F2E;
+            --luxreal-primary: #4C7FF8;
+            --luxreal-foreground: #F0F0F5;
+        }
+        /* Sidebar navigation item */
+        .luxreal-nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 56px;
+            height: 56px;
+            border-radius: 10px;
+            color: var(--luxreal-sidebar-foreground);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            gap: 3px;
+            text-decoration: none;
+            font-size: 11px;
+            position: relative;
+        }
+        .luxreal-nav-item:hover {
+            color: var(--luxreal-foreground);
+            background: rgba(255,255,255,0.05);
+        }
+        .luxreal-nav-item.active {
+            color: var(--luxreal-primary);
+            background: rgba(59,130,246,0.12);
+        }
+        .luxreal-nav-item.nav-recharge {
+            color: #A78BFA;
+            background: rgba(139,92,246,0.08);
+        }
+        .luxreal-nav-item.nav-recharge:hover {
+            color: #C4B5FD;
+            background: rgba(139,92,246,0.14);
+        }
+        /* Nav badge */
+        .nav-badge {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            background: #EF4444;
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+            min-width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 5px;
+            line-height: 1;
+        }
+        /* Avatar circle */
+        .avatar-circle {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            flex-shrink: 0;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        /* Top bar unified styles */
+        .topbar-container {
+            height: 64px;
+            background: rgba(13, 17, 25, 0.8);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid #1A1F2E;
+        }
+        /* Workflow Pill Bar optimized */
+        .workflow-pill-bar {
+            background: rgba(13, 17, 25, 0.8) !important;
+            border: 1px solid #1A1F2E !important;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+        .workflow-active {
+            box-shadow: 0 0 16px rgba(76, 127, 248, 0.5), 0 0 32px rgba(139, 92, 246, 0.25) !important;
+        }
+        /* Unified topbar right buttons */
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            height: 32px;
+        }
+        .topbar-btn {
+            height: 32px;
+            padding: 0 12px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 1px solid #1A1F2E;
+            background: #0D1119;
+            color: #8B8B9A;
+            white-space: nowrap;
+        }
+        .topbar-btn:hover {
+            border-color: #2A2F3E;
+            color: #F0F0F5;
+        }
+        .topbar-btn-primary {
+            border-color: rgba(76, 127, 248, 0.4);
+            color: #4C7FF8;
+        }
+        .topbar-btn-primary:hover {
+            border-color: rgba(76, 127, 248, 0.6);
+            color: #6B9BFF;
+        }
+        .topbar-icon-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6B7088;
+            cursor: pointer;
+            transition: all 0.15s;
+            background: transparent;
+            border: none;
+            flex-shrink: 0;
+            position: relative;
+        }
+        .topbar-icon-btn:hover {
+            color: #F0F0F5;
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .topbar-icon-btn .notification-dot {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #EF4444;
+        }
+        /* Recharge button with gradient text */
+        .topbar-recharge-btn {
+            height: 32px;
+            padding: 0 12px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            text-decoration: none;
+        }
+        .topbar-recharge-btn:hover {
+            background: rgba(139, 92, 246, 0.18);
+            border-color: rgba(139, 92, 246, 0.5);
+        }
+        .topbar-recharge-btn span {
+            background: linear-gradient(135deg, #A78BFA, #8B5CF6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        /* Topbar avatar */
+        .topbar-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            flex-shrink: 0;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.15s;
+            border: 2px solid transparent;
+        }
+        .topbar-avatar:hover {
+            border-color: rgba(76, 127, 248, 0.5);
+        }
+        /* Profile Panel */
+        .profile-panel {
+            position: fixed;
+            top: 0;
+            left: 84px;
+            width: 240px;
+            background: #1A1A2E;
+            border: 1px solid #2A2A3E;
+            border-radius: 20px;
+            padding: 16px;
+            z-index: 100;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03) inset;
+        }
+        .profile-panel::before {
+            content: '';
+            position: absolute;
+            left: -6px;
+            top: 50%;
+            transform: translateY(-50%) rotate(45deg);
+            width: 10px;
+            height: 10px;
+            background: #1A1A2E;
+            border-left: 1px solid #2A2A3E;
+            border-bottom: 1px solid #2A2A3E;
+        }
+        .profile-panel.hidden {
+            display: none;
+        }
+        .profile-panel-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 4px;
+        }
+        .profile-avatar-lg {
+            position: relative;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 18px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+        .profile-avatar-lg::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 12px;
+            height: 12px;
+            background: #22C55E;
+            border: 2px solid #1A1A2E;
+            border-radius: 50%;
+        }
+        .profile-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .profile-name {
+            font-size: 15px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 2px;
+        }
+        .profile-id {
+            font-size: 12px;
+            color: #6B7088;
+        }
+        .profile-panel-divider {
+            height: 1px;
+            background: rgba(255,255,255,0.06);
+            margin: 12px 0;
+        }
+        .profile-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .profile-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            color: #C0C0CC;
+            font-size: 13px;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .profile-menu-item:hover {
+            background: rgba(255,255,255,0.05);
+            color: #fff;
+        }
+        .profile-menu-item:hover .profile-menu-arrow {
+            color: #4C7FF8;
+            transform: translateX(2px);
+        }
+        .profile-menu-arrow {
+            margin-left: auto;
+            color: #4A4A5A;
+            transition: all 0.2s;
+        }
+        .profile-logout {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px;
+            border-radius: 10px;
+            color: #EF4444;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .profile-logout:hover {
+            background: rgba(239,68,68,0.1);
+        }
+        /* Narrative unit timeline */
+        .timeline-container {
+            width: 100%;
+            max-width: 680px;
+            margin: 0 auto 20px;
+            background: #16161C;
+            border: 1px solid #252530;
+            border-radius: 12px;
+            padding: 12px;
+            overflow-x: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #2A2A35 transparent;
+        }
+        .timeline-container::-webkit-scrollbar {
+            height: 4px;
+        }
+        .timeline-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .timeline-container::-webkit-scrollbar-thumb {
+            background: #2A2A35;
+            border-radius: 2px;
+        }
+        .timeline-track {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            min-width: max-content;
+        }
+        .timeline-unit {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            flex-shrink: 0;
+        }
+        .timeline-unit-card {
+            background: #1E1E24;
+            border: 1px solid #2A2A35;
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+            min-width: 110px;
+        }
+        .timeline-unit-card:hover {
+            border-color: #3A3A4A;
+        }
+        .timeline-unit-card.active {
+            border-color: #4C7FF8;
+            background: rgba(76, 127, 248, 0.08);
+            box-shadow: 0 0 12px rgba(76, 127, 248, 0.15);
+        }
+        .timeline-unit-number {
+            font-size: 10px;
+            color: #6B7088;
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+        .timeline-unit-card.active .timeline-unit-number {
+            color: #4C7FF8;
+        }
+        .timeline-unit-title {
+            font-size: 11px;
+            color: #C0C0CC;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 90px;
+            margin-bottom: 2px;
+        }
+        .timeline-unit-card.active .timeline-unit-title {
+            color: #fff;
+        }
+        .timeline-unit-duration {
+            font-size: 10px;
+            color: #6B7088;
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+        .timeline-connector {
+            width: 12px;
+            height: 1px;
+            background: #2A2A35;
+            flex-shrink: 0;
+        }
+        /* Episode Sidebar - LuxReal Unified Style */
+        .ep-sidebar {
+            width: 240px;
+            background: #0A0D14;
+            border-right: 1px solid #1A1F2E;
+        }
+        .ep-sidebar-header {
+            height: 48px;
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            border-bottom: 1px solid #1A1F2E;
+            flex-shrink: 0;
+        }
+        .ep-sidebar-back {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #8B8B9A;
+            cursor: pointer;
+            transition: all 0.15s;
+            flex-shrink: 0;
+            margin-right: 4px;
+            text-decoration: none;
+        }
+        .ep-sidebar-back:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #F0F0F5;
+        }
+        .ep-sidebar-project {
+            font-size: 13px;
+            font-weight: 500;
+            color: #F0F0F5;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .ep-sidebar-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+        /* Episode Card */
+        .ep-card {
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .ep-card.expanded {
+            background: #0D1119;
+            border: 1px solid rgba(76, 127, 248, 0.3);
+            border-left: 2px solid #4C7FF8;
+        }
+        .ep-card.collapsed {
+            background: transparent;
+            border: 1px solid #1A1F2E;
+        }
+        .ep-card.collapsed:hover {
+            border-color: #2A2F3E;
+        }
+        /* Episode Header */
+        .ep-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .ep-header-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .ep-chevron {
+            flex-shrink: 0;
+            color: #6B7088;
+            width: 14px;
+            height: 14px;
+        }
+        .ep-number {
+            font-size: 11px;
+            color: #6B7088;
+            text-transform: uppercase;
+        }
+        .ep-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10B981;
+            flex-shrink: 0;
+        }
+        /* Episode Title */
+        .ep-title {
+            margin-top: 4px;
+        }
+        .ep-card.expanded .ep-title {
+            font-size: 14px;
+            color: #F0F0F5;
+            font-weight: 500;
+        }
+        .ep-card.collapsed .ep-title {
+            font-size: 13px;
+            color: #8B8B9A;
+            font-weight: normal;
+        }
+        /* Narrative Units */
+        .ep-units {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #1A1F2E;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .ep-unit {
+            font-size: 12px;
+            line-height: 1.5;
+            padding: 6px 10px;
+            border-radius: 6px;
+            color: #8B8B9A;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            background: transparent;
+        }
+        .ep-unit:hover {
+            color: #F0F0F5;
+            background: rgba(255, 255, 255, 0.04);
+        }
+        .ep-unit.active {
+            color: #F0F0F5;
+            background: rgba(76, 127, 248, 0.1);
+            border-left: 2px solid #4C7FF8;
+            padding-left: 8px;
+        }
+        /* Add Episode Button */
+        .ep-add-btn {
+            height: 36px;
+            margin: 0 12px 12px;
+            border: 1px dashed #1A1F2E;
+            border-radius: 8px;
+            background: transparent;
+            font-size: 12px;
+            color: #6B7088;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            flex-shrink: 0;
+            width: calc(100% - 24px);
+        }
+        .ep-add-btn:hover {
+            border-color: #4C7FF8;
+            color: #4C7FF8;
+        }
+        /* === Sidebar Credits & Recharge === */
+        .sidebar-credits {
+            font-size: 13px;
+            font-weight: 500;
+            color: #F0F0F5;
+            line-height: 1.2;
+            margin: 4px 0 2px;
+            flex-shrink: 0;
+        }
+        .sidebar-recharge {
+            font-size: 12px;
+            font-weight: 500;
+            color: #fff;
+            background: linear-gradient(135deg, #A78BFA, #8B5CF6);
+            padding: 4px 12px;
+            border-radius: 9999px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+        .sidebar-recharge:hover {
+            background: linear-gradient(135deg, #C4B5FD, #A78BFA);
+            transform: translateY(-1px);
+        }
+        /* Sidebar spacer */
+        .sidebar-spacer {
+            flex: 1;
+            min-height: 8px;
+        }
+        /* Sidebar avatar */
+        .sidebar-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .sidebar-avatar:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 0 2px rgba(76, 127, 248, 0.3);
+        }
+        /* Sidebar bottom section - fixed at bottom */
+        .sidebar-bottom-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+            padding-top: 8px;
+            margin-top: auto;
+        }
+        .sidebar-icon-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            position: relative;
+            flex-shrink: 0;
+            color: #B0B0C8;
+        }
+        .sidebar-icon-btn:hover {
+            background: rgba(255,255,255,0.05);
+            color: #F0F0F5;
+        }
+        .sidebar-icon-btn .sidebar-badge {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            background: #EF4444;
+            color: white;
+            font-size: 9px;
+            font-weight: 600;
+            min-width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 4px;
+            line-height: 1;
+        }
+        /* === Workflow Navigation (pill style, LuxReal aligned) === */
+        .workflow-steps {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .workflow-nav {
+            display: flex;
+            align-items: center;
+            background: rgba(26, 26, 46, 0.8);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 999px;
+            padding: 4px;
+            backdrop-filter: blur(12px);
+        }
+        .workflow-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 18px;
+            border-radius: 999px;
+            font-size: 13px;
+            color: #8B8B9A;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+            white-space: nowrap;
+        }
+        .workflow-nav-item:hover {
+            color: #fff;
+            background: rgba(255,255,255,0.04);
+        }
+        .workflow-nav-item.active {
+            background: linear-gradient(135deg, #4C7FF8, #6366F1);
+            color: #fff;
+            font-weight: 500;
+            box-shadow: 0 2px 12px rgba(76, 127, 248, 0.35);
+        }
+        .workflow-nav-item.active:hover {
+            background: linear-gradient(135deg, #5C8FFF, #7376F9);
+            box-shadow: 0 4px 16px rgba(76, 127, 248, 0.5);
+        }
+        .workflow-nav-num {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.08);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: #6B7088;
+            transition: all 0.2s ease;
+        }
+        .workflow-nav-item.active .workflow-nav-num {
+            background: rgba(255,255,255,0.25);
+            color: #fff;
+        }
+        .workflow-nav-text {
+            line-height: 1;
+        }
+        /* === Recharge Popup Modal === */
+        .recharge-modal {
+            position: fixed;
+            z-index: 200;
+            width: 420px;
+            background: #0D1119;
+            border: 1px solid #1A1F2E;
+            border-radius: 16px;
+            box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.03);
+            overflow: hidden;
+        }
+        .recharge-modal.hidden {
+            display: none;
+        }
+        .recharge-modal-header {
+            padding: 20px 20px 16px;
+            border-bottom: 1px solid #1A1F2E;
+        }
+        .recharge-modal-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .recharge-modal-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .recharge-modal-close {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6B7088;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .recharge-modal-close:hover {
+            background: rgba(255,255,255,0.06);
+            color: #F0F0F5;
+        }
+        .recharge-modal-balance {
+            font-size: 13px;
+            color: #8B8B9A;
+        }
+        .recharge-modal-balance strong {
+            color: #F59E0B;
+            font-weight: 500;
+        }
+        .recharge-modal-body {
+            padding: 16px 20px;
+            max-height: 420px;
+            overflow-y: auto;
+        }
+        .recharge-section-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: #F0F0F5;
+            margin-bottom: 10px;
+        }
+        .recharge-package-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        .recharge-package-card {
+            position: relative;
+            padding: 12px 8px;
+            border: 1px solid #1A1F2E;
+            border-radius: 10px;
+            background: #111520;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: center;
+        }
+        .recharge-package-card:hover {
+            border-color: #2A3A5A;
+        }
+        .recharge-package-card.selected {
+            border-color: #4C7FF8;
+            background: rgba(76, 127, 248, 0.08);
+        }
+        .recharge-package-card.hot::before {
+            content: '热门';
+            position: absolute;
+            top: -1px;
+            right: -1px;
+            width: 0;
+            height: 0;
+            border-style: solid;
+            border-width: 0 34px 34px 0;
+            border-color: transparent #EF4444 transparent transparent;
+            z-index: 1;
+        }
+        .recharge-package-card.hot::after {
+            content: '热门';
+            position: absolute;
+            top: 5px;
+            right: 1px;
+            font-size: 8px;
+            font-weight: 600;
+            color: white;
+            transform: rotate(45deg);
+            z-index: 2;
+            letter-spacing: 0.5px;
+        }
+        .recharge-package-card.hot {
+            border-color: rgba(245, 158, 11, 0.4);
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.12), inset 0 0 8px rgba(245, 158, 11, 0.05);
+        }
+        .recharge-package-amount {
+            font-size: 18px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 2px;
+        }
+        .recharge-package-bonus {
+            font-size: 10px;
+            color: #10B981;
+            margin-bottom: 6px;
+            height: 14px;
+        }
+        .recharge-package-bonus:empty {
+            display: none;
+        }
+        .recharge-package-price {
+            font-size: 14px;
+            color: #F59E0B;
+            font-weight: 500;
+        }
+        .recharge-subscription-section {
+            margin-bottom: 20px;
+        }
+        .recharge-subscription-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        .recharge-sub-card {
+            padding: 12px 10px;
+            border: 1px solid #1A1F2E;
+            border-radius: 10px;
+            background: #111520;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: left;
+            position: relative;
+            overflow: hidden;
+        }
+        .recharge-sub-card:hover {
+            border-color: #2A3A5A;
+        }
+        .recharge-sub-card.selected {
+            border-color: #4C7FF8;
+            background: rgba(76, 127, 248, 0.08);
+        }
+        .recharge-sub-card.featured {
+            border-color: rgba(139, 92, 246, 0.4);
+            background: linear-gradient(135deg, rgba(139,92,246,0.08), rgba(76,127,248,0.06));
+        }
+        .recharge-sub-card.featured::before {
+            content: '推荐';
+            position: absolute;
+            top: -1px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 2px 8px;
+            font-size: 9px;
+            font-weight: 600;
+            color: white;
+            background: linear-gradient(135deg, #8B5CF6, #4C7FF8);
+            border-radius: 0 0 8px 8px;
+            line-height: 1.2;
+        }
+        .recharge-sub-header {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            margin-top: 4px;
+        }
+        .recharge-sub-name {
+            font-size: 12px;
+            color: #8B8B9A;
+            font-weight: 500;
+        }
+        .recharge-sub-card.featured .recharge-sub-name {
+            color: #A78BFA;
+        }
+        .recharge-sub-price {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .recharge-sub-period {
+            font-size: 10px;
+            color: #6B7088;
+        }
+        .recharge-sub-features {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .recharge-sub-feature {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 10.5px;
+            color: #6B7088;
+            line-height: 1.6;
+        }
+        .recharge-sub-feature-check {
+            color: #10B981;
+            font-size: 11px;
+            font-weight: 700;
+            flex-shrink: 0;
+            line-height: 1;
+        }
+        .recharge-payment-section {
+            margin-bottom: 16px;
+        }
+        .recharge-payment-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+        .recharge-payment-card {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px;
+            border: 1px solid #1A1F2E;
+            border-radius: 10px;
+            background: #111520;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .recharge-payment-card:hover {
+            border-color: #2A3A5A;
+        }
+        .recharge-payment-card.selected {
+            border-color: #4C7FF8;
+            background: rgba(76, 127, 248, 0.08);
+        }
+        .recharge-payment-card .payment-icon {
+            width: 20px;
+            height: 20px;
+        }
+        .recharge-payment-card .payment-name {
+            font-size: 13px;
+            color: #C0C0CC;
+        }
+        .recharge-modal-footer {
+            padding: 14px 20px 20px;
+            border-top: 1px solid #1A1F2E;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .recharge-total-label {
+            font-size: 12px;
+            color: #6B7088;
+            margin-bottom: 4px;
+        }
+        .recharge-total-amount {
+            font-size: 24px;
+            font-weight: 600;
+            color: #F59E0B;
+        }
+        .recharge-total-amount span {
+            font-size: 14px;
+            font-weight: 400;
+        }
+        .recharge-pay-btn {
+            padding: 10px 28px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 500;
+            color: white;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s;
+            box-shadow: 0 4px 16px rgba(76, 127, 248, 0.3);
+        }
+        .recharge-pay-btn:hover {
+            box-shadow: 0 6px 24px rgba(76, 127, 248, 0.45);
+            transform: translateY(-1px);
+        }
+        .recharge-pay-btn.processing {
+            opacity: 0.7;
+            cursor: wait;
+            transform: none;
+        }
+        .recharge-pay-btn.success {
+            background: linear-gradient(135deg, #10B981, #059669);
+            box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);
+            cursor: default;
+        }
+        .recharge-pay-btn.success:hover {
+            transform: none;
+            box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);
+        }
+        /* === Top Bar adjusted === */
+        .topbar-container {
+            position: relative;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex">
+
+    <!-- Column 1: Far Left Main Nav (72px) -->
+    <aside id="sidebar-nav" class="flex flex-col items-center py-3 gap-1 flex-shrink-0 z-10" style="width:72px; background: var(--luxreal-sidebar); border-right: 1px solid var(--luxreal-border);">
+        <!-- Top: Logo mark -->
+        <div class="flex items-center justify-center flex-shrink-0" style="height:56px; margin-bottom: 4px;">
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M6 4H22V8H10V24H6V4Z" fill="white"/>
+                <path d="M14 12H22V16H18V24H14V12Z" fill="white" opacity="0.7"/>
+            </svg>
+        </div>
+
+        <!-- Spacer to push main nav down -->
+        <div class="flex-1" style="min-height: 20px;"></div>
+
+        <!-- Center nav (创作 active blue, 发现, 作品) - vertically centered -->
+        <nav class="flex flex-col items-center gap-2 flex-shrink-0">
+            <a id="nav-create" href="create-video.html" class="luxreal-nav-item active" title="创作">
+                <i data-lucide="sparkles" class="w-[22px] h-[22px]"></i>
+                <span>创作</span>
+            </a>
+            <a id="nav-discover" href="discover.html" class="luxreal-nav-item" title="发现">
+                <i data-lucide="compass" class="w-[22px] h-[22px]"></i>
+                <span>发现</span>
+            </a>
+            <a id="nav-projects" href="works.html" class="luxreal-nav-item" title="作品">
+                <i data-lucide="folder" class="w-[22px] h-[22px]"></i>
+                <span>作品</span>
+            </a>
+        </nav>
+
+        <!-- Spacer to push lower nav down -->
+        <div class="flex-1" style="min-height: 20px;"></div>
+
+        <!-- Avatar (click to show profile panel) -->
+        <div id="sidebarAvatar" class="sidebar-avatar" style="margin-bottom: 4px;">
+            Y
+        </div>
+
+        <!-- Credits number -->
+        <span class="sidebar-credits">2,580</span>
+        <!-- Recharge link -->
+        <a href="recharge.html" class="sidebar-recharge" title="充值">充值</a>
+
+        <!-- Profile Panel (popup from avatar) -->
+        <div id="profilePanel" class="profile-panel hidden">
+            <div class="profile-panel-header">
+                <div class="profile-avatar-lg">Y</div>
+                <div class="profile-info">
+                    <div class="profile-name">夜行者</div>
+                    <div class="profile-id">ID: 10086520</div>
+                </div>
+            </div>
+            <div class="profile-panel-divider"></div>
+            <div class="profile-menu">
+                <a href="works.html" class="profile-menu-item">
+                    <i data-lucide="folder" class="w-4 h-4"></i>
+                    <span>我的作品</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                </a>
+                <a href="recharge.html" class="profile-menu-item">
+                    <i data-lucide="gem" class="w-4 h-4"></i>
+                    <span>充值中心</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                </a>
+                <a href="#" class="profile-menu-item">
+                    <i data-lucide="settings" class="w-4 h-4"></i>
+                    <span>账号设置</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                </a>
+                <a href="#" class="profile-menu-item">
+                    <i data-lucide="help-circle" class="w-4 h-4"></i>
+                    <span>帮助中心</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                </a>
+            </div>
+            <div class="profile-panel-divider"></div>
+            <div class="profile-logout">
+                <i data-lucide="log-out" class="w-4 h-4"></i>
+                <span>退出登录</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Column 2: Episode Sidebar (240px) -->
+    <aside class="ep-sidebar flex flex-col flex-shrink-0 scrollbar-thin">
+        <!-- Top Header -->
+        <div class="ep-sidebar-header">
+            <a href="works.html" class="ep-sidebar-back">
+                <i data-lucide="chevron-left" class="w-[18px] h-[18px]"></i>
+            </a>
+            <span class="ep-sidebar-project">剑魂觉醒：弃子归来</span>
+        </div>
+
+        <!-- Episode List (scrollable) -->
+        <div class="ep-sidebar-list scrollbar-thin">
+            <!-- Episode 1 - Expanded (current) -->
+            <div class="ep-card expanded">
+                <!-- Episode Header -->
+                <div class="ep-header">
+                    <div class="ep-header-left">
+                        <i data-lucide="chevron-down" class="ep-chevron"></i>
+                        <span class="ep-number">第1集</span>
+                    </div>
+                    <div class="ep-status-dot"></div>
+                </div>
+                <!-- Episode Title -->
+                <div class="ep-title">废柴跳崖，剑魂觉醒</div>
+                <!-- Narrative Units -->
+                <div class="ep-units">
+                    <div class="ep-unit active">叙事单元1 | 宗门大比受诬陷</div>
+                    <div class="ep-unit">叙事单元2 | 坠崖瞬间剑魂苏醒</div>
+                    <div class="ep-unit">叙事单元3 | 三月后青衫归来</div>
+                    <div class="ep-unit">叙事单元4 | 一剑破大阵</div>
+                    <div class="ep-unit">叙事单元5 | 剑指长老全宗凛然</div>
+                    <div class="ep-unit">叙事单元6 | 真相揭晓堕下悬崖</div>
+                </div>
+            </div>
+
+            <!-- Episode 2 - Collapsed -->
+            <div class="ep-card collapsed">
+                <div class="ep-header">
+                    <div class="ep-header-left">
+                        <i data-lucide="chevron-right" class="ep-chevron"></i>
+                        <span class="ep-number">第2集</span>
+                    </div>
+                </div>
+                <div class="ep-title">青衫归来，震惊全宗</div>
+            </div>
+        </div>
+
+        <!-- Bottom: Add Episode Button -->
+        <button class="ep-add-btn">
+            <i data-lucide="plus" class="w-[14px] h-[14px]"></i>
+            新增剧集
+        </button>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 flex flex-col overflow-hidden" style="background: #030911;">
+        <!-- Top Bar Area -->
+        <div class="topbar-container flex items-center justify-between px-6 relative flex-shrink-0">
+            <!-- Left: Empty spacer (~200px) -->
+            <div class="w-[200px] flex-shrink-0"></div>
+
+            <!-- Center: Workflow Steps Navigation -->
+            <div class="workflow-steps">
+                <div class="workflow-nav">
+                    <a href="workbench-script.html" class="workflow-nav-item">
+                        <span class="workflow-nav-num">1</span>
+                        <span class="workflow-nav-text">剧本拆分</span>
+                    </a>
+                    <a href="workbench-assets.html" class="workflow-nav-item">
+                        <span class="workflow-nav-num">2</span>
+                        <span class="workflow-nav-text">资产生成</span>
+                    </a>
+                    <a href="workbench-video.html" class="workflow-nav-item">
+                        <span class="workflow-nav-num">3</span>
+                        <span class="workflow-nav-text">视频制作</span>
+                    </a>
+                    <a href="workbench-preview.html" class="workflow-nav-item active">
+                        <span class="workflow-nav-num">4</span>
+                        <span class="workflow-nav-text">成片预览</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Right: Preview quality button only -->
+            <div class="topbar-right">
+                <button class="topbar-btn">
+                    <i data-lucide="monitor-play" class="w-3.5 h-3.5"></i>
+                    1080P
+                </button>
+            </div>
+        </div>
+
+
+
+
+
+        <!-- Content Scroll Area -->
+        <div class="flex-1 overflow-y-auto flex flex-col px-6 pt-10 pb-6 scrollbar-thin" style="justify-content: flex-start;">
+
+            <!-- ===== VIDEO PLAYER (3/5 of viewport height) ===== -->
+            <div class="flex-shrink-0 relative w-full flex justify-center mb-8" style="height: 68vh;">
+                <div class="relative h-full rounded-2xl overflow-hidden bg-black shadow-2xl shadow-black/60" style="width: calc(68vh * 9 / 16); max-width: 400px;">
+                    <!-- Simulated video content: dark cinematic gradient -->
+                    <div class="absolute inset-0" style="background: linear-gradient(180deg, #0a0a12 0%, #1a1530 40%, #0d1a2d 70%, #0a0a12 100%);">
+                        <div class="absolute top-1/5 left-1/4 w-40 h-40 rounded-full opacity-25" style="background: radial-gradient(circle, #4C7FF8, transparent); filter: blur(60px);"></div>
+                        <div class="absolute bottom-1/4 right-1/5 w-32 h-32 rounded-full opacity-20" style="background: radial-gradient(circle, #8B5CF6, transparent); filter: blur(50px);"></div>
+                        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-56 h-56 rounded-full opacity-10" style="background: radial-gradient(circle, #fff, transparent); filter: blur(80px);"></div>
+                    </div>
+
+                    <!-- Center big play button (preview / paused state) -->
+                    <button class="play-btn absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 rounded-full bg-white/10 backdrop-blur-md border border-white/25 flex items-center justify-center hover:bg-white/20 transition-all z-10">
+                        <i data-lucide="play" class="w-9 h-9 text-white ml-1 fill-white"></i>
+                    </button>
+
+                    <!-- Top-left: episode badge -->
+                    <div class="absolute top-4 left-4 bg-black/60 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5 z-10">
+                        <i data-lucide="film" class="w-3.5 h-3.5"></i>
+                        第1集 废柴跳崖
+                    </div>
+
+                    <!-- Top-right: quality selector dropdown -->
+                    <div class="absolute top-4 right-4 z-10">
+                        <button id="btn-quality" class="bg-black/60 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1 font-medium hover:bg-black/70 transition-colors">
+                            <span>1080P</span>
+                            <i data-lucide="chevron-down" class="w-3 h-3"></i>
+                        </button>
+                        <div id="quality-dropdown" class="hidden absolute top-full right-0 mt-1.5 bg-[#1E1E24] border border-[#2A2A35] rounded-lg py-1 w-24 z-20 shadow-xl">
+                            <button class="w-full text-left text-sm text-white/70 hover:bg-white/5 py-2 px-3 transition-colors">480P</button>
+                            <button class="w-full text-left text-sm text-white/70 hover:bg-white/5 py-2 px-3 transition-colors">720P</button>
+                            <button class="w-full text-left text-sm text-[#4C7FF8] hover:bg-white/5 py-2 px-3 transition-colors font-medium">1080P</button>
+                            <button class="w-full text-left text-sm text-white/70 hover:bg-white/5 py-2 px-3 transition-colors">4K</button>
+                        </div>
+                    </div>
+
+                    <!-- Bottom-right: LuxReal watermark -->
+                    <div class="absolute bottom-16 right-4 text-white/30 text-sm flex items-center gap-1 select-none pointer-events-none z-10">
+                        <span class="font-semibold tracking-wide text-xs">LuxReal</span>
+                    </div>
+
+                    <!-- Bottom control bar with gradient overlay -->
+                    <div class="absolute bottom-0 left-0 right-0 px-4 pb-4 pt-10 z-10" style="background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.5) 50%, transparent 100%);">
+                        <!-- Progress bar -->
+                        <div class="relative h-1 bg-white/20 rounded-full mb-3 cursor-pointer group">
+                            <div class="h-full rounded-full bg-white relative" style="width: 18%;">
+                                <div class="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-md -mr-1.5"></div>
+                            </div>
+                        </div>
+
+                        <!-- Controls row -->
+                        <div class="flex items-center justify-between">
+                            <!-- Left: play, skip back, skip forward, volume -->
+                            <div class="flex items-center gap-3">
+                                <button class="text-white hover:text-white/80 transition flex items-center justify-center">
+                                    <i data-lucide="play" class="w-5 h-5 fill-white"></i>
+                                </button>
+                                <button class="text-white/80 hover:text-white transition flex items-center justify-center">
+                                    <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+                                </button>
+                                <button class="text-white/80 hover:text-white transition flex items-center justify-center">
+                                    <i data-lucide="rotate-cw" class="w-4 h-4"></i>
+                                </button>
+                                <div class="flex items-center gap-1.5 group/vol">
+                                    <button class="text-white/80 hover:text-white transition">
+                                        <i data-lucide="volume-2" class="w-4 h-4"></i>
+                                    </button>
+                                    <div class="w-16 h-1 bg-white/20 rounded-full cursor-pointer">
+                                        <div class="h-full w-3/5 bg-white rounded-full"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Center: time -->
+                            <div class="absolute left-1/2 -translate-x-1/2">
+                                <span class="text-white/90 text-xs font-mono">00:15 / 01:24</span>
+                            </div>
+                            <!-- Right: speed, pip, fullscreen -->
+                            <div class="flex items-center gap-3 relative">
+                                <div class="relative">
+                                    <button id="btn-speed" class="text-white/80 text-xs hover:text-white transition flex items-center gap-0.5">
+                                        <span>倍速</span>
+                                        <span class="font-medium">1x</span>
+                                    </button>
+                                    <div id="speed-dropdown" class="hidden absolute bottom-full right-0 mb-2 bg-[#1E1E24] border border-[#2A2A35] rounded-lg py-1 w-20 z-20 shadow-xl">
+                                        <button class="w-full text-left text-sm text-white/70 hover:bg-white/5 py-2 px-3 transition-colors" data-speed="0.5">0.5x</button>
+                                        <button class="w-full text-left text-sm text-white/70 hover:bg-white/5 py-2 px-3 transition-colors" data-speed="0.75">0.75x</button>
+                                        <button class="w-full text-left text-sm text-[#4C7FF8] hover:bg-white/5 py-2 px-3 transition-colors font-medium" data-speed="1">1x</button>
+                                        <button class="w-full text-left text-sm text-white/70 hover:bg-white/5 py-2 px-3 transition-colors" data-speed="1.25">1.25x</button>
+                                        <button class="w-full text-left text-sm text-white/70 hover:bg-white/5 py-2 px-3 transition-colors" data-speed="1.5">1.5x</button>
+                                        <button class="w-full text-left text-sm text-white/70 hover:bg-white/5 py-2 px-3 transition-colors" data-speed="2">2x</button>
+                                    </div>
+                                </div>
+                                <button class="text-white/80 hover:text-white transition">
+                                    <i data-lucide="picture-in-picture-2" class="w-4 h-4"></i>
+                                </button>
+                                <button class="text-white hover:text-white/80 transition">
+                                    <i data-lucide="maximize" class="w-4.5 h-4.5" style="width: 18px; height: 18px;"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== NARRATIVE UNIT TIMELINE ===== -->
+            <div class="timeline-container">
+                <div class="timeline-track">
+                    <!-- Unit 1 - Active (current playing) -->
+                    <div class="timeline-unit">
+                        <div class="timeline-unit-card active">
+                            <div class="timeline-unit-number">叙事单元1</div>
+                            <div class="timeline-unit-title">宗门大比受诬陷</div>
+                            <div class="timeline-unit-duration">
+                                <i data-lucide="clock" class="w-3 h-3"></i>
+                                <span>00:15</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="timeline-connector"></div>
+                    <!-- Unit 2 -->
+                    <div class="timeline-unit">
+                        <div class="timeline-unit-card">
+                            <div class="timeline-unit-number">叙事单元2</div>
+                            <div class="timeline-unit-title">坠崖瞬间剑魂苏醒</div>
+                            <div class="timeline-unit-duration">
+                                <i data-lucide="clock" class="w-3 h-3"></i>
+                                <span>00:18</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="timeline-connector"></div>
+                    <!-- Unit 3 -->
+                    <div class="timeline-unit">
+                        <div class="timeline-unit-card">
+                            <div class="timeline-unit-number">叙事单元3</div>
+                            <div class="timeline-unit-title">三月后青衫归来</div>
+                            <div class="timeline-unit-duration">
+                                <i data-lucide="clock" class="w-3 h-3"></i>
+                                <span>00:12</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="timeline-connector"></div>
+                    <!-- Unit 4 -->
+                    <div class="timeline-unit">
+                        <div class="timeline-unit-card">
+                            <div class="timeline-unit-number">叙事单元4</div>
+                            <div class="timeline-unit-title">一剑破大阵</div>
+                            <div class="timeline-unit-duration">
+                                <i data-lucide="clock" class="w-3 h-3"></i>
+                                <span>00:16</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="timeline-connector"></div>
+                    <!-- Unit 5 -->
+                    <div class="timeline-unit">
+                        <div class="timeline-unit-card">
+                            <div class="timeline-unit-number">叙事单元5</div>
+                            <div class="timeline-unit-title">剑指长老全宗凛然</div>
+                            <div class="timeline-unit-duration">
+                                <i data-lucide="clock" class="w-3 h-3"></i>
+                                <span>00:14</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="timeline-connector"></div>
+                    <!-- Unit 6 -->
+                    <div class="timeline-unit">
+                        <div class="timeline-unit-card">
+                            <div class="timeline-unit-number">叙事单元6</div>
+                            <div class="timeline-unit-title">真相揭晓堕下悬崖</div>
+                            <div class="timeline-unit-duration">
+                                <i data-lucide="clock" class="w-3 h-3"></i>
+                                <span>00:09</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== INFO + TWO ACTION BUTTONS ===== -->
+            <div class="w-full max-w-[420px] mx-auto flex-shrink-0 mt-6 pb-4">
+                <!-- Title -->
+                <div class="text-center mb-5">
+                    <h2 class="text-white font-medium text-base mb-1">剑魂觉醒：弃子归来 · 第1集</h2>
+                    <p class="text-xs text-[#6B7088]">总时长 01:24 · 1080P · 9:16 竖屏</p>
+                </div>
+                <!-- Two Action Buttons -->
+                <div class="flex gap-3">
+                    <button id="btn-export" class="flex-1 h-11 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all hover:bg-[#252535]" style="background: #1A1A2E; border: 1px solid #2A2A3E; color: white;">
+                        <i data-lucide="file-export" class="w-4 h-4"></i>
+                        导出工程视频
+                    </button>
+                    <button id="btn-compose" class="flex-1 h-11 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all hover:opacity-90" style="background: linear-gradient(135deg, #4C7FF8, #8B5CF6); color: white;">
+                        <i data-lucide="wand-2" class="w-4 h-4"></i>
+                        合成视频
+                    </button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Bottom Right Floating Buttons -->
+        <div class="fixed bottom-6 right-6 flex flex-col gap-2 z-20">
+            <button class="w-10 h-10 rounded-full flex items-center justify-center transition-all hover:text-white hover:border-[#4C7FF8]/50" style="background: #1A1A2E; border: 1px solid #2A2A3E; color: #8B8B9A;">
+                <i data-lucide="users" class="w-5 h-5"></i>
+            </button>
+            <button class="w-10 h-10 rounded-full flex items-center justify-center transition-all hover:text-white hover:border-[#4C7FF8]/50" style="background: #1A1A2E; border: 1px solid #2A2A3E; color: #8B8B9A;">
+                <i data-lucide="message-circle" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <!-- ===== MODALS ===== -->
+
+        <!-- Export Project Modal -->
+        <div id="modal-export" class="hidden fixed inset-0 z-50 items-center justify-center">
+            <div class="modal-overlay absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+            <div class="relative bg-[#1E1E24] rounded-2xl border border-[#2A2A35] w-[420px] p-6 shadow-2xl">
+                <h3 class="text-white text-lg font-medium mb-2">导出工程文件</h3>
+                <p class="text-[#6B7088] text-sm mb-5">导出包含所有剧本、资产、分镜配置的工程文件，可在其他项目中导入复用</p>
+
+                <!-- Options list -->
+                <div class="space-y-3 mb-5">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-white/80">包含剧本内容</span>
+                        <div class="toggle on" data-toggle="export-script"></div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-white/80">包含资产参考图</span>
+                        <div class="toggle on" data-toggle="export-assets"></div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-white/80">包含分镜设置</span>
+                        <div class="toggle on" data-toggle="export-storyboard"></div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-white/80">包含Agent技能配置</span>
+                        <div class="toggle" data-toggle="export-agent"></div>
+                    </div>
+                </div>
+
+                <!-- Format selector -->
+                <div class="flex items-center justify-between mb-6">
+                    <span class="text-sm text-white/80">导出格式</span>
+                    <button class="flex items-center gap-1 text-sm text-white/80 bg-[#252535] rounded-lg px-3 py-1.5 hover:bg-[#2A2A3A] transition-colors">
+                        <span>LXP（推荐）</span>
+                        <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+
+                <!-- Footer buttons -->
+                <div class="flex items-center gap-3">
+                    <button class="modal-close flex-1 h-10 rounded-xl text-sm text-white/70 bg-[#252535] hover:bg-[#2A2A3A] transition-colors">取消</button>
+                    <button class="flex-1 h-10 rounded-xl text-sm text-white font-medium transition-all hover:opacity-90" style="background: linear-gradient(135deg, #4C7FF8, #8B5CF6);">导出</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Compose Video Modal -->
+        <div id="modal-compose" class="hidden fixed inset-0 z-50 items-center justify-center">
+            <div class="modal-overlay absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+            <div class="relative bg-[#1E1E24] rounded-2xl border border-[#2A2A35] w-[420px] p-6 shadow-2xl">
+                <h3 class="text-white text-lg font-medium mb-2">合成视频</h3>
+                <p class="text-[#6B7088] text-sm mb-5">将当前集所有叙事单元的视频片段合成为完整剧集</p>
+
+                <!-- Settings -->
+                <div class="space-y-4 mb-5">
+                    <!-- Compose mode -->
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-white/80">合成方式</span>
+                        <div class="flex items-center bg-[#252535] rounded-lg p-0.5">
+                            <button class="px-3 py-1 text-xs text-white rounded-md bg-[#1A1A2E] font-medium">整集合成</button>
+                            <button class="px-3 py-1 text-xs text-white/60 rounded-md hover:text-white/80 transition-colors">选片段合成</button>
+                        </div>
+                    </div>
+                    <!-- Export format -->
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-white/80">导出格式</span>
+                        <button class="flex items-center gap-1.5 text-sm text-white/80 bg-[#252535] rounded-lg px-3 py-1.5 hover:bg-[#2A2A3A] transition-colors">
+                            <span>MP4（推荐）</span>
+                            <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                    <!-- Resolution -->
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-white/80">分辨率</span>
+                        <div class="flex items-center bg-[#252535] rounded-lg p-0.5">
+                            <button class="px-3 py-1 text-xs text-white/60 rounded-md hover:text-white/80 transition-colors">480P</button>
+                            <button class="px-3 py-1 text-xs text-white/60 rounded-md hover:text-white/80 transition-colors">720P</button>
+                            <button class="px-3 py-1 text-xs text-white rounded-md bg-[#1A1A2E] font-medium">1080P</button>
+                            <button class="px-3 py-1 text-xs text-white/60 rounded-md hover:text-white/80 transition-colors">4K</button>
+                        </div>
+                    </div>
+                    <!-- Frame rate -->
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-white/80">帧率</span>
+                        <div class="flex items-center bg-[#252535] rounded-lg p-0.5">
+                            <button class="px-3 py-1 text-xs text-white/60 rounded-md hover:text-white/80 transition-colors">24fps</button>
+                            <button class="px-3 py-1 text-xs text-white rounded-md bg-[#1A1A2E] font-medium">30fps</button>
+                            <button class="px-3 py-1 text-xs text-white/60 rounded-md hover:text-white/80 transition-colors">60fps</button>
+                        </div>
+                    </div>
+                    <!-- Subtitles toggle -->
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-white/80">包含字幕</span>
+                        <div class="toggle on" data-toggle="compose-subtitles"></div>
+                    </div>
+                    <!-- Intro/outro toggle -->
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-white/80">包含片头片尾</span>
+                        <div class="toggle" data-toggle="compose-intro"></div>
+                    </div>
+                    <!-- Auto download toggle -->
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-white/80">合成后自动下载</span>
+                        <div class="toggle on" data-toggle="compose-autodownload"></div>
+                    </div>
+                </div>
+
+                <!-- Cost info -->
+                <div class="flex items-center justify-center mb-5">
+                    <span class="text-sm text-[#4C7FF8]">预计消耗 120 积分</span>
+                </div>
+
+                <!-- Footer buttons -->
+                <div class="flex items-center gap-3">
+                    <button class="modal-close flex-1 h-10 rounded-xl text-sm text-white/70 bg-[#252535] hover:bg-[#2A2A3A] transition-colors">取消</button>
+                    <button class="flex-1 h-10 rounded-xl text-sm text-white font-medium transition-all hover:opacity-90" style="background: linear-gradient(135deg, #4C7FF8, #8B5CF6);">开始合成</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Share Modal -->
+        <div id="modal-share" class="hidden fixed inset-0 z-50 items-center justify-center">
+            <div class="modal-overlay absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+            <div class="relative bg-[#1E1E24] rounded-2xl border border-[#2A2A35] w-[420px] p-6 shadow-2xl">
+                <h3 class="text-white text-lg font-medium mb-5">分享作品</h3>
+
+                <!-- Share link -->
+                <div class="flex items-center gap-2 mb-5">
+                    <div class="flex-1 h-10 rounded-xl bg-[#252535] px-3 flex items-center">
+                        <span class="text-sm text-white/50 truncate">https://luxreal.com/work/abc123xyz</span>
+                    </div>
+                    <button class="h-10 px-4 rounded-xl text-sm text-white font-medium transition-all hover:opacity-90" style="background: linear-gradient(135deg, #4C7FF8, #8B5CF6);">复制</button>
+                </div>
+
+                <!-- Share platforms -->
+                <div class="flex items-center justify-center gap-6 mb-6">
+                    <button class="flex flex-col items-center gap-1.5 text-[#8B8B9A] hover:text-white transition-colors">
+                        <div class="w-12 h-12 rounded-full bg-[#252535] flex items-center justify-center">
+                            <i data-lucide="message-circle" class="w-5 h-5"></i>
+                        </div>
+                        <span class="text-xs">微信</span>
+                    </button>
+                    <button class="flex flex-col items-center gap-1.5 text-[#8B8B9A] hover:text-white transition-colors">
+                        <div class="w-12 h-12 rounded-full bg-[#252535] flex items-center justify-center">
+                            <i data-lucide="grid-3x3" class="w-5 h-5"></i>
+                        </div>
+                        <span class="text-xs">QQ</span>
+                    </button>
+                    <button class="flex flex-col items-center gap-1.5 text-[#8B8B9A] hover:text-white transition-colors">
+                        <div class="w-12 h-12 rounded-full bg-[#252535] flex items-center justify-center">
+                            <i data-lucide="globe" class="w-5 h-5"></i>
+                        </div>
+                        <span class="text-xs">微博</span>
+                    </button>
+                    <button class="flex flex-col items-center gap-1.5 text-[#8B8B9A] hover:text-white transition-colors">
+                        <div class="w-12 h-12 rounded-full bg-[#252535] flex items-center justify-center">
+                            <i data-lucide="link" class="w-5 h-5"></i>
+                        </div>
+                        <span class="text-xs">链接</span>
+                    </button>
+                </div>
+
+                <!-- Public share toggle -->
+                <div class="flex items-center justify-between pt-4 border-t border-[#2A2A35]">
+                    <div>
+                        <div class="text-sm text-white/80">公开分享</div>
+                        <div class="text-xs text-[#6B7088] mt-0.5">开启后任何人可通过链接查看</div>
+                    </div>
+                    <div class="toggle" data-toggle="share-public"></div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        lucide.createIcons();
+
+        // ===== Speed Dropdown =====
+        const btnSpeed = document.getElementById('btn-speed');
+        const speedDropdown = document.getElementById('speed-dropdown');
+        let currentSpeed = '1';
+
+        btnSpeed.addEventListener('click', (e) => {
+            e.stopPropagation();
+            speedDropdown.classList.toggle('hidden');
+            moreDropdown.classList.add('hidden');
+            qualityDropdown.classList.add('hidden');
+        });
+
+        // ===== Quality Dropdown =====
+        const btnQuality = document.getElementById('btn-quality');
+        const qualityDropdown = document.getElementById('quality-dropdown');
+
+        btnQuality.addEventListener('click', (e) => {
+            e.stopPropagation();
+            qualityDropdown.classList.toggle('hidden');
+            speedDropdown.classList.add('hidden');
+            moreDropdown.classList.add('hidden');
+        });
+
+        qualityDropdown.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const quality = btn.textContent.trim();
+                btnQuality.querySelector('span').textContent = quality;
+                qualityDropdown.querySelectorAll('button').forEach(b => {
+                    b.classList.remove('text-[#4C7FF8]', 'font-medium');
+                    b.classList.add('text-white/70');
+                });
+                btn.classList.remove('text-white/70');
+                btn.classList.add('text-[#4C7FF8]', 'font-medium');
+                qualityDropdown.classList.add('hidden');
+            });
+        });
+
+        speedDropdown.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const speed = btn.dataset.speed;
+                currentSpeed = speed;
+                btnSpeed.querySelector('span:last-child').textContent = speed + 'x';
+                speedDropdown.querySelectorAll('button').forEach(b => {
+                    b.classList.remove('text-[#4C7FF8]', 'font-medium');
+                    b.classList.add('text-white/70');
+                });
+                btn.classList.remove('text-white/70');
+                btn.classList.add('text-[#4C7FF8]', 'font-medium');
+                speedDropdown.classList.add('hidden');
+            });
+        });
+
+        // ===== More Dropdown =====
+        const btnMore = document.getElementById('btn-more');
+        const moreDropdown = document.getElementById('more-dropdown');
+
+        btnMore.addEventListener('click', (e) => {
+            e.stopPropagation();
+            moreDropdown.classList.toggle('hidden');
+            speedDropdown.classList.add('hidden');
+        });
+
+        // Close dropdowns when clicking elsewhere
+        document.addEventListener('click', () => {
+            speedDropdown.classList.add('hidden');
+            moreDropdown.classList.add('hidden');
+            qualityDropdown.classList.add('hidden');
+        });
+
+        // ===== Modal Helper Functions =====
+        function openModal(modalId) {
+            const modal = document.getElementById(modalId);
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeModal(modal) {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        // ===== Export Modal =====
+        const btnExport = document.getElementById('btn-export');
+        const modalExport = document.getElementById('modal-export');
+
+        btnExport.addEventListener('click', () => {
+            openModal('modal-export');
+        });
+
+        // ===== Compose Modal =====
+        const btnCompose = document.getElementById('btn-compose');
+        const modalCompose = document.getElementById('modal-compose');
+
+        btnCompose.addEventListener('click', () => {
+            openModal('modal-compose');
+        });
+
+        // ===== Share Modal =====
+        const btnShare = document.getElementById('btn-share');
+        const modalShare = document.getElementById('modal-share');
+
+        btnShare.addEventListener('click', () => {
+            openModal('modal-share');
+        });
+
+        // Close modals on overlay click or close button
+        document.querySelectorAll('[id^="modal-"]').forEach(modal => {
+            modal.querySelector('.modal-overlay').addEventListener('click', () => {
+                closeModal(modal);
+            });
+            const closeBtn = modal.querySelector('.modal-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    closeModal(modal);
+                });
+            }
+        });
+
+        // ===== Toggle Switches =====
+        document.querySelectorAll('.toggle').forEach(toggle => {
+            toggle.addEventListener('click', () => {
+                toggle.classList.toggle('on');
+            });
+        });
+
+        // ESC key to close modals and dropdowns
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('[id^="modal-"]').forEach(modal => {
+                    closeModal(modal);
+                });
+                speedDropdown.classList.add('hidden');
+                moreDropdown.classList.add('hidden');
+                qualityDropdown.classList.add('hidden');
+            }
+        });
+
+        // ===== Profile Panel (sidebar avatar) =====
+        const profilePanel = document.getElementById('profilePanel');
+        const sidebarAvatar = document.getElementById('sidebarAvatar');
+
+        function positionProfilePanel() {
+            if (!profilePanel || !sidebarAvatar) return;
+            const avatarRect = sidebarAvatar.getBoundingClientRect();
+            const panelRect = profilePanel.getBoundingClientRect();
+            
+            // 优先：面板顶部与头像顶部对齐（向下展开）
+            let top = avatarRect.top - 8;
+            
+            // 如果下方空间不够（面板底部超出视口），改为从头像底部向上展开
+            if (top + panelRect.height > window.innerHeight - 12) {
+                top = avatarRect.bottom - panelRect.height + 8;
+            }
+            
+            // 上方也不够的话，贴顶
+            if (top < 12) top = 12;
+            
+            profilePanel.style.top = top + 'px';
+        }
+
+        function toggleProfilePanel() {
+            if (!profilePanel) return;
+            if (profilePanel.classList.contains('hidden')) {
+                profilePanel.classList.remove('hidden');
+                positionProfilePanel();
+                lucide.createIcons();
+            } else {
+                profilePanel.classList.add('hidden');
+            }
+        }
+
+        if (sidebarAvatar) {
+            sidebarAvatar.addEventListener('click', function(e) {
+                e.stopPropagation();
+                toggleProfilePanel();
+            });
+        }
+
+        // Close profile panel when clicking outside
+        document.addEventListener('click', function(e) {
+            if (profilePanel && !profilePanel.classList.contains('hidden')) {
+                if (!profilePanel.contains(e.target) && 
+                    e.target !== sidebarAvatar && !sidebarAvatar.contains(e.target)) {
+                    profilePanel.classList.add('hidden');
+                }
+            }
+        });
+
+        // Reposition on resize
+        window.addEventListener('resize', function() {
+            if (profilePanel && !profilePanel.classList.contains('hidden')) {
+                positionProfilePanel();
+            }
+        });
+
+        // ===== Agent Skill Config Toggle =====
+        document.querySelectorAll('.agent-skill-item').forEach(item => {
+            item.addEventListener('click', function(e) {
+                // Don't toggle if clicking modify link directly
+                if (e.target.closest('.agent-skill-item-modify')) return;
+                const skillId = 'skill-' + this.dataset.skill;
+                const expanded = document.getElementById(skillId);
+                if (expanded) {
+                    expanded.classList.toggle('open');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

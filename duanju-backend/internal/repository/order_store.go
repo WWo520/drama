@@ -69,6 +69,34 @@ func (s *OrderStore) GetOrderByNo(ctx context.Context, orderNo string) (*billing
 	return &o, err
 }
 
+// GetOrderByNoForUser 查订单（归属校验：仅订单所有者可见，防水平越权）。
+func (s *OrderStore) GetOrderByNoForUser(ctx context.Context, orderNo string, userID int64) (*billing.Order, error) {
+	var o billing.Order
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, order_no, user_id, order_type, plan_code, paid_amount_yuan::text, points_granted_total,
+		       pay_status::text, COALESCE(pay_transaction_id,'')
+		FROM orders WHERE order_no=$1 AND user_id=$2`, orderNo, userID).
+		Scan(&o.ID, &o.OrderNo, &o.UserID, &o.OrderType, &o.PlanCode, &o.AmountYuan, &o.Points,
+			&o.PayStatus, &o.PayTransactionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("订单不存在")
+	}
+	return &o, err
+}
+
+// GetPackage 查积分套餐（档位校验）。
+func (s *OrderStore) GetPackage(ctx context.Context, pkgCode string) (*billing.Package, error) {
+	var p billing.Package
+	err := s.pool.QueryRow(ctx, `
+		SELECT pkg_code, points, COALESCE(bonus_points,0), price_yuan::text, status::text
+		FROM point_packages WHERE pkg_code=$1 AND deleted_at IS NULL`, pkgCode).
+		Scan(&p.PkgCode, &p.Points, &p.BonusPoints, &p.PriceYuan, &p.Status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("套餐不存在")
+	}
+	return &p, err
+}
+
 // PayCallback 回调事务（04 H.2 步4~6）：订单 PAID + 积分加余额（含首购加赠）+ 流水。
 // pay_transaction_id UNIQUE 幂等：重复回调返回 (false, nil)。
 // 首购判定：历史 PAID 订单数=0 → 加赠（03 E.6.2：中包/大包 +50%）。

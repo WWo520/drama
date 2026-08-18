@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Preflight</title>
+    <style id="theme-vars">
+/* LuxReal Clone - Design Tokens */
+/* Dark cinematic theme inspired by LuxReal AI Short Drama platform */
+
+:root {
+  /* Brand prefix: luxreal */
+  --luxreal-background: #08080F;
+  --luxreal-foreground: #F0F0F5;
+  --luxreal-card: #12121E;
+  --luxreal-card-foreground: #E8E8F0;
+  --luxreal-popover: #16162A;
+  --luxreal-popover-foreground: #F0F0F5;
+  --luxreal-primary: #3B82F6;
+  --luxreal-primary-foreground: #FFFFFF;
+  --luxreal-muted: #1A1A2E;
+  --luxreal-muted-foreground: #8B8BA0;
+  --luxreal-border: #252540;
+  --luxreal-input: #1E1E35;
+  --luxreal-ring: #3B82F6;
+  --luxreal-accent: #1A1A30;
+  --luxreal-accent-foreground: #F0F0F5;
+  --luxreal-destructive: #EF4444;
+  --luxreal-destructive-foreground: #FFFFFF;
+  --luxreal-success: #10B981;
+  --luxreal-warning: #F59E0B;
+
+  /* Radius scale */
+  --luxreal-radius-sm: 6px;
+  --luxreal-radius-md: 10px;
+  --luxreal-radius-lg: 16px;
+  --luxreal-radius-xl: 24px;
+  --luxreal-radius-full: 9999px;
+
+  /* Gradient accents */
+  --luxreal-gradient-neon: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 50%, #06B6D4 100%);
+  --luxreal-gradient-glow: linear-gradient(180deg, rgba(59,130,246,0.15) 0%, rgba(139,92,246,0.05) 100%);
+  --luxreal-gradient-card: linear-gradient(145deg, rgba(26,26,46,0.8) 0%, rgba(18,18,30,0.9) 100%);
+  --luxreal-gradient-banner1: linear-gradient(135deg, #1E1B4B 0%, #312E81 40%, #1E1B4B 100%);
+  --luxreal-gradient-banner2: linear-gradient(135deg, #0C2340 0%, #1E3A5F 40%, #0C2340 100%);
+  --luxreal-gradient-banner3: linear-gradient(135deg, #1A0F2E 0%, #2D1B4E 40%, #1A0F2E 100%);
+
+  /* Shadows */
+  --luxreal-shadow-glow: 0 0 30px rgba(59,130,246,0.15);
+  --luxreal-shadow-card: 0 4px 24px rgba(0,0,0,0.4);
+  --luxreal-shadow-elevated: 0 8px 40px rgba(0,0,0,0.5);
+
+  /* Sidebar */
+  --luxreal-sidebar: #0A0A14;
+  --luxreal-sidebar-foreground: #B0B0C8;
+  --luxreal-sidebar-accent: #3B82F6;
+  --luxreal-sidebar-width: 64px;
+
+  /* Top banner */
+  --luxreal-banner-height: 36px;
+}
+
+/* Base typography */
+html {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--luxreal-background);
+  color: var(--luxreal-foreground);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--luxreal-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--luxreal-muted-foreground);
+}
+
+/* Glass card effect */
+.luxreal-glass {
+  background: var(--luxreal-gradient-card);
+  border: 1px solid var(--luxreal-border);
+  backdrop-filter: blur(12px);
+}
+
+/* Neon glow effect for primary elements */
+.luxreal-glow {
+  box-shadow: var(--luxreal-shadow-glow);
+}
+
+/* Gradient text */
+.luxreal-gradient-text {
+  background: var(--luxreal-gradient-neon);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Tab capsule style */
+.luxreal-tab-capsule {
+  border-radius: var(--luxreal-radius-full);
+  padding: 6px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--luxreal-muted-foreground);
+}
+.luxreal-tab-capsule.active {
+  background: var(--luxreal-primary);
+  color: var(--luxreal-primary-foreground);
+}
+.luxreal-tab-capsule:hover:not(.active) {
+  color: var(--luxreal-foreground);
+  background: var(--luxreal-muted);
+}
+
+/* Button styles */
+.luxreal-btn-primary {
+  background: var(--luxreal-primary);
+  color: var(--luxreal-primary-foreground);
+  border: none;
+  border-radius: var(--luxreal-radius-full);
+  padding: 10px 28px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.luxreal-btn-primary:hover {
+  background: #2563EB;
+  box-shadow: 0 0 20px rgba(59,130,246,0.3);
+}
+.luxreal-btn-secondary {
+  background: transparent;
+  color: var(--luxreal-foreground);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-full);
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.luxreal-btn-secondary:hover {
+  border-color: var(--luxreal-primary);
+  color: var(--luxreal-primary);
+}
+.luxreal-btn-ghost {
+  background: transparent;
+  color: var(--luxreal-muted-foreground);
+  border: none;
+  border-radius: var(--luxreal-radius-md);
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.luxreal-btn-ghost:hover {
+  color: var(--luxreal-foreground);
+  background: var(--luxreal-muted);
+}
+
+/* Input styles */
+.luxreal-input {
+  background: var(--luxreal-input);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-md);
+  padding: 10px 14px;
+  color: var(--luxreal-foreground);
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+.luxreal-input:focus {
+  border-color: var(--luxreal-primary);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+}
+.luxreal-input::placeholder {
+  color: var(--luxreal-muted-foreground);
+}
+
+/* Select/Dropdown trigger style */
+.luxreal-select {
+  background: var(--luxreal-input);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-full);
+  padding: 6px 14px;
+  color: var(--luxreal-foreground);
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+.luxreal-select:hover {
+  border-color: var(--luxreal-primary);
+}
+
+/* Sidebar navigation item */
+.luxreal-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 56px;
+  border-radius: var(--luxreal-radius-md);
+  color: var(--luxreal-sidebar-foreground);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  gap: 4px;
+  text-decoration: none;
+  font-size: 11px;
+}
+.luxreal-nav-item:hover {
+  color: var(--luxreal-foreground);
+  background: var(--luxreal-muted);
+}
+.luxreal-nav-item.active {
+  color: var(--luxreal-primary);
+  background: rgba(59,130,246,0.1);
+}
+
+/* Badge */
+.luxreal-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--luxreal-radius-full);
+  font-size: 11px;
+  font-weight: 500;
+}
+.luxreal-badge-beta {
+  background: linear-gradient(135deg, #8B5CF6, #3B82F6);
+  color: white;
+}
+.luxreal-badge-vip {
+  background: linear-gradient(135deg, #F59E0B, #EF4444);
+  color: white;
+}
+
+/* Card hover effect */
+.luxreal-card-hover {
+  transition: all 0.3s ease;
+}
+.luxreal-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--luxreal-shadow-elevated);
+  border-color: rgba(59,130,246,0.3);
+}
+
+/* Announcement banner marquee */
+.luxreal-marquee {
+  overflow: hidden;
+  white-space: nowrap;
+}
+.luxreal-marquee-content {
+  display: inline-block;
+  animation: marquee 20s linear infinite;
+}
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* Drag & drop zone */
+.luxreal-dropzone {
+  border: 2px dashed var(--luxreal-border);
+  border-radius: var(--luxreal-radius-lg);
+  transition: all 0.3s ease;
+  background: rgba(59,130,246,0.02);
+}
+.luxreal-dropzone:hover, .luxreal-dropzone.dragover {
+  border-color: var(--luxreal-primary);
+  background: rgba(59,130,246,0.06);
+}
+
+/* Divider */
+.luxreal-divider {
+  height: 1px;
+  background: var(--luxreal-border);
+  margin: 16px 0;
+}
+
+/* Section title */
+.luxreal-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--luxreal-foreground);
+  margin-bottom: 12px;
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-background: var(--luxreal-background);
+    --color-foreground: var(--luxreal-foreground);
+    --color-card: var(--luxreal-card);
+    --color-card-foreground: var(--luxreal-card-foreground);
+    --color-popover: var(--luxreal-popover);
+    --color-popover-foreground: var(--luxreal-popover-foreground);
+    --color-primary: var(--luxreal-primary);
+    --color-primary-foreground: var(--luxreal-primary-foreground);
+    --color-muted: var(--luxreal-muted);
+    --color-muted-foreground: var(--luxreal-muted-foreground);
+    --color-accent: var(--luxreal-accent);
+    --color-accent-foreground: var(--luxreal-accent-foreground);
+    --color-destructive: var(--luxreal-destructive);
+    --color-destructive-foreground: var(--luxreal-destructive-foreground);
+    --color-border: var(--luxreal-border);
+    --color-input: var(--luxreal-input);
+    --color-ring: var(--luxreal-ring);
+    --color-sidebar: var(--luxreal-sidebar);
+    --color-sidebar-foreground: var(--luxreal-sidebar-foreground);
+    --color-sidebar-accent: var(--luxreal-sidebar-accent);
+    --radius-sm: var(--luxreal-radius-sm);
+    --radius-md: var(--luxreal-radius-md);
+    --radius-lg: var(--luxreal-radius-lg);
+    --radius-xl: var(--luxreal-radius-xl);
+  }
+  @layer base {
+    body { background: var(--luxreal-background); color: var(--luxreal-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style id="semantic-token-fallback">
+      .bg-background { background-color: var(--luxreal-background); }
+      .text-background { color: var(--luxreal-background); }
+      .border-background { border-color: var(--luxreal-background); }
+      .ring-background { --tw-ring-color: var(--luxreal-background); }
+      .bg-foreground { background-color: var(--luxreal-foreground); }
+      .text-foreground { color: var(--luxreal-foreground); }
+      .border-foreground { border-color: var(--luxreal-foreground); }
+      .ring-foreground { --tw-ring-color: var(--luxreal-foreground); }
+      .bg-card { background-color: var(--luxreal-card); }
+      .text-card { color: var(--luxreal-card); }
+      .border-card { border-color: var(--luxreal-card); }
+      .ring-card { --tw-ring-color: var(--luxreal-card); }
+      .bg-card-foreground { background-color: var(--luxreal-card-foreground); }
+      .text-card-foreground { color: var(--luxreal-card-foreground); }
+      .border-card-foreground { border-color: var(--luxreal-card-foreground); }
+      .ring-card-foreground { --tw-ring-color: var(--luxreal-card-foreground); }
+      .bg-popover { background-color: var(--luxreal-popover); }
+      .text-popover { color: var(--luxreal-popover); }
+      .border-popover { border-color: var(--luxreal-popover); }
+      .ring-popover { --tw-ring-color: var(--luxreal-popover); }
+      .bg-popover-foreground { background-color: var(--luxreal-popover-foreground); }
+      .text-popover-foreground { color: var(--luxreal-popover-foreground); }
+      .border-popover-foreground { border-color: var(--luxreal-popover-foreground); }
+      .ring-popover-foreground { --tw-ring-color: var(--luxreal-popover-foreground); }
+      .bg-primary { background-color: var(--luxreal-primary); }
+      .text-primary { color: var(--luxreal-primary); }
+      .border-primary { border-color: var(--luxreal-primary); }
+      .ring-primary { --tw-ring-color: var(--luxreal-primary); }
+      .bg-primary-foreground { background-color: var(--luxreal-primary-foreground); }
+      .text-primary-foreground { color: var(--luxreal-primary-foreground); }
+      .border-primary-foreground { border-color: var(--luxreal-primary-foreground); }
+      .ring-primary-foreground { --tw-ring-color: var(--luxreal-primary-foreground); }
+      .bg-muted { background-color: var(--luxreal-muted); }
+      .text-muted { color: var(--luxreal-muted); }
+      .border-muted { border-color: var(--luxreal-muted); }
+      .ring-muted { --tw-ring-color: var(--luxreal-muted); }
+      .bg-muted-foreground { background-color: var(--luxreal-muted-foreground); }
+      .text-muted-foreground { color: var(--luxreal-muted-foreground); }
+      .border-muted-foreground { border-color: var(--luxreal-muted-foreground); }
+      .ring-muted-foreground { --tw-ring-color: var(--luxreal-muted-foreground); }
+      .bg-accent { background-color: var(--luxreal-accent); }
+      .text-accent { color: var(--luxreal-accent); }
+      .border-accent { border-color: var(--luxreal-accent); }
+      .ring-accent { --tw-ring-color: var(--luxreal-accent); }
+      .bg-accent-foreground { background-color: var(--luxreal-accent-foreground); }
+      .text-accent-foreground { color: var(--luxreal-accent-foreground); }
+      .border-accent-foreground { border-color: var(--luxreal-accent-foreground); }
+      .ring-accent-foreground { --tw-ring-color: var(--luxreal-accent-foreground); }
+      .bg-destructive { background-color: var(--luxreal-destructive); }
+      .text-destructive { color: var(--luxreal-destructive); }
+      .border-destructive { border-color: var(--luxreal-destructive); }
+      .ring-destructive { --tw-ring-color: var(--luxreal-destructive); }
+      .bg-destructive-foreground { background-color: var(--luxreal-destructive-foreground); }
+      .text-destructive-foreground { color: var(--luxreal-destructive-foreground); }
+      .border-destructive-foreground { border-color: var(--luxreal-destructive-foreground); }
+      .ring-destructive-foreground { --tw-ring-color: var(--luxreal-destructive-foreground); }
+      .bg-border { background-color: var(--luxreal-border); }
+      .text-border { color: var(--luxreal-border); }
+      .border-border { border-color: var(--luxreal-border); }
+      .ring-border { --tw-ring-color: var(--luxreal-border); }
+      .bg-input { background-color: var(--luxreal-input); }
+      .text-input { color: var(--luxreal-input); }
+      .border-input { border-color: var(--luxreal-input); }
+      .ring-input { --tw-ring-color: var(--luxreal-input); }
+      .bg-ring { background-color: var(--luxreal-ring); }
+      .text-ring { color: var(--luxreal-ring); }
+      .border-ring { border-color: var(--luxreal-ring); }
+      .ring-ring { --tw-ring-color: var(--luxreal-ring); }
+      .bg-sidebar { background-color: var(--luxreal-sidebar); }
+      .text-sidebar { color: var(--luxreal-sidebar); }
+      .border-sidebar { border-color: var(--luxreal-sidebar); }
+      .ring-sidebar { --tw-ring-color: var(--luxreal-sidebar); }
+      .bg-sidebar-foreground { background-color: var(--luxreal-sidebar-foreground); }
+      .text-sidebar-foreground { color: var(--luxreal-sidebar-foreground); }
+      .border-sidebar-foreground { border-color: var(--luxreal-sidebar-foreground); }
+      .ring-sidebar-foreground { --tw-ring-color: var(--luxreal-sidebar-foreground); }
+      .bg-sidebar-accent { background-color: var(--luxreal-sidebar-accent); }
+      .text-sidebar-accent { color: var(--luxreal-sidebar-accent); }
+      .border-sidebar-accent { border-color: var(--luxreal-sidebar-accent); }
+      .ring-sidebar-accent { --tw-ring-color: var(--luxreal-sidebar-accent); }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <main>
+    </main>
+    <script>lucide.createIcons();</script>
+</body>
+</html>

@@ -1,0 +1,392 @@
+{
+  "skillProvenance": {
+    "name": "solo-design",
+    "mode": "free-fast",
+    "lane": "free_exploration",
+    "version": "1.0",
+    "version_source": "builtin"
+  },
+  "pages": [
+    {
+      "nodeId": "page-create-video",
+      "htmlSrc": "pages/create-video.html",
+      "title": "AI创作 - LuxReal",
+      "writeMode": "SectionPlanThenWrite",
+      "viewportMode": "app-shell",
+      "deviceType": "web",
+      "cssPath": "colors_and_type.css",
+      "brandPrefix": "luxreal",
+      "pageType": "task-driven",
+      "stateRole": "base",
+      "chartsRequired": false,
+      "assets": [],
+      "domIdsRequired": [
+        "tab-agent",
+        "tab-canvas",
+        "btn-enter-workbench",
+        "nav-create",
+        "nav-discover",
+        "nav-projects"
+      ],
+      "allowedWritePaths": [
+        "pages/create-video.html"
+      ],
+      "sections": [
+        "announcement-banner",
+        "app-shell-layout",
+        "sidebar-navigation",
+        "creation-tabs",
+        "script-upload-zone",
+        "quick-config-bar",
+        "example-project-cards",
+        "model-config-panel",
+        "recommendation-banners",
+        "footer-bar"
+      ]
+    }
+  ],
+  "project": {
+    "name": "LuxReal Clone",
+    "deviceType": "desktop",
+    "operatingMode": "free-explore",
+    "resolvedLane": "free_exploration",
+    "selectedIntentWorkflowRead": true,
+    "contextRequirementsLoaded": [
+      {
+        "path": "shared-runtime/runtime-boundaries/lane-runtime-contracts.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "shared-runtime/agent-dispatch-runtime/lane-dispatch-index.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "delivery-quality/page-rendering-quality-gate.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "delivery-quality/design-artifact-validation.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "delivery-quality/delivery-evidence-contract.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "visual-experience/visual-experience-guidelines.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      }
+    ],
+    "contextReadScope": {
+      "mainAgent": {
+        "forbiddenReads": [
+          "other intent-workflows/**",
+          "Sub-Agent implementation files before dispatch"
+        ]
+      },
+      "pageSubAgent": {
+        "allowedReads": [
+          "current lane page runtime guide",
+          "current lane dispatch contract excerpt",
+          "current Page Packet",
+          "supplementaryReads[] only"
+        ],
+        "forbiddenReads": [
+          "SKILL.md full re-read",
+          "other intent-workflows/**",
+          "full runtime-orchestration-summary.json unless explicitly sliced"
+        ]
+      },
+      "readScopeLedgerWriter": "shared-runtime/deterministic-tooling/build-page-dispatch-manifest.mjs"
+    },
+    "validationRunDiscipline": {
+      "maxFullValidationRuns": 2,
+      "softWarningsTriggerRepair": false,
+      "blockingRepairMode": "targeted-once",
+      "forbiddenRepairTriggers": [
+        "soft-warning-only",
+        "provenance-warning-only",
+        "style-warning-only"
+      ]
+    },
+    "lowValueCallWatchdog": {
+      "applies": true,
+      "noProgressSignals": [
+        "no_tool_call",
+        "no_artifact_diff",
+        "no_structured_decision"
+      ],
+      "noProgressNextAction": "enter_readiness_or_blocked_summary"
+    },
+    "intentProfile": {
+      "caseFamily": "free_exploration",
+      "routingReason": "Creating a new LuxReal-inspired AI video creation workbench UI as a free exploration page. Dark cinematic theme, app-shell layout with sidebar navigation."
+    },
+    "cssPreflightEvidence": {
+      "applies": true,
+      "status": "passed",
+      "command": "node {SKILL_DIR}/shared-runtime/deterministic-tooling/apply-html-head-contract.mjs colors_and_type.css .preflight/preflight.html --title=\"Preflight\" --lang=zh-CN --prefix=luxreal",
+      "brandPrefix": "luxreal",
+      "checks": {
+        "themeVars": "present",
+        "semanticTokenFallback": "present",
+        "themeInline": "present",
+        "tailwindCdn": "present",
+        "htmlClass": "present",
+        "semanticMappings": "resolved"
+      },
+      "retryCount": 0,
+      "blockingReason": null
+    },
+    "pageCompletenessGate": {
+      "expectedPages": [
+        "create-video"
+      ],
+      "requiredStates": [
+        "default"
+      ],
+      "requiredInteractions": [
+        "tab-switch",
+        "enter-workbench"
+      ],
+      "requiredNavigation": [
+        "sidebar-nav"
+      ],
+      "missingAllowed": []
+    },
+    "defaultDeliverableVisibility": {
+      "applies": true,
+      "requiredVisibleRegions": [
+        {
+          "htmlSrc": "pages/create-video.html",
+          "selector": "#announcement-banner",
+          "label": "top announcement banner",
+          "source": "user requirement"
+        },
+        {
+          "htmlSrc": "pages/create-video.html",
+          "selector": "#sidebar-nav",
+          "label": "left sidebar navigation",
+          "source": "user requirement"
+        },
+        {
+          "htmlSrc": "pages/create-video.html",
+          "selector": "#creation-tabs",
+          "label": "creation mode tabs",
+          "source": "user requirement"
+        },
+        {
+          "htmlSrc": "pages/create-video.html",
+          "selector": "#script-upload",
+          "label": "script upload area",
+          "source": "user requirement"
+        },
+        {
+          "htmlSrc": "pages/create-video.html",
+          "selector": "#quick-config",
+          "label": "quick config bar",
+          "source": "user requirement"
+        },
+        {
+          "htmlSrc": "pages/create-video.html",
+          "selector": "#example-projects",
+          "label": "example project cards",
+          "source": "user requirement"
+        },
+        {
+          "htmlSrc": "pages/create-video.html",
+          "selector": "#model-config-panel",
+          "label": "model configuration panel",
+          "source": "user requirement"
+        },
+        {
+          "htmlSrc": "pages/create-video.html",
+          "selector": "#recommendation-banners",
+          "label": "recommendation banner cards",
+          "source": "user requirement"
+        }
+      ],
+      "hiddenAllowed": [
+        {
+          "selector": "#agent-skills-modal",
+          "reason": "modal overlay, shown on click"
+        },
+        {
+          "selector": "#model-config-expand",
+          "reason": "collapsible panel section, may be collapsed by default"
+        }
+      ]
+    },
+    "expectedDispatches": [
+      {
+        "nodeId": "page-create-video",
+        "packetType": "FreePagePacket",
+        "status": "completed",
+        "changedFiles": ["pages/create-video.html"],
+        "toolCallLedger": {
+          "source": "main-agent-runtime-trace",
+          "traceDigest": "luxreal-clone-v1",
+          "todoWriteCalls": 0,
+          "previewCalls": 0,
+          "validationScriptCalls": 0,
+          "helperScriptWrites": 0
+        },
+        "mainAgentPostDispatchMutations": [
+          {
+            "file": "pages/create-video.html",
+            "reason": "added overflow-y-auto class to scroll region for app-shell validator compliance",
+            "scope": "class-attribute-only"
+          },
+          {
+            "file": "pages/create-video.html",
+            "reason": "aligned styles with LuxReal reference: updated primary color to #4C7FF8, background to #030911, added spotlight effect, fixed sidebar active state, enhanced carousel, added cinematic card covers, improved animations",
+            "scope": "style-and-structure"
+          },
+          {
+            "file": "luxreal-clone.design",
+            "reason": "updated canvas layout snapshot after visual alignment",
+            "scope": "canvas-data-only"
+          }
+        ]
+      }
+    ],
+    "dispatchPreflightManifest": [
+      {
+        "recorded_at": "2026-08-13T09:05:48.601Z",
+        "generatedBy": "build-page-dispatch-manifest.mjs",
+        "packetType": "FreePagePacket",
+        "laneContract": {
+          "resolvedLane": "free_exploration",
+          "packetType": "FreePagePacket",
+          "pageRuntimeGuide": "intent-workflows/intent-page-free-exploration/free-exploration-page-runtime.md",
+          "dispatchContract": "intent-workflows/intent-page-free-exploration/dispatch-contract.md"
+        },
+        "taskLinePresent": true,
+        "outputPathPresent": true,
+        "sharedTemplate": "intent-workflows/intent-page-free-exploration/free-exploration-page-runtime.md",
+        "nodeId": "page-create-video",
+        "htmlSrc": "pages/create-video.html",
+        "supplementaryReads": [],
+        "allowedWritePaths": [
+          "pages/create-video.html",
+          "assets/"
+        ],
+        "forbiddenWriteRoots": [
+          "*.design",
+          "runtime-orchestration-summary.json",
+          "validation-report.json",
+          "finish-readiness-report.json",
+          "restore-contract-report.json",
+          "page-generation-summary.json"
+        ],
+        "toolPolicy": {
+          "todoWriteAllowed": false,
+          "validationScriptsAllowed": false,
+          "previewAllowed": false,
+          "helperScriptsAllowed": false,
+          "designFileWriteAllowed": false,
+          "allowedWritePaths": [
+            "pages/create-video.html",
+            "assets/"
+          ]
+        },
+        "skillRuntime": {
+          "skillDir": "c:\\Users\\yz02\\.trae-cn\\builtin\\design\\default\\skills\\solo-design",
+          "deterministicToolDir": "c:\\Users\\yz02\\.trae-cn\\builtin\\design\\default\\skills\\solo-design\\shared-runtime\\deterministic-tooling",
+          "toolPaths": {
+            "applyHtmlHeadContract": "c:\\Users\\yz02\\.trae-cn\\builtin\\design\\default\\skills\\solo-design\\shared-runtime\\deterministic-tooling\\apply-html-head-contract.mjs",
+            "recordDispatchCompletion": "c:\\Users\\yz02\\.trae-cn\\builtin\\design\\default\\skills\\solo-design\\shared-runtime\\deterministic-tooling\\record-dispatch-completion.mjs",
+            "buildPageDispatchManifest": "c:\\Users\\yz02\\.trae-cn\\builtin\\design\\default\\skills\\solo-design\\shared-runtime\\deterministic-tooling\\build-page-dispatch-manifest.mjs",
+            "validateDesignWorkspace": "c:\\Users\\yz02\\.trae-cn\\builtin\\design\\default\\skills\\solo-design\\shared-runtime\\deterministic-tooling\\validate-design-workspace.mjs",
+            "validateFinishReadiness": "c:\\Users\\yz02\\.trae-cn\\builtin\\design\\default\\skills\\solo-design\\shared-runtime\\deterministic-tooling\\validate-finish-readiness.mjs",
+            "validateRestoreContract": "c:\\Users\\yz02\\.trae-cn\\builtin\\design\\default\\skills\\solo-design\\shared-runtime\\deterministic-tooling\\validate-restore-contract.mjs"
+          },
+          "requiredForPageSubAgent": [
+            "applyHtmlHeadContract",
+            "recordDispatchCompletion"
+          ],
+          "pathInjection": "absolute",
+          "pathContract": "Do not use {SKILL_DIR} placeholders inside Page Sub-Agent packets; use toolPaths.* absolute paths.",
+          "commandTemplates": {
+            "recordDispatchCompletion": "node \"c:\\Users\\yz02\\.trae-cn\\builtin\\design\\default\\skills\\solo-design\\shared-runtime\\deterministic-tooling\\record-dispatch-completion.mjs\" \"d:\\develop\\Drama_UI\\luxreal-clone\" --node-id=\"page-create-video\" --html-src=\"pages/create-video.html\" --status=completed --changed-files=<comma-separated-project-relative-files> --trace-digest=<main-agent-runtime-trace-digest> --tool-ledger-json=<tool-ledger-json-or-file>"
+          }
+        },
+        "cssFilePath": "d:\\develop\\Drama_UI\\luxreal-clone\\colors_and_type.css",
+        "htmlFilePath": "d:\\develop\\Drama_UI\\luxreal-clone\\pages\\create-video.html",
+        "brandPrefix": "luxreal",
+        "aestheticsMode": "free-explore",
+        "toolDisciplineBlockPresent": true,
+        "fillHtmlHeadCommand": "node \"c:\\Users\\yz02\\.trae-cn\\builtin\\design\\default\\skills\\solo-design\\shared-runtime\\deterministic-tooling\\apply-html-head-contract.mjs\" \"d:\\develop\\Drama_UI\\luxreal-clone\\colors_and_type.css\" \"d:\\develop\\Drama_UI\\luxreal-clone\\pages\\create-video.html\" --title=\"AI创作 - LuxReal\" --lang=\"zh-CN\" --prefix=\"luxreal\" --replace-head",
+        "headFillMode": "replace-head-after-body",
+        "viewportMode": "app-shell",
+        "completionSchemaExpected": "compact",
+        "restoreFields": null,
+        "restoreContractStatus": null,
+        "restoreCompactPacket": null,
+        "deterministicCommands": null,
+        "sourceAuthorityLock": null,
+        "preDispatchFileHashes": {
+          "luxreal-clone.design": "823da60b6f9d211f0f305d9919cacbd1b226e1f3f8d9373e4310109b5698516d"
+        },
+        "contextPreflight": {
+          "workflowPath": "intent-workflows/intent-page-free-exploration/INTENT_WORKFLOW.md",
+          "requiredContextFiles": [
+            "shared-runtime/runtime-boundaries/lane-runtime-contracts.md",
+            "shared-runtime/agent-dispatch-runtime/lane-dispatch-index.md",
+            "delivery-quality/page-rendering-quality-gate.md",
+            "delivery-quality/design-artifact-validation.md",
+            "delivery-quality/delivery-evidence-contract.md",
+            "visual-experience/visual-experience-guidelines.md"
+          ],
+          "optionalContextFiles": [],
+          "passed": true
+        },
+        "pageSliceOnly": true,
+        "requiredFieldsPresent": true,
+        "missingFields": [],
+        "fillHtmlHeadCommandValid": true,
+        "mobileNavigation": {
+          "required": false,
+          "appliesToThisPage": false,
+          "canonicalHtmlIncluded": false,
+          "missingFields": []
+        },
+        "persistedToSummary": true,
+        "taskQueryAudited": false,
+        "proofSource": "summary-only",
+        "largeWorkflowFilesInTaskQuery": null
+      }
+    ],
+    "readScopeLedger": [
+      {
+        "actor": "page-sub-agent",
+        "lane": "free_exploration",
+        "path": "intent-workflows/intent-page-free-exploration/free-exploration-page-runtime.md",
+        "reason": "page runtime guide",
+        "scopeClass": "page-runtime",
+        "declaredBeforeRead": true,
+        "recordedAt": "2026-08-13T09:05:48.601Z",
+        "nodeId": "page-create-video",
+        "htmlSrc": "pages/create-video.html"
+      },
+      {
+        "actor": "page-sub-agent",
+        "lane": "free_exploration",
+        "path": "intent-workflows/intent-page-free-exploration/dispatch-contract.md",
+        "reason": "dispatch contract",
+        "scopeClass": "dispatch-contract",
+        "declaredBeforeRead": true,
+        "recordedAt": "2026-08-13T09:05:48.601Z",
+        "nodeId": "page-create-video",
+        "htmlSrc": "pages/create-video.html"
+      }
+    ]
+  }
+}
+

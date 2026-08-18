@@ -51,22 +51,37 @@ func (s *Service) Register(c *gin.Context, req *RegisterReq) {
 	s.issueTokens(c, u, "注册成功")
 }
 
-// Login 登录（05 1.2）。
+// Login 登录（05 1.2）：封禁拦截 + 失败限流 + bcrypt→Argon2id 透明升级。
 func (s *Service) Login(c *gin.Context, req *LoginReq) {
+	// 失败次数限流（防暴力破解）：同账号+IP 15 分钟内失败 5 次锁定
+	failKey := fmt.Sprintf("duanju:%s:auth:loginfail:%s:%s", s.env, strings.ToLower(req.Account()), c.ClientIP())
+	if n, _ := s.rdb.Get(c.Request.Context(), failKey).Int(); n >= 5 {
+		httpx.Fail(c, http.StatusTooManyRequests, httpx.CodeRateLimited, "失败次数过多，请 15 分钟后再试")
+		return
+	}
 	u, err := s.repo.GetByAccount(c.Request.Context(), req.Account())
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
+			// 账号不存在也计数（防枚举）
+			s.countLoginFail(c, failKey)
 			httpx.Fail(c, http.StatusUnauthorized, httpx.CodeLoginFailed, "账号或密码错误")
 			return
 		}
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "登录失败，请稍后重试")
 		return
 	}
+	// 封禁拦截（P1 修复：封禁账号禁止登录）
+	if u.Status == "BANNED" {
+		httpx.Fail(c, http.StatusForbidden, httpx.CodeBanned, "账号已被封禁，请联系客服")
+		return
+	}
 	ok, upgrade := password.Verify(req.Password, u.PasswordHash)
 	if !ok {
+		s.countLoginFail(c, failKey)
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeLoginFailed, "账号或密码错误")
 		return
 	}
+	_ = s.rdb.Del(c.Request.Context(), failKey).Err()
 	if upgrade {
 		// bcrypt → Argon2id 透明升级
 		if newHash, err := password.Hash(req.Password); err == nil {
@@ -74,6 +89,12 @@ func (s *Service) Login(c *gin.Context, req *LoginReq) {
 		}
 	}
 	s.issueTokens(c, u, "登录成功")
+}
+
+// countLoginFail 登录失败计数（15 分钟窗口）。
+func (s *Service) countLoginFail(c *gin.Context, key string) {
+	_ = s.rdb.Incr(c.Request.Context(), key).Err()
+	_ = s.rdb.Expire(c.Request.Context(), key, 15*time.Minute).Err()
 }
 
 // Refresh 用 Refresh Token 换新 Access（05 1.3，Cookie 携带）。
@@ -101,16 +122,35 @@ func (s *Service) Refresh(c *gin.Context) {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeRefreshExpired, "登录已过期，请重新登录")
 		return
 	}
+	// 指纹校验（M 修复：Refresh 同样绑定 UA+IP，与设计文档一致）
+	if fp, ok := claims[jwt.ClaimFinger].(string); ok && fp != "" {
+		if fp != c.ClientIP()+"|"+c.Request.UserAgent() {
+			httpx.Fail(c, http.StatusUnauthorized, httpx.CodeRefreshExpired, "登录环境变化，请重新登录")
+			return
+		}
+	}
 	u, err := s.repo.GetByUUID(c.Request.Context(), uid)
 	if err != nil {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeRefreshExpired, "账号不存在")
 		return
 	}
+	if u.Status == "BANNED" {
+		httpx.Fail(c, http.StatusForbidden, httpx.CodeBanned, "账号已被封禁，请联系客服")
+		return
+	}
 	s.issueTokens(c, u, "刷新成功")
 }
 
-// Logout 登出：Refresh jti 进黑名单（05 1.4）。
+// Logout 登出：拉黑 access jti + refresh jti（05 1.4；access 立即失效）。
 func (s *Service) Logout(c *gin.Context) {
+	// 拉黑 access token（剩余有效期窗口，保证登出后 access 立即失效）
+	if authHeader := c.GetHeader("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+		if claims, perr := s.jwtMgr.Parse(strings.TrimPrefix(authHeader, "Bearer ")); perr == nil {
+			if jti, jerr := jwt.JTI(claims); jerr == nil {
+				_ = s.rdb.Set(c.Request.Context(), s.refreshBlacklistKey(jti), "1", 2*time.Hour).Err()
+			}
+		}
+	}
 	if refreshStr, err := c.Cookie("refresh_token"); err == nil && refreshStr != "" {
 		if claims, perr := s.jwtMgr.Parse(refreshStr); perr == nil {
 			if jti, jerr := jwt.JTI(claims); jerr == nil {
@@ -154,7 +194,7 @@ func (s *Service) issueTokens(c *gin.Context, u *UserRow, msg string) {
 	// 生产环境 Secure=true（HTTPS），开发环境 http 本地可携带
 	secure := s.env == "production"
 	c.SetCookie("refresh_token", refresh, int((7*24*time.Hour).Seconds()), "/", "", secure, true)
-	c.Set(middleware.CtxUserID, fmt.Sprint(u.ID))
+	c.Set(middleware.CtxUserID, u.ID)
 	c.Set(middleware.CtxUserUUID, u.UserUUID)
 	httpx.OK(c, LoginResp{
 		AccessToken: pair.AccessToken,

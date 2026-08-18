@@ -8,18 +8,20 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/duanju/backend/internal/engine/billing"
 	"github.com/duanju/backend/internal/middleware"
 	"github.com/duanju/backend/internal/pkg/httpx"
 )
 
 // Service creation 服务。
 type Service struct {
-	repo *Repo
-	lg   *zap.Logger
+	repo    *Repo
+	lg      *zap.Logger
+	billing *billing.Engine // 计费引擎（任务冻结/结算；nil 时跳过计费）
 }
 
-func NewService(repo *Repo, lg *zap.Logger) *Service {
-	return &Service{repo: repo, lg: lg}
+func NewService(repo *Repo, lg *zap.Logger, b *billing.Engine) *Service {
+	return &Service{repo: repo, lg: lg, billing: b}
 }
 
 // Create 创建项目（3.0.2）：默认空间缺省 + 自动第 1 集。
@@ -232,7 +234,13 @@ func (s *Service) SplitScript(c *gin.Context, projectUUID string) {
 	httpx.OK(c, gin.H{"project_id": p.ProjectUUID, "status": StatusScriptSplitting})
 }
 
-// GenerateVideos 3.3.7a 批量生成 beat 下全部镜头视频（VIDEO_SEGMENT_GEN + Outbox）。
+// 计费定价（对齐 LuxReal 免费/收费分界：拆分免费、资产图扣点、视频按秒计费、导出按时长计费）。
+const (
+	VideoPointsPerSec  = 10 // 视频生成 P720：10 点/秒（Seedance 成本 ~5 点/秒，定价留平台利润）
+	ExportPointsPerSec = 1  // 导出合成：1 点/秒（FFmpeg 成本低）
+)
+
+// GenerateVideos 3.3.7a 批量生成 beat 下全部镜头视频（VIDEO_SEGMENT_GEN + Outbox + 按秒计费冻结）。
 func (s *Service) GenerateVideos(c *gin.Context, beatUUID string) {
 	uid := userID(c)
 	if uid == 0 {
@@ -263,12 +271,48 @@ func (s *Service) GenerateVideos(c *gin.Context, beatUUID string) {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "查询空间失败")
 		return
 	}
-	created, err := s.repo.CreateVideoTasks(c.Request.Context(), projectID, spaceID, uid, beatID, shots)
+	taskIDs, err := s.repo.CreateVideoTasks(c.Request.Context(), projectID, spaceID, uid, beatID, shots)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建视频任务失败")
 		return
 	}
-	httpx.OK(c, gin.H{"created": created, "total": len(shots)})
+	// 计费冻结：按镜头时长 × 10 点/秒（未成功镜头；不足则任务标记失败并回退 shot 状态）
+	totalCost, frozenCount := 0, 0
+	if s.billing != nil {
+		for i, tID := range taskIDs {
+			dur := 0
+			// 找到对应 shot 的时长（按顺序过滤 SUCCESS 后对齐）
+			idx := 0
+			for _, sh := range shots {
+				if sh.VideoStatus == "SUCCESS" {
+					continue
+				}
+				if idx == i {
+					dur = sh.DurationSec
+					break
+				}
+				idx++
+			}
+			cost := dur * VideoPointsPerSec
+			if cost <= 0 {
+				continue
+			}
+			if err := s.billing.Freeze(c.Request.Context(), "USER", uid, tID, cost, &billing.TxnMeta{
+				SpaceID: spaceID, OperatorUserID: uid, ProjectID: &projectID, Description: "视频生成",
+			}); err != nil {
+				// 余额不足等：任务标记失败，shot 状态回退
+				_ = s.repo.MarkTaskFailed(c.Request.Context(), tID, "积分不足或冻结失败："+err.Error())
+				continue
+			}
+			totalCost += cost
+			frozenCount++
+		}
+		if frozenCount == 0 && len(taskIDs) > 0 {
+			httpx.Fail(c, http.StatusBadRequest, httpx.CodeInsufficientPoints, "积分不足，无法生成视频")
+			return
+		}
+	}
+	httpx.OK(c, gin.H{"created": len(taskIDs), "total": len(shots), "frozen_count": frozenCount, "total_cost": totalCost})
 }
 
 // ListBeatShots 单镜头视频列表（Step3 轮询）。

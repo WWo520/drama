@@ -26,10 +26,18 @@ func NewHandler(svc *Service, assetSvc *AssetService, exportSvc *ExportService, 
 	return &Handler{svc: svc, assetSvc: assetSvc, exportSvc: exportSvc, canvasSvc: canvasSvc, memberSvc: memberSvc, contentSvc: contentSvc, marketSvc: marketSvc, adminSvc: adminSvc, openSvc: openSvc}
 }
 
-// RegisterRoutes 注册 /projects /episodes /beats 路由（JWT + LoadUserID 由 router 挂载）。
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtMW, loadUserMW gin.HandlerFunc) {
-	auth := []gin.HandlerFunc{jwtMW, loadUserMW}
-	projects := rg.Group("/projects", auth...)
+// ExtraServices 补齐服务集（S5 接口覆盖率）。
+type ExtraServices struct {
+	Storyboard  *StoryboardService
+	AssetDetail *AssetDetailService
+	Biz         *BizService
+	AdminExtra  *AdminExtraService
+	CanvasExtra *CanvasExtraService
+}
+
+// RegisterRoutes 注册 /projects /episodes /beats 路由（JWT + LoadUserID 由 router 组挂载；adminMW/auditMW 为 RBAC 角色中间件）。
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, adminMW, auditMW gin.HandlerFunc, extra *ExtraServices) {
+	projects := rg.Group("/projects")
 	{
 		projects.GET("", h.list)
 		projects.POST("", h.create)
@@ -41,54 +49,54 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtMW, loadUserMW gin.Hand
 		projects.POST("/:project_id/split-script", h.splitScript)
 		projects.GET("/:project_id/episodes", h.listEpisodes)
 	}
-	episodes := rg.Group("/episodes", auth...)
+	episodes := rg.Group("/episodes")
 	{
 		episodes.GET("/:episode_id/beats", h.listBeats)
 		episodes.GET("/:episode_id/characters", h.listCharacters)
 	}
-	uploads := rg.Group("/uploads", auth...)
+	uploads := rg.Group("/uploads")
 	{
 		uploads.POST("/presign", h.presign)
 		uploads.POST("/complete", h.complete)
 	}
-	assets := rg.Group("/assets", auth...)
+	assets := rg.Group("/assets")
 	{
 		assets.POST("/batch-generate", h.batchGenerate)
 	}
 	// 9.3.1 生成消耗预览（S2-B06 跨集复用豁免）
-	preview := rg.Group("/points", auth...)
+	preview := rg.Group("/points")
 	{
 		preview.POST("/preview", h.previewPoints)
 	}
 	// 多变体（S2-B04）：3.2.6 创建变体 / 3.2.7 变体列表
-	chars := rg.Group("/characters", auth...)
+	chars := rg.Group("/characters")
 	{
 		chars.GET("/:character_id/variants", h.listVariants)
 		chars.POST("/:character_id/variants", h.createVariant)
 	}
 	// 版本回滚（S2-B05）
-	nus := rg.Group("/narrative-units", auth...)
+	nus := rg.Group("/narrative-units")
 	{
 		nus.GET("/:nu_id/versions", h.listVersions)
 		nus.POST("/:nu_id/rollback/:version_id", h.rollbackVersion)
 	}
-	exportGroup := rg.Group("/projects", auth...)
+	exportGroup := rg.Group("/projects")
 	{
 		exportGroup.POST("/:project_id/export", h.triggerExport)
 	}
-	exportList := rg.Group("/exports", auth...)
+	exportList := rg.Group("/exports")
 	{
 		exportList.GET("", h.listExports)
 		exportList.GET("/:export_id", h.exportDetail)
 	}
 	// Step3 视频（S1-F05）：3.3.7a 批量生成镜头块视频
-	beats := rg.Group("/beats", auth...)
+	beats := rg.Group("/beats")
 	{
 		beats.POST("/:beat_id/generate-videos", h.generateVideos)
 		beats.GET("/:beat_id/shots", h.listBeatShots)
 	}
 	// 自由画布（S2-B07）：TAG 4.1~4.2 + 4.4 执行
-	canvases := rg.Group("/canvases", auth...)
+	canvases := rg.Group("/canvases")
 	{
 		canvases.POST("", h.createCanvas)
 		canvases.GET("/:canvas_id", h.loadCanvas)
@@ -99,16 +107,16 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtMW, loadUserMW gin.Hand
 		canvases.POST("/:canvas_id/snapshots/:snapshot_id/restore", h.restoreSnapshot) // 恢复
 	}
 	// 月卡会员（S2-B09）：9.9 购买/查询 + 9.10 取消 + 4.5 SSE（S2-B10）
-	mems := rg.Group("/memberships", auth...)
+	mems := rg.Group("/memberships")
 	{
 		mems.POST("/purchase", h.membershipPurchase)
 		mems.GET("", h.membershipDetail)
 		mems.POST("/cancel", h.membershipCancel)
+		mems.POST("/orders/:order_no/activate", h.membershipActivate) // 开发期激活（鉴权+归属校验）
 	}
-	rg.POST("/memberships/orders/:order_no/activate", h.membershipActivate)
 	rg.GET("/ai/dialog/stream", h.aiDialogSSE)
 	// 内容域（S3-B01~B03）：信息流/作品/互动/审核
-	feed := rg.Group("/works", auth...)
+	feed := rg.Group("/works")
 	{
 		feed.GET("", h.contentFeed)
 		feed.POST("", h.contentSubmit)
@@ -120,27 +128,31 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtMW, loadUserMW gin.Hand
 		feed.POST("/:work_id/report", h.contentReport)
 	}
 	// 关注（S3-B02 补齐）
-	users := rg.Group("/users", auth...)
+	users := rg.Group("/users")
 	{
 		users.POST("/:user_uuid/follow", h.contentFollow)
 		users.DELETE("/:user_uuid/follow", h.contentUnfollow)
 	}
-	rg.GET("/audit/works", h.contentAuditList) // 11.15 待审列表（审核员）
-	rg.POST("/audit/works/:work_id/review", h.contentReview)      // 11.16 审核
-	rg.POST("/audit/works/:work_id/revoke", h.contentRevoke)      // 11.17 下架
+	// 审核（11.15~11.17）：SUPER_ADMIN/AUDITOR 角色（RBAC）
+	audit := rg.Group("/audit", auditMW)
+	{
+		audit.GET("/works", h.contentAuditList)
+		audit.POST("/works/:work_id/review", h.contentReview)
+		audit.POST("/works/:work_id/revoke", h.contentRevoke)
+	}
 	// 生态（S3-B04~B06）：模板/风格/任务
-	tpls := rg.Group("/templates", auth...)
+	tpls := rg.Group("/templates")
 	{
 		tpls.GET("", h.marketTemplates)
 		tpls.POST("", h.marketCreateTemplate)
 		tpls.POST("/:template_id/apply", h.marketApplyTemplate)
 	}
-	styles := rg.Group("/style-library", auth...)
+	styles := rg.Group("/style-library")
 	{
 		styles.GET("", h.marketStyles)
 	}
 	rg.POST("/projects/:project_id/apply-style", h.marketApplyStyle)
-	tasks := rg.Group("/tasks", auth...)
+	tasks := rg.Group("/tasks")
 	{
 		tasks.GET("", h.marketOrders)
 		tasks.POST("", h.marketCreateOrder)
@@ -148,48 +160,183 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, jwtMW, loadUserMW gin.Hand
 		tasks.POST("/:order_id/accept", h.marketAcceptIntent)
 		tasks.POST("/:order_id/status", h.marketUpdateOrderStatus)
 	}
-	// 管理后台（S3-B07/B08）：TAG 11
-	adm := rg.Group("/admin")
+	// 管理后台（S3-B07/B08）：TAG 11（RBAC：SUPER_ADMIN）
+	adm := rg.Group("/admin", adminMW)
 	{
-		adm.GET("/dashboard", h.adminDashboard)                       // 11.0 指标（公开 mock）
-		admAuth := adm.Group("", auth...)
-		{
-			admAuth.GET("/users", h.adminUsers)                       // 11.2 用户列表
-			admAuth.PATCH("/users/:user_uuid/ban", h.adminBanUser)     // 11.5 封禁
-			admAuth.GET("/works", h.adminWorks)                        // 内容列表
-			admAuth.DELETE("/works/:work_id", h.adminDeleteWork)       // 11.73 强制删除
-			admAuth.GET("/reports", h.adminReports)                    // 11.74 举报列表
-			admAuth.GET("/orders", h.adminOrders)                    // P2 订单管理
-			admAuth.GET("/packages", h.adminPackages)                // P2 套餐管理
-			admAuth.GET("/models", h.adminModels)                    // P2 模型管理
-			admAuth.GET("/audit-logs", h.adminAuditLogs)             // P2 审计日志
-		admAuth.GET("/roles", h.adminRoles)                     // P2 角色列表
-		admAuth.GET("/platform-config", h.adminPlatformConfig)   // P2 平台配置
-		admAuth.PUT("/platform-config", h.adminUpdatePlatformConfig) // P2 更新配置
-		admAuth.PUT("/packages", h.adminUpdatePackage)           // P2 更新套餐
-		admAuth.PUT("/models", h.adminUpdateModel)               // P2 更新模型
-		admAuth.GET("/announcements", h.adminAnnouncements)      // P2 公告列表
-		admAuth.GET("/banners", h.adminBanners)                  // P2 Banner 列表
-		admAuth.GET("/hints", h.adminHints)                      // P2 提示列表
-	}
+		adm.GET("/dashboard", h.adminDashboard)                       // 11.0 指标
+		adm.GET("/users", h.adminUsers)                       // 11.2 用户列表
+		adm.PATCH("/users/:user_uuid/ban", h.adminBanUser)     // 11.5 封禁
+		adm.GET("/works", h.adminWorks)                        // 内容列表
+		adm.DELETE("/works/:work_id", h.adminDeleteWork)       // 11.73 强制删除
+		adm.GET("/reports", h.adminReports)                    // 11.74 举报列表
+		adm.GET("/orders", h.adminOrders)                    // P2 订单管理
+		adm.GET("/packages", h.adminPackages)                // P2 套餐管理
+		adm.GET("/models", h.adminModels)                    // P2 模型管理
+		adm.GET("/audit-logs", h.adminAuditLogs)             // P2 审计日志
+		adm.GET("/roles", h.adminRoles)                     // P2 角色列表
+		adm.GET("/platform-config", h.adminPlatformConfig)   // P2 平台配置
+		adm.PUT("/platform-config", h.adminUpdatePlatformConfig) // P2 更新配置
+		adm.PUT("/packages", h.adminUpdatePackage)           // P2 更新套餐
+		adm.PUT("/models", h.adminUpdateModel)               // P2 更新模型
+		adm.GET("/announcements", h.adminAnnouncements)      // P2 公告列表
+		adm.GET("/banners", h.adminBanners)                  // P2 Banner 列表
+		adm.GET("/hints", h.adminHints)                      // P2 提示列表
 	}
 	// 开发者（S3-B09）：API Key + Webhook
-	dev := rg.Group("/api-keys", auth...)
+	dev := rg.Group("/api-keys")
 	{
 		dev.GET("", h.openListKeys)
 		dev.POST("", h.openCreateKey)
 		dev.POST("/:key_prefix/revoke", h.openRevokeKey)
 	}
-	wh := rg.Group("/webhooks", auth...)
+	wh := rg.Group("/webhooks")
 	{
 		wh.POST("", h.openRegisterWebhook)
 	}
 	rg.POST("/webhooks/verify", h.openVerifyWebhook)
 	// 个人偏好
-	me := rg.Group("/me", auth...)
+	me := rg.Group("/me")
 	{
 		me.GET("/preferences", h.myPreferences)
 		me.PUT("/preferences", h.updateMyPreferences)
+	}
+	if extra == nil {
+		return
+	}
+	h.registerExtraRoutes(rg, extra, adminMW)
+}
+
+// registerExtraRoutes S5 补齐路由（89 个 coverage 端点）。
+// 注意：参数名必须与同前缀已有路由一致（gin 同层级通配符同名约束）。
+func (h *Handler) registerExtraRoutes(rg *gin.RouterGroup, extra *ExtraServices, adminMW gin.HandlerFunc) {
+	// ---- 叙事单元/镜头块/镜头/分镜 ----
+	beats := rg.Group("/beats")
+	{
+		beats.GET("/:beat_id", func(c *gin.Context) { extra.Storyboard.BeatDetail(c, c.Param("beat_id")) })
+		beats.POST("/:beat_id/compose-video", func(c *gin.Context) { extra.Storyboard.ComposeBeatVideo(c, c.Param("beat_id")) })
+		beats.POST("/:beat_id/replan", func(c *gin.Context) { extra.Storyboard.ReplanBeat(c, c.Param("beat_id")) })
+		beats.GET("/:beat_id/shot-groups", func(c *gin.Context) { extra.Storyboard.BeatShotGroups(c, c.Param("beat_id")) })
+		beats.GET("/:beat_id/storyboards", func(c *gin.Context) { extra.Storyboard.BeatStoryboards(c, c.Param("beat_id")) })
+		beats.POST("/:beat_id/storyboards/generate", func(c *gin.Context) { extra.Storyboard.GenerateStoryboards(c, c.Param("beat_id")) })
+	}
+	shotGroups := rg.Group("/shot-groups")
+	{
+		shotGroups.POST("/:shot_group_id/concat-video", func(c *gin.Context) { extra.Storyboard.ConcatShotGroupVideo(c, c.Param("shot_group_id")) })
+		shotGroups.POST("/:shot_group_id/generate-video", func(c *gin.Context) { extra.Storyboard.GenerateShotGroupVideo(c, c.Param("shot_group_id")) })
+	}
+	shots := rg.Group("/shots")
+	{
+		shots.GET("/:shot_id", func(c *gin.Context) { extra.Storyboard.ShotDetail(c, c.Param("shot_id")) })
+		shots.POST("/batch", extra.Storyboard.ShotsBatch)
+	}
+	storyboards := rg.Group("/storyboards")
+	{
+		storyboards.GET("/:storyboard_id", func(c *gin.Context) { extra.Storyboard.StoryboardDetail(c, c.Param("storyboard_id")) })
+		storyboards.POST("/:storyboard_id/image/edit", func(c *gin.Context) { extra.Storyboard.StoryboardImageEdit(c, c.Param("storyboard_id")) })
+		storyboards.POST("/:storyboard_id/video", func(c *gin.Context) { extra.Storyboard.StoryboardVideo(c, c.Param("storyboard_id")) })
+		storyboards.POST("/batch-generate-image", extra.Storyboard.BatchGenerateStoryboardImage)
+	}
+	tasks := rg.Group("/tasks")
+	{
+		tasks.GET("/:order_id", func(c *gin.Context) { extra.Storyboard.TaskDetail(c, c.Param("order_id")) })
+		tasks.POST("/:order_id/retry", func(c *gin.Context) { extra.Storyboard.TaskRetry(c, c.Param("order_id")) })
+	}
+	videos := rg.Group("/videos")
+	{
+		videos.GET("/:video_id/track-timeline", func(c *gin.Context) { extra.Storyboard.VideoTrackTimeline(c, c.Param("video_id")) })
+		videos.POST("/:video_id/tts", func(c *gin.Context) { extra.Storyboard.VideoTTS(c, c.Param("video_id")) })
+	}
+	// ---- 角色/场景/道具/资产/剧集 ----
+	rg.PATCH("/characters/:character_id", func(c *gin.Context) { extra.AssetDetail.UpdateCharacter(c, c.Param("character_id")) })
+	rg.GET("/character-variants/:variant_id", func(c *gin.Context) { extra.AssetDetail.VariantDetail(c, c.Param("variant_id")) })
+	rg.PATCH("/scenes/:scene_id", func(c *gin.Context) { extra.AssetDetail.UpdateScene(c, c.Param("scene_id")) })
+	rg.PATCH("/props/:prop_id", func(c *gin.Context) { extra.AssetDetail.UpdateProp(c, c.Param("prop_id")) })
+	epGroup := rg.Group("/episodes")
+	{
+		epGroup.GET("/:episode_id", func(c *gin.Context) { extra.AssetDetail.EpisodeDetail(c, c.Param("episode_id")) })
+		epGroup.GET("/:episode_id/assets/overview", func(c *gin.Context) { extra.AssetDetail.EpisodeAssetsOverview(c, c.Param("episode_id")) })
+		epGroup.GET("/:episode_id/scenes", func(c *gin.Context) { extra.AssetDetail.EpisodeScenes(c, c.Param("episode_id")) })
+		epGroup.GET("/:episode_id/props", func(c *gin.Context) { extra.AssetDetail.EpisodeProps(c, c.Param("episode_id")) })
+	}
+	assetGroup := rg.Group("/assets")
+	{
+		assetGroup.GET("/:asset_id/derivatives", func(c *gin.Context) { extra.AssetDetail.AssetDerivatives(c, c.Param("asset_id")) })
+		assetGroup.POST("/:asset_id/derive", func(c *gin.Context) { extra.AssetDetail.AssetDerive(c, c.Param("asset_id")) })
+		assetGroup.POST("/:asset_id/preview-points", func(c *gin.Context) { extra.AssetDetail.AssetPreviewPoints(c, c.Param("asset_id")) })
+	}
+	// ---- 项目导出历史 / 回收站 ----
+	rg.GET("/projects/:project_id/exports", func(c *gin.Context) { h.exportSvc.List(c) })
+	recycle := rg.Group("/recycle-bin")
+	{
+		recycle.POST("/:work_id/restore", func(c *gin.Context) { h.contentSvc.RestoreWork(c, c.Param("work_id")) })
+		recycle.DELETE("/:work_id", func(c *gin.Context) { h.contentSvc.DeleteWorkForever(c, c.Param("work_id")) })
+	}
+	// ---- 内容域 ----
+	// 公开端点（/feed /works/public /works/:work_id/public）由 router 层挂 v1Pub（无需登录）
+	rg.POST("/works/:work_id/publish", func(c *gin.Context) { h.contentSvc.PublishWork(c, c.Param("work_id")) })
+	rg.PUT("/comments/:comment_id", func(c *gin.Context) { h.contentSvc.EditComment(c, c.Param("comment_id")) })
+	// ---- 任务接单 ----
+	taskOrders := rg.Group("/task-orders")
+	{
+		taskOrders.GET("", h.marketSvc.TaskOrderSquare)
+		taskOrders.GET("/:task_order_id", func(c *gin.Context) { h.marketSvc.TaskOrderDetail(c, c.Param("task_order_id")) })
+		taskOrders.POST("/:task_order_id/close", func(c *gin.Context) { h.marketSvc.CloseTaskOrder(c, c.Param("task_order_id")) })
+		taskOrders.GET("/:task_order_id/intents", func(c *gin.Context) { h.marketSvc.TaskOrderIntents(c, c.Param("task_order_id")) })
+	}
+	rg.GET("/me/task-intents", h.marketSvc.MyTaskIntents)
+	// ---- 商业域 ----
+	// 公开端点（/packages /models /point-packages）由 router 层挂 v1Pub（无需登录）
+	rg.GET("/membership", extra.Biz.MembershipDetail)
+	rg.POST("/membership/cancel", extra.Biz.MembershipCancel)
+	// ---- 画布域 ----
+	canvasGroup := rg.Group("/canvas")
+	{
+		canvasGroup.GET("/:project_id", func(c *gin.Context) { extra.CanvasExtra.CanvasByProject(c, c.Param("project_id")) })
+		canvasGroup.POST("/:project_id/nodes-validate", func(c *gin.Context) { extra.CanvasExtra.CanvasNodesValidate(c, c.Param("project_id")) })
+		canvasGroup.POST("/:project_id/workflow-execute", func(c *gin.Context) { extra.CanvasExtra.CanvasWorkflowExecute(c, c.Param("project_id")) })
+		canvasGroup.GET("/console/episodes", extra.CanvasExtra.ConsoleEpisodes)
+	}
+	// ---- 内部回调（无鉴权，在 router 层公开组注册） ----
+	// ---- Admin 补齐 ----
+	admX := rg.Group("/admin", adminMW)
+	{
+		admX.GET("/activities", extra.AdminExtra.Activities)
+		admX.GET("/agent-memory", extra.AdminExtra.AgentMemory)
+		admX.GET("/agent-skills", extra.AdminExtra.AgentSkills)
+		admX.GET("/auth/permissions", extra.AdminExtra.AuthPermissions)
+		admX.GET("/categories", extra.AdminExtra.Categories)
+		admX.GET("/comments", extra.AdminExtra.Comments)
+		admX.GET("/courses", extra.AdminExtra.Courses)
+		admX.GET("/dashboard/summary", extra.AdminExtra.DashboardSummary)
+		admX.GET("/directive-skills", extra.AdminExtra.DirectiveSkills)
+		admX.GET("/languages", extra.AdminExtra.Languages)
+		admX.GET("/model-keys", extra.AdminExtra.ModelKeys)
+		admX.GET("/platform/config", extra.AdminExtra.PlatformConfig)
+		admX.GET("/point-packages", extra.AdminExtra.PointPackages)
+		admX.GET("/providers", extra.AdminExtra.ModelProvidersList)
+		admX.POST("/providers", extra.AdminExtra.ModelProviderCreate)
+		admX.PUT("/providers/:provider_id", func(c *gin.Context) { extra.AdminExtra.ModelProviderUpdate(c, c.Param("provider_id")) })
+		admX.GET("/model-list", extra.AdminExtra.ModelListAdmin) // 11.39 模型列表（含厂商）
+		admX.POST("/model-create", extra.AdminExtra.ModelCreate) // 新建模型
+		admX.GET("/model-key-list", extra.AdminExtra.ModelKeyList) // 11.43 密钥列表（隐藏密文）
+		admX.POST("/model-key-create", extra.AdminExtra.ModelKeyCreate)
+		admX.PUT("/model-key-update/:key_id", func(c *gin.Context) { extra.AdminExtra.ModelKeyUpdate(c, c.Param("key_id")) })
+		admX.POST("/model-key-revoke/:key_id", func(c *gin.Context) { extra.AdminExtra.ModelKeyRevoke(c, c.Param("key_id")) })
+		admX.GET("/queues", extra.AdminExtra.Queues)
+		admX.GET("/rate-limits", extra.AdminExtra.RateLimits)
+		admX.GET("/spaces", extra.AdminExtra.Spaces)
+		admX.PUT("/spaces/:space_id/status", func(c *gin.Context) { extra.AdminExtra.SpaceStatus(c, c.Param("space_id")) })
+		admX.GET("/statistics", extra.AdminExtra.Statistics)
+		admX.GET("/style-library", extra.AdminExtra.StyleLibrary)
+		admX.GET("/themes", extra.AdminExtra.Themes)
+		admX.GET("/think-levels", extra.AdminExtra.ThinkLevels)
+		admX.GET("/users/:user_uuid", func(c *gin.Context) { extra.AdminExtra.UserDetail(c, c.Param("user_uuid")) })
+		admX.PUT("/users/:user_uuid/membership", func(c *gin.Context) { extra.AdminExtra.UserMembership(c, c.Param("user_uuid")) })
+		admX.PUT("/users/:user_uuid/points", func(c *gin.Context) { extra.AdminExtra.UserPoints(c, c.Param("user_uuid")) })
+		admX.PUT("/users/:user_uuid/roles", func(c *gin.Context) { extra.AdminExtra.UserRoles(c, c.Param("user_uuid")) })
+		admX.PUT("/users/:user_uuid/status", func(c *gin.Context) { extra.AdminExtra.UserStatus(c, c.Param("user_uuid")) })
+		admX.POST("/works/:work_id/audit", func(c *gin.Context) { extra.AdminExtra.WorkAudit(c, c.Param("work_id")) })
+		admX.PUT("/works/:work_id/unlist", func(c *gin.Context) { extra.AdminExtra.WorkUnlist(c, c.Param("work_id")) })
 	}
 }
 
@@ -341,10 +488,22 @@ func (h *Handler) createCanvas(c *gin.Context) {
 		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
 		return
 	}
-	spaceID, _, err := h.svc.repo.DefaultSpaceID(c.Request.Context(), uid)
-	if err != nil {
-		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取空间失败")
-		return
+	spaceID := int64(0)
+	if req.SpaceID != "" {
+		// 指定空间：校验成员身份
+		id, err := h.svc.repo.ResolveSpace(c.Request.Context(), req.SpaceID, uid)
+		if err != nil {
+			httpx.Fail(c, http.StatusForbidden, httpx.CodeForbidden, "空间不存在或无权限")
+			return
+		}
+		spaceID = id
+	} else {
+		id, _, err := h.svc.repo.DefaultSpaceID(c.Request.Context(), uid)
+		if err != nil {
+			httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取空间失败")
+			return
+		}
+		spaceID = id
 	}
 	uuid, err := h.canvasSvc.store.CreateCanvas(c.Request.Context(), spaceID, 0, uid, req.Name)
 	if err != nil {

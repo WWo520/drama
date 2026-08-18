@@ -29,9 +29,8 @@ const (
 	CodeInternal          = 99999 // 未知内部错误
 )
 
-// BadRequest 参数校验失败（沿用 10001 之外的通用约定：此处用 90000 段保留，实际按 05 字典无通用参数错误码，
-// 参数错误统一走 10001 语义有歧义，故引入 99999 变体不扩散——直接使用 10001 的 message 描述参数问题）。
-const CodeBadRequest = 10001
+// CodeBadRequest 参数错误专用码（90007，与未登录 10001 分离，避免语义冲突；05 字典 90001~90006 已占用）。
+const CodeBadRequest = 90007
 
 // Response ApiResponse<T> 统一响应体（05 B2 章字段完全对齐）。
 type Response struct {
@@ -48,8 +47,11 @@ func OK(c *gin.Context, data any) {
 }
 
 // maskSensitive 递归掩码敏感字段：email → s***@test.com；phone/mobile → 138****1234。
-// 用反射处理任意 map/slice 类型（gin.H、[]map[string]any 等）。
+// 用反射处理任意 map/slice/struct 类型（gin.H、[]map[string]any、DTO struct 等）。
 func maskSensitive(v any) any {
+	if v == nil {
+		return nil
+	}
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {
 	case reflect.Map:
@@ -78,6 +80,45 @@ func maskSensitive(v any) any {
 			out[i] = maskSensitive(rv.Index(i).Interface())
 		}
 		return out
+	case reflect.Ptr:
+		if rv.IsNil() {
+			return v
+		}
+		// 保持指针类型：新指针指向脱敏后的元素（避免 struct 外层 Set 类型不匹配丢失字段）
+		masked := maskSensitive(rv.Elem().Interface())
+		mv := reflect.ValueOf(masked)
+		if mv.IsValid() && mv.Type().AssignableTo(rv.Elem().Type()) {
+			np := reflect.New(rv.Elem().Type())
+			np.Elem().Set(mv)
+			return np.Interface()
+		}
+		return v
+	case reflect.Struct:
+		// 结构体：按字段名脱敏（支持指针字段再递归）
+		out := reflect.New(rv.Type()).Elem()
+		for i := 0; i < rv.NumField(); i++ {
+			f := rv.Field(i)
+			name := rv.Type().Field(i).Name
+			if !f.CanInterface() {
+				continue
+			}
+			fv := f.Interface()
+			if s, ok := fv.(string); ok {
+				switch name {
+				case "Email":
+					out.Field(i).SetString(maskEmail(s))
+					continue
+				case "Phone", "Mobile":
+					out.Field(i).SetString(maskPhone(s))
+					continue
+				}
+			}
+			masked := maskSensitive(fv)
+			if mv := reflect.ValueOf(masked); mv.IsValid() && mv.Type().AssignableTo(f.Type()) {
+				out.Field(i).Set(mv)
+			}
+		}
+		return out.Interface()
 	default:
 		return v
 	}
@@ -94,7 +135,8 @@ func maskEmail(s string) string {
 	if at <= 1 {
 		return "***" + s
 	}
-	return s[:1] + "***" + s[at-1:]
+	// 首字母 + *** + @域名（规范：s***@test.com）
+	return s[:1] + "***" + s[at:]
 }
 
 func maskPhone(s string) string {

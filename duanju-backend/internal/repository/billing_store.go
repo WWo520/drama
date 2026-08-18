@@ -163,11 +163,11 @@ func (s *BillingStore) Unfreeze(ctx context.Context, a *billing.Account, amount 
 
 // GetPoints 用户积分账户（9.3）。
 func (s *BillingStore) GetPoints(ctx context.Context, userID int64) (*billing.Account, error) {
-	return s.GetAccountForUpdateNoLock(ctx, "USER", userID)
+	return s.GetAccount(ctx, "USER", userID)
 }
 
-// GetAccountForUpdateNoLock 无锁读取（查询场景）。
-func (s *BillingStore) GetAccountForUpdateNoLock(ctx context.Context, ownerType string, ownerID int64) (*billing.Account, error) {
+// GetAccount 无锁读取账户（只读场景，避免行锁阻塞扣费）。
+func (s *BillingStore) GetAccount(ctx context.Context, ownerType string, ownerID int64) (*billing.Account, error) {
 	var a billing.Account
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, owner_type::text, owner_id, current_balance, frozen_balance

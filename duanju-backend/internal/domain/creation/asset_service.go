@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/duanju/backend/internal/engine/asset"
+	"github.com/duanju/backend/internal/engine/billing"
 	"github.com/duanju/backend/internal/middleware"
 	"github.com/duanju/backend/internal/pkg/httpx"
 )
@@ -36,13 +37,14 @@ type AssetOps interface {
 
 // AssetService 资产相关服务。
 type AssetService struct {
-	repo  *Repo
-	asset *asset.Client
-	ops   AssetOps
+	repo    *Repo
+	asset   *asset.Client
+	ops     AssetOps
+	billing *billing.Engine // 计费引擎（批量生成冻结；nil 跳过）
 }
 
-func NewAssetService(repo *Repo, ac *asset.Client, ops AssetOps) *AssetService {
-	return &AssetService{repo: repo, asset: ac, ops: ops}
+func NewAssetService(repo *Repo, ac *asset.Client, ops AssetOps, b *billing.Engine) *AssetService {
+	return &AssetService{repo: repo, asset: ac, ops: ops, billing: b}
 }
 
 // UploadPresignReq 预签名请求（05 ReqUploadPresign）。
@@ -267,12 +269,13 @@ func (s *AssetService) PreviewPoints(c *gin.Context) {
 		return
 	}
 	// 豁免判定（S2-B06）：asset_usage_logs 同项目已生成过 → 免扣费
-	totalCost, exemptCount := 0, 0
+	totalCost, exemptCount, exemptAmount := 0, 0, 0
 	for _, item := range req.Items {
 		cost := defaultCost(item.Kind)
 		exempt, _ := s.ops.IsAssetUsedBefore(c.Request.Context(), proj.ID, item.Kind, item.TargetID)
 		if exempt {
 			exemptCount++
+			exemptAmount += cost // 按实际 kind 单价计算豁免金额（修复：不再用 CHARACTER_VARIANT 单价近似）
 		} else {
 			totalCost += cost
 		}
@@ -281,7 +284,7 @@ func (s *AssetService) PreviewPoints(c *gin.Context) {
 		"total_items":   len(req.Items),
 		"total_cost":    totalCost,
 		"exempt_count":  exemptCount,
-		"exempt_amount": exemptCount * defaultCost("CHARACTER_VARIANT"), // 公示豁免金额（03 E.6.4 透明化）
+		"exempt_amount": exemptAmount, // 公示豁免金额（按实际 kind 单价）
 		"actual_cost":   totalCost,
 		"billing_scope": "USER", // TEAM 空间时为 TEAM_SPACE（B03 已支持 SPACE 账户）
 	})
@@ -322,21 +325,38 @@ func (s *AssetService) BatchGenerate(c *gin.Context, req *BatchGenerateReq) {
 		return
 	}
 	created := 0
+	frozen := 0
 	for _, item := range req.Items {
 		// 跨集复用豁免：同项目已用过的资产本次 cost=0（03 E.6.4 不重复扣费）
 		cost := defaultCost(item.Kind)
 		if reused, _ := s.ops.IsAssetUsedBefore(c.Request.Context(), projectID, item.Kind, item.TargetID); reused {
 			cost = 0
 		}
-		if _, err := s.ops.CreateAssetTask(c.Request.Context(), spaceID, uid, projectID, epID,
-			item.Kind, item.TargetID, cost); err != nil {
+		taskID, err := s.ops.CreateAssetTask(c.Request.Context(), spaceID, uid, projectID, epID,
+			item.Kind, item.TargetID, cost)
+		if err != nil {
 			fmt.Printf("[asset] CreateAssetTask kind=%s target=%d: %v\n", item.Kind, item.TargetID, err)
 			continue
+		}
+		// 计费冻结（cost>0 时；不足则任务标记失败）
+		if cost > 0 && s.billing != nil {
+			if ferr := s.billing.Freeze(c.Request.Context(), "USER", uid, taskID, cost, &billing.TxnMeta{
+				SpaceID: spaceID, OperatorUserID: uid, ProjectID: &projectID, Description: "资产生成",
+			}); ferr != nil {
+				_ = s.repo.MarkTaskFailed(c.Request.Context(), taskID, "积分不足或冻结失败："+ferr.Error())
+				continue
+			}
+			frozen++
 		}
 		created++
 	}
 	if created == 0 {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "批量生成任务创建失败")
+		return
+	}
+	if s.billing != nil && frozen == 0 && created > 0 {
+		// 全部因积分不足失败
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeInsufficientPoints, "积分不足，无法生成资产")
 		return
 	}
 	httpx.OK(c, gin.H{"created": created, "total": len(req.Items)})

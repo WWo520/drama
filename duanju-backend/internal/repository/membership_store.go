@@ -65,7 +65,7 @@ func (s *MembershipStore) Purchase(ctx context.Context, userID int64, planCode, 
 	return orderNo, nil
 }
 
-func (s *MembershipStore) Activate(ctx context.Context, orderNo string) error {
+func (s *MembershipStore) Activate(ctx context.Context, orderNo string, requesterID int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -80,6 +80,10 @@ func (s *MembershipStore) Activate(ctx context.Context, orderNo string) error {
 		FROM orders WHERE order_no=$1::text FOR UPDATE`, orderNo).
 		Scan(&oid, &userID, &planCode, &days, &status); err != nil {
 		return err
+	}
+	// 归属校验（P0 修复：仅订单所有者可激活会员）
+	if userID != requesterID {
+		return errors.New("无权操作该订单")
 	}
 	if status == "PAID" {
 		return nil

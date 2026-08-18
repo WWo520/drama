@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作台 - Empty Broken 管理后台</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          'bg-deep': '#0B0B1A',
+          'bg-card': '#151525',
+          'bg-card-light': '#1A1A2E',
+          'border-dark': '#2A2A3E',
+          'amber-gold': '#fbbf24',
+          'amber-dim': '#d97706',
+          'text-primary': '#ffffff',
+          'text-secondary': '#9ca3af',
+          'text-muted': '#6b7280',
+        },
+        fontFamily: {
+          sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        },
+      }
+    }
+  }
+</script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    background: #0B0B1A;
+    color: #fff;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #151525; }
+  ::-webkit-scrollbar-thumb { background: #2A2A3E; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3a4e; }
+
+  /* Sidebar menu item active */
+  .menu-item.active {
+    background: linear-gradient(90deg, rgba(251, 191, 36, 0.15) 0%, rgba(251, 191, 36, 0.05) 100%);
+    color: #fbbf24;
+    border-left: 3px solid #fbbf24;
+  }
+  .menu-item.active svg { color: #fbbf24; }
+
+  .menu-item:hover {
+    background: rgba(255,255,255,0.05);
+  }
+
+  /* Card hover effect */
+  .data-card {
+    transition: all 0.25s ease;
+  }
+  .data-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3), 0 0 0 1px rgba(251,191,36,0.1);
+  }
+
+  /* Glow effect for gold text */
+  .glow-gold {
+    text-shadow: 0 0 20px rgba(251, 191, 36, 0.3);
+  }
+
+  /* Progress bar animation */
+  @keyframes progressPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+  .progress-bar-running {
+    animation: progressPulse 2s ease-in-out infinite;
+  }
+
+  /* Chart grid lines */
+  .chart-grid line {
+    stroke: #2A2A3E;
+    stroke-width: 1;
+  }
+
+  /* Activity log item hover */
+  .log-item:hover {
+    background: rgba(255,255,255,0.02);
+  }
+
+  /* Rank badge colors */
+  .rank-1 { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #0B0B1A; }
+  .rank-2 { background: linear-gradient(135deg, #d1d5db, #9ca3af); color: #0B0B1A; }
+  .rank-3 { background: linear-gradient(135deg, #d97706, #92400e); color: #fff; }
+
+  /* Notification dot */
+  .notif-dot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    background: #ef4444;
+    border-radius: 50%;
+    border: 2px solid #0D0D0D;
+  }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="flex min-h-screen">
+
+  <!-- ========== SIDEBAR ========== -->
+  <aside class="w-[240px] bg-[#0D0D0D] border-r border-[#2A2A3E] flex flex-col flex-shrink-0 fixed h-full z-20">
+    <!-- Logo -->
+    <div class="h-[60px] flex items-center px-5 border-b border-[#2A2A3E]">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center mr-3">
+        <svg class="w-5 h-5 text-[#0B0B1A]" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M8 5v14l11-7z"/>
+        </svg>
+      </div>
+      <span class="text-white font-bold text-lg tracking-wide">Empty Broken <span class="text-amber-gold">Admin</span></span>
+    </div>
+
+    <!-- Menu -->
+    <nav class="flex-1 py-4 overflow-y-auto">
+      <div class="px-3 mb-2 text-[11px] text-text-muted uppercase tracking-wider font-medium">主菜单</div>
+
+      <a href="#" class="menu-item active flex items-center px-5 py-3 text-sm cursor-pointer">
+        <i data-lucide="layout-dashboard" class="w-[18px] h-[18px] mr-3"></i>
+        <span>工作台</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="users" class="w-[18px] h-[18px] mr-3"></i>
+        <span>用户管理</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="shield-check" class="w-[18px] h-[18px] mr-3"></i>
+        <span>内容审核</span>
+        <span class="ml-auto text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">12</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="film" class="w-[18px] h-[18px] mr-3"></i>
+        <span>作品管理</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="wallet" class="w-[18px] h-[18px] mr-3"></i>
+        <span>计费财务</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="cpu" class="w-[18px] h-[18px] mr-3"></i>
+        <span>算力任务</span>
+        <span class="ml-auto text-[10px] bg-amber-gold/20 text-amber-gold px-2 py-0.5 rounded-full">34</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="settings" class="w-[18px] h-[18px] mr-3"></i>
+        <span>平台配置</span>
+      </a>
+    </nav>
+
+    <!-- Bottom user -->
+    <div class="p-4 border-t border-[#2A2A3E]">
+      <div class="flex items-center">
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center text-[#0B0B1A] font-bold text-sm">
+          A
+        </div>
+        <div class="ml-3 flex-1 min-w-0">
+          <div class="text-sm font-medium text-white truncate">Admin</div>
+          <div class="text-xs text-text-muted truncate">超级管理员</div>
+        </div>
+        <i data-lucide="chevron-up" class="w-4 h-4 text-text-muted"></i>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ========== MAIN WRAPPER ========== -->
+  <div class="flex-1 ml-[240px] flex flex-col min-w-0">
+
+    <!-- ========== TOP BAR ========== -->
+    <header class="h-[60px] bg-[#0D0D0D]/80 backdrop-blur-sm border-b border-[#2A2A3E] flex items-center justify-between px-6 sticky top-0 z-10">
+      <!-- Left: breadcrumb -->
+      <div class="flex items-center">
+        <i data-lucide="home" class="w-4 h-4 text-text-muted mr-2"></i>
+        <span class="text-text-muted text-sm">管理后台</span>
+        <i data-lucide="chevron-right" class="w-4 h-4 text-text-muted mx-2"></i>
+        <span class="text-white text-sm font-medium">工作台</span>
+      </div>
+
+      <!-- Right: search + notif + avatar -->
+      <div class="flex items-center gap-4">
+        <!-- Search -->
+        <div class="relative">
+          <i data-lucide="search" class="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input type="text" placeholder="搜索..." class="bg-bg-card border border-[#2A2A3E] rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-text-muted focus:outline-none focus:border-amber-gold/50 w-56 transition-colors">
+        </div>
+
+        <!-- Notification -->
+        <button class="relative w-9 h-9 rounded-lg bg-bg-card border border-[#2A2A3E] flex items-center justify-center hover:border-[#3A3A4E] transition-colors">
+          <i data-lucide="bell" class="w-4 h-4 text-text-secondary"></i>
+          <span class="notif-dot"></span>
+        </button>
+
+        <!-- Divider -->
+        <div class="w-px h-6 bg-[#2A2A3E]"></div>
+
+        <!-- Avatar -->
+        <div class="flex items-center cursor-pointer">
+          <div class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center text-[#0B0B1A] font-bold text-sm">
+            A
+          </div>
+          <span class="ml-2 text-sm text-white">Admin</span>
+          <i data-lucide="chevron-down" class="w-4 h-4 text-text-muted ml-1"></i>
+        </div>
+      </div>
+    </header>
+
+    <!-- ========== MAIN CONTENT ========== -->
+    <main class="flex-1 p-6 overflow-auto">
+      <!-- Page title -->
+      <div class="mb-6">
+        <h1 class="text-2xl font-bold text-white mb-1">数据概览</h1>
+        <p class="text-sm text-text-muted">欢迎回来，以下是平台今日运营数据概览</p>
+      </div>
+
+      <!-- ====== SECTION 1: DATA CARDS ====== -->
+      <div class="grid grid-cols-4 gap-4 mb-6">
+        <!-- Card 1: 累计注册用户 -->
+        <div class="data-card bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-start justify-between mb-4">
+            <div class="w-10 h-10 rounded-lg bg-amber-gold/10 flex items-center justify-center">
+              <i data-lucide="users" class="w-5 h-5 text-amber-gold"></i>
+            </div>
+            <span class="text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded-md flex items-center">
+              <i data-lucide="trending-up" class="w-3 h-3 mr-1"></i>12.5%
+            </span>
+          </div>
+          <div class="text-2xl font-bold text-amber-gold glow-gold font-mono">128,456</div>
+          <div class="text-xs text-text-muted mt-1">累计注册用户</div>
+        </div>
+
+        <!-- Card 2: 今日活跃 DAU -->
+        <div class="data-card bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-start justify-between mb-4">
+            <div class="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+              <i data-lucide="activity" class="w-5 h-5 text-blue-400"></i>
+            </div>
+            <span class="text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded-md flex items-center">
+              <i data-lucide="trending-up" class="w-3 h-3 mr-1"></i>8.3%
+            </span>
+          </div>
+          <div class="text-2xl font-bold text-amber-gold glow-gold font-mono">24,891</div>
+          <div class="text-xs text-text-muted mt-1">今日活跃 (DAU)</div>
+        </div>
+
+        <!-- Card 3: 空间总数 -->
+        <div class="data-card bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-start justify-between mb-4">
+            <div class="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
+              <i data-lucide="folder-open" class="w-5 h-5 text-purple-400"></i>
+            </div>
+            <span class="text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded-md flex items-center">
+              <i data-lucide="trending-up" class="w-3 h-3 mr-1"></i>5.2%
+            </span>
+          </div>
+          <div class="text-2xl font-bold text-amber-gold glow-gold font-mono">8,723</div>
+          <div class="text-xs text-text-muted mt-1">空间总数</div>
+        </div>
+
+        <!-- Card 4: 作品总数 -->
+        <div class="data-card bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-start justify-between mb-4">
+            <div class="w-10 h-10 rounded-lg bg-pink-500/10 flex items-center justify-center">
+              <i data-lucide="film" class="w-5 h-5 text-pink-400"></i>
+            </div>
+            <span class="text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded-md flex items-center">
+              <i data-lucide="trending-up" class="w-3 h-3 mr-1"></i>15.7%
+            </span>
+          </div>
+          <div class="text-2xl font-bold text-amber-gold glow-gold font-mono">45,672</div>
+          <div class="text-xs text-text-muted mt-1">作品总数</div>
+        </div>
+
+        <!-- Card 5: 生成任务数 -->
+        <div class="data-card bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-start justify-between mb-4">
+            <div class="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center">
+              <i data-lucide="cpu" class="w-5 h-5 text-cyan-400"></i>
+            </div>
+            <span class="text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded-md flex items-center">
+              <i data-lucide="trending-up" class="w-3 h-3 mr-1"></i>22.1%
+            </span>
+          </div>
+          <div class="text-2xl font-bold text-amber-gold glow-gold font-mono">3,847</div>
+          <div class="text-xs text-text-muted mt-1">今日生成任务</div>
+        </div>
+
+        <!-- Card 6: 待审核作品 -->
+        <div class="data-card bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-start justify-between mb-4">
+            <div class="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center">
+              <i data-lucide="clock" class="w-5 h-5 text-orange-400"></i>
+            </div>
+            <span class="text-xs text-red-400 bg-red-400/10 px-2 py-1 rounded-md flex items-center">
+              <i data-lucide="trending-up" class="w-3 h-3 mr-1"></i>8.0%
+            </span>
+          </div>
+          <div class="text-2xl font-bold text-amber-gold glow-gold font-mono">156</div>
+          <div class="text-xs text-text-muted mt-1">待审核作品</div>
+        </div>
+
+        <!-- Card 7: 今日收入 -->
+        <div class="data-card bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-start justify-between mb-4">
+            <div class="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
+              <i data-lucide="dollar-sign" class="w-5 h-5 text-green-400"></i>
+            </div>
+            <span class="text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded-md flex items-center">
+              <i data-lucide="trending-up" class="w-3 h-3 mr-1"></i>18.6%
+            </span>
+          </div>
+          <div class="text-2xl font-bold text-amber-gold glow-gold font-mono">¥89,432</div>
+          <div class="text-xs text-text-muted mt-1">今日收入</div>
+        </div>
+
+        <!-- Card 8: 付费转化率 -->
+        <div class="data-card bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-start justify-between mb-4">
+            <div class="w-10 h-10 rounded-lg bg-rose-500/10 flex items-center justify-center">
+              <i data-lucide="percent" class="w-5 h-5 text-rose-400"></i>
+            </div>
+            <span class="text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded-md flex items-center">
+              <i data-lucide="trending-up" class="w-3 h-3 mr-1"></i>2.4%
+            </span>
+          </div>
+          <div class="text-2xl font-bold text-amber-gold glow-gold font-mono">6.87%</div>
+          <div class="text-xs text-text-muted mt-1">付费转化率</div>
+        </div>
+      </div>
+
+      <!-- ====== SECTION 2: TREND CHARTS ====== -->
+      <div class="grid grid-cols-2 gap-4 mb-6">
+        <!-- Left: 用户增长趋势图 -->
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-center justify-between mb-5">
+            <div>
+              <h3 class="text-white font-semibold">用户增长趋势</h3>
+              <p class="text-xs text-text-muted mt-0.5">近 7 天注册与活跃数据</p>
+            </div>
+            <div class="flex items-center gap-4 text-xs">
+              <span class="flex items-center text-text-secondary">
+                <span class="w-3 h-3 rounded-full bg-amber-gold mr-2"></span>注册用户
+              </span>
+              <span class="flex items-center text-text-secondary">
+                <span class="w-3 h-3 rounded-full bg-blue-400 mr-2"></span>活跃用户
+              </span>
+            </div>
+          </div>
+
+          <!-- Line Chart SVG -->
+          <div class="relative h-[220px]">
+            <svg class="w-full h-full" viewBox="0 0 500 220" preserveAspectRatio="none">
+              <!-- Grid lines -->
+              <g class="chart-grid">
+                <line x1="40" y1="20" x2="490" y2="20"/>
+                <line x1="40" y1="70" x2="490" y2="70"/>
+                <line x1="40" y1="120" x2="490" y2="120"/>
+                <line x1="40" y1="170" x2="490" y2="170"/>
+              </g>
+              <!-- Y-axis labels -->
+              <text x="35" y="24" text-anchor="end" fill="#6b7280" font-size="10">30k</text>
+              <text x="35" y="74" text-anchor="end" fill="#6b7280" font-size="10">22.5k</text>
+              <text x="35" y="124" text-anchor="end" fill="#6b7280" font-size="10">15k</text>
+              <text x="35" y="174" text-anchor="end" fill="#6b7280" font-size="10">7.5k</text>
+
+              <!-- Area fill for registration (gold) -->
+              <defs>
+                <linearGradient id="goldGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" style="stop-color:#fbbf24;stop-opacity:0.3"/>
+                  <stop offset="100%" style="stop-color:#fbbf24;stop-opacity:0"/>
+                </linearGradient>
+                <linearGradient id="blueGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" style="stop-color:#60a5fa;stop-opacity:0.2"/>
+                  <stop offset="100%" style="stop-color:#60a5fa;stop-opacity:0"/>
+                </linearGradient>
+              </defs>
+
+              <!-- Registration area (gold) -->
+              <path d="M70,150 L140,130 L210,110 L280,95 L350,80 L420,60 L490,45 L490,200 L70,200 Z"
+                    fill="url(#goldGradient)"/>
+              <!-- Registration line -->
+              <path d="M70,150 L140,130 L210,110 L280,95 L350,80 L420,60 L490,45"
+                    fill="none" stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <!-- Registration dots -->
+              <circle cx="70" cy="150" r="4" fill="#fbbf24"/>
+              <circle cx="140" cy="130" r="4" fill="#fbbf24"/>
+              <circle cx="210" cy="110" r="4" fill="#fbbf24"/>
+              <circle cx="280" cy="95" r="4" fill="#fbbf24"/>
+              <circle cx="350" cy="80" r="4" fill="#fbbf24"/>
+              <circle cx="420" cy="60" r="4" fill="#fbbf24"/>
+              <circle cx="490" cy="45" r="4" fill="#fbbf24"/>
+
+              <!-- Active users area (blue) -->
+              <path d="M70,170 L140,160 L210,145 L280,135 L350,125 L420,110 L490,95 L490,200 L70,200 Z"
+                    fill="url(#blueGradient)"/>
+              <!-- Active users line -->
+              <path d="M70,170 L140,160 L210,145 L280,135 L350,125 L420,110 L490,95"
+                    fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0"/>
+              <!-- Active dots -->
+              <circle cx="70" cy="170" r="3.5" fill="#60a5fa"/>
+              <circle cx="140" cy="160" r="3.5" fill="#60a5fa"/>
+              <circle cx="210" cy="145" r="3.5" fill="#60a5fa"/>
+              <circle cx="280" cy="135" r="3.5" fill="#60a5fa"/>
+              <circle cx="350" cy="125" r="3.5" fill="#60a5fa"/>
+              <circle cx="420" cy="110" r="3.5" fill="#60a5fa"/>
+              <circle cx="490" cy="95" r="3.5" fill="#60a5fa"/>
+
+              <!-- X-axis labels -->
+              <text x="70" y="215" text-anchor="middle" fill="#6b7280" font-size="10">周一</text>
+              <text x="140" y="215" text-anchor="middle" fill="#6b7280" font-size="10">周二</text>
+              <text x="210" y="215" text-anchor="middle" fill="#6b7280" font-size="10">周三</text>
+              <text x="280" y="215" text-anchor="middle" fill="#6b7280" font-size="10">周四</text>
+              <text x="350" y="215" text-anchor="middle" fill="#6b7280" font-size="10">周五</text>
+              <text x="420" y="215" text-anchor="middle" fill="#6b7280" font-size="10">周六</text>
+              <text x="490" y="215" text-anchor="middle" fill="#6b7280" font-size="10">周日</text>
+            </svg>
+          </div>
+        </div>
+
+        <!-- Right: 收入趋势图 -->
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-center justify-between mb-5">
+            <div>
+              <h3 class="text-white font-semibold">收入趋势</h3>
+              <p class="text-xs text-text-muted mt-0.5">近 7 天收入与付费用户</p>
+            </div>
+            <div class="flex items-center gap-4 text-xs">
+              <span class="flex items-center text-text-secondary">
+                <span class="w-3 h-3 rounded-sm bg-amber-gold mr-2"></span>收入
+              </span>
+              <span class="flex items-center text-text-secondary">
+                <span class="w-3 h-0.5 bg-green-400 mr-2"></span>付费用户
+              </span>
+            </div>
+          </div>
+
+          <!-- Bar + Line Chart -->
+          <div class="relative h-[220px]">
+            <svg class="w-full h-full" viewBox="0 0 500 220" preserveAspectRatio="none">
+              <!-- Grid lines -->
+              <g class="chart-grid">
+                <line x1="40" y1="20" x2="490" y2="20"/>
+                <line x1="40" y1="70" x2="490" y2="70"/>
+                <line x1="40" y1="120" x2="490" y2="120"/>
+                <line x1="40" y1="170" x2="490" y2="170"/>
+              </g>
+              <!-- Y-axis labels -->
+              <text x="35" y="24" text-anchor="end" fill="#6b7280" font-size="10">¥100k</text>
+              <text x="35" y="74" text-anchor="end" fill="#6b7280" font-size="10">¥75k</text>
+              <text x="35" y="124" text-anchor="end" fill="#6b7280" font-size="10">¥50k</text>
+              <text x="35" y="174" text-anchor="end" fill="#6b7280" font-size="10">¥25k</text>
+
+              <!-- Bars -->
+              <defs>
+                <linearGradient id="barGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" style="stop-color:#fbbf24;stop-opacity:0.9"/>
+                  <stop offset="100%" style="stop-color:#d97706;stop-opacity:0.6"/>
+                </linearGradient>
+              </defs>
+
+              <!-- 7 bars with spacing -->
+              <rect x="55" y="100" width="35" height="100" rx="3" fill="url(#barGradient)"/>
+              <rect x="120" y="85" width="35" height="115" rx="3" fill="url(#barGradient)"/>
+              <rect x="185" y="70" width="35" height="130" rx="3" fill="url(#barGradient)"/>
+              <rect x="250" y="55" width="35" height="145" rx="3" fill="url(#barGradient)"/>
+              <rect x="315" y="60" width="35" height="140" rx="3" fill="url(#barGradient)"/>
+              <rect x="380" y="35" width="35" height="165" rx="3" fill="url(#barGradient)"/>
+              <rect x="445" y="30" width="35" height="170" rx="3" fill="url(#barGradient)"/>
+
+              <!-- Line for paying users (green) -->
+              <path d="M72,140 L137,130 L202,115 L267,100 L332,105 L397,80 L462,70"
+                    fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="72" cy="140" r="3.5" fill="#34d399"/>
+              <circle cx="137" cy="130" r="3.5" fill="#34d399"/>
+              <circle cx="202" cy="115" r="3.5" fill="#34d399"/>
+              <circle cx="267" cy="100" r="3.5" fill="#34d399"/>
+              <circle cx="332" cy="105" r="3.5" fill="#34d399"/>
+              <circle cx="397" cy="80" r="3.5" fill="#34d399"/>
+              <circle cx="462" cy="70" r="3.5" fill="#34d399"/>
+
+              <!-- X-axis labels -->
+              <text x="72" y="215" text-anchor="middle" fill="#6b7280" font-size="10">周一</text>
+              <text x="137" y="215" text-anchor="middle" fill="#6b7280" font-size="10">周二</text>
+              <text x="202" y="215" text-anchor="middle" fill="#6b7280" font-size="10">周三</text>
+              <text x="267" y="215" text-anchor="middle" fill="#6b7280" font-size="10">周四</text>
+              <text x="332" y="215" text-anchor="middle" fill="#6b7280" font-size="10">周五</text>
+              <text x="397" y="215" text-anchor="middle" fill="#6b7280" font-size="10">周六</text>
+              <text x="462" y="215" text-anchor="middle" fill="#6b7280" font-size="10">周日</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====== SECTION 3: RANKINGS ====== -->
+      <div class="grid grid-cols-3 gap-4 mb-6">
+        <!-- Top10 热门作品 -->
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-white font-semibold flex items-center">
+              <i data-lucide="flame" class="w-4 h-4 text-amber-gold mr-2"></i>
+              Top10 热门作品
+            </h3>
+            <a href="#" class="text-xs text-text-muted hover:text-amber-gold transition-colors">查看全部</a>
+          </div>
+          <div class="space-y-3">
+            <!-- Rank items -->
+            <div class="flex items-center gap-3 py-1">
+              <span class="rank-1 w-5 h-5 rounded text-xs font-bold flex items-center justify-center flex-shrink-0">1</span>
+              <div class="w-10 h-10 rounded bg-gradient-to-br from-purple-600 to-pink-500 flex-shrink-0 flex items-center justify-center">
+                <i data-lucide="play" class="w-4 h-4 text-white"></i>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white truncate">都市巅峰之逆袭归来</div>
+                <div class="text-xs text-text-muted">128.5万次播放</div>
+              </div>
+              <span class="text-xs text-amber-gold font-mono">+12%</span>
+            </div>
+            <div class="flex items-center gap-3 py-1">
+              <span class="rank-2 w-5 h-5 rounded text-xs font-bold flex items-center justify-center flex-shrink-0">2</span>
+              <div class="w-10 h-10 rounded bg-gradient-to-br from-blue-600 to-cyan-500 flex-shrink-0 flex items-center justify-center">
+                <i data-lucide="play" class="w-4 h-4 text-white"></i>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white truncate">重生之都市修仙</div>
+                <div class="text-xs text-text-muted">98.3万次播放</div>
+              </div>
+              <span class="text-xs text-amber-gold font-mono">+8%</span>
+            </div>
+            <div class="flex items-center gap-3 py-1">
+              <span class="rank-3 w-5 h-5 rounded text-xs font-bold flex items-center justify-center flex-shrink-0">3</span>
+              <div class="w-10 h-10 rounded bg-gradient-to-br from-rose-600 to-orange-500 flex-shrink-0 flex items-center justify-center">
+                <i data-lucide="play" class="w-4 h-4 text-white"></i>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white truncate">豪门总裁的契约新娘</div>
+                <div class="text-xs text-text-muted">87.1万次播放</div>
+              </div>
+              <span class="text-xs text-green-400 font-mono">+5%</span>
+            </div>
+            <div class="flex items-center gap-3 py-1">
+              <span class="w-5 h-5 rounded text-xs font-bold flex items-center justify-center flex-shrink-0 bg-[#2A2A3E] text-text-secondary">4</span>
+              <div class="w-10 h-10 rounded bg-gradient-to-br from-green-600 to-teal-500 flex-shrink-0 flex items-center justify-center">
+                <i data-lucide="play" class="w-4 h-4 text-white"></i>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white truncate">穿越古代当王爷</div>
+                <div class="text-xs text-text-muted">65.4万次播放</div>
+              </div>
+              <span class="text-xs text-green-400 font-mono">+3%</span>
+            </div>
+            <div class="flex items-center gap-3 py-1">
+              <span class="w-5 h-5 rounded text-xs font-bold flex items-center justify-center flex-shrink-0 bg-[#2A2A3E] text-text-secondary">5</span>
+              <div class="w-10 h-10 rounded bg-gradient-to-br from-indigo-600 to-purple-500 flex-shrink-0 flex items-center justify-center">
+                <i data-lucide="play" class="w-4 h-4 text-white"></i>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white truncate">战神归来之凤唳九天</div>
+                <div class="text-xs text-text-muted">52.8万次播放</div>
+              </div>
+              <span class="text-xs text-red-400 font-mono">-2%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Top10 活跃用户 -->
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-white font-semibold flex items-center">
+              <i data-lucide="user-check" class="w-4 h-4 text-blue-400 mr-2"></i>
+              Top10 活跃用户
+            </h3>
+            <a href="#" class="text-xs text-text-muted hover:text-amber-gold transition-colors">查看全部</a>
+          </div>
+          <div class="space-y-3">
+            <div class="flex items-center gap-3 py-1">
+              <span class="rank-1 w-5 h-5 rounded text-xs font-bold flex items-center justify-center flex-shrink-0">1</span>
+              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">L</div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white truncate">李逍遥</div>
+                <div class="text-xs text-text-muted">VIP会员 · 在线 32h</div>
+              </div>
+              <span class="text-xs text-amber-gold font-mono">328</span>
+            </div>
+            <div class="flex items-center gap-3 py-1">
+              <span class="rank-2 w-5 h-5 rounded text-xs font-bold flex items-center justify-center flex-shrink-0">2</span>
+              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">Z</div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white truncate">周芷若</div>
+                <div class="text-xs text-text-muted">VIP会员 · 在线 28h</div>
+              </div>
+              <span class="text-xs text-amber-gold font-mono">256</span>
+            </div>
+            <div class="flex items-center gap-3 py-1">
+              <span class="rank-3 w-5 h-5 rounded text-xs font-bold flex items-center justify-center flex-shrink-0">3</span>
+              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">W</div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white truncate">王语嫣</div>
+                <div class="text-xs text-text-muted">SVIP会员 · 在线 25h</div>
+              </div>
+              <span class="text-xs text-amber-gold font-mono">214</span>
+            </div>
+            <div class="flex items-center gap-3 py-1">
+              <span class="w-5 h-5 rounded text-xs font-bold flex items-center justify-center flex-shrink-0 bg-[#2A2A3E] text-text-secondary">4</span>
+              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">C</div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white truncate">陈长生</div>
+                <div class="text-xs text-text-muted">VIP会员 · 在线 22h</div>
+              </div>
+              <span class="text-xs text-text-secondary font-mono">189</span>
+            </div>
+            <div class="flex items-center gap-3 py-1">
+              <span class="w-5 h-5 rounded text-xs font-bold flex items-center justify-center flex-shrink-0 bg-[#2A2A3E] text-text-secondary">5</span>
+              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-violet-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">H</div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white truncate">黄蓉</div>
+                <div class="text-xs text-text-muted">SVIP会员 · 在线 20h</div>
+              </div>
+              <span class="text-xs text-text-secondary font-mono">167</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 模型使用排行 -->
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-white font-semibold flex items-center">
+              <i data-lucide="brain-circuit" class="w-4 h-4 text-purple-400 mr-2"></i>
+              模型使用排行
+            </h3>
+            <a href="#" class="text-xs text-text-muted hover:text-amber-gold transition-colors">查看全部</a>
+          </div>
+          <div class="space-y-4">
+            <div>
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold text-amber-gold">01</span>
+                  <span class="text-sm text-white">Seedance-Video-XL</span>
+                </div>
+                <span class="text-xs text-text-secondary font-mono">12,458 次</span>
+              </div>
+              <div class="w-full h-1.5 bg-[#2A2A3E] rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-amber-gold to-amber-dim rounded-full" style="width: 92%"></div>
+              </div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold text-text-secondary">02</span>
+                  <span class="text-sm text-white">Seedream-Image-Pro</span>
+                </div>
+                <span class="text-xs text-text-secondary font-mono">9,823 次</span>
+              </div>
+              <div class="w-full h-1.5 bg-[#2A2A3E] rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-blue-500 to-cyan-400 rounded-full" style="width: 78%"></div>
+              </div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold text-text-secondary">03</span>
+                  <span class="text-sm text-white">Voice-Clone-Pro</span>
+                </div>
+                <span class="text-xs text-text-secondary font-mono">7,654 次</span>
+              </div>
+              <div class="w-full h-1.5 bg-[#2A2A3E] rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-purple-500 to-pink-400 rounded-full" style="width: 61%"></div>
+              </div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold text-text-secondary">04</span>
+                  <span class="text-sm text-white">Script-Writer-Max</span>
+                </div>
+                <span class="text-xs text-text-secondary font-mono">5,432 次</span>
+              </div>
+              <div class="w-full h-1.5 bg-[#2A2A3E] rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-green-500 to-emerald-400 rounded-full" style="width: 43%"></div>
+              </div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold text-text-secondary">05</span>
+                  <span class="text-sm text-white">Music-Gen-Studio</span>
+                </div>
+                <span class="text-xs text-text-secondary font-mono">3,210 次</span>
+              </div>
+              <div class="w-full h-1.5 bg-[#2A2A3E] rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-rose-500 to-orange-400 rounded-full" style="width: 26%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====== SECTION 4: REAL-TIME MONITORING ====== -->
+      <div class="grid grid-cols-2 gap-4">
+        <!-- Left: 任务队列状态 -->
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-center justify-between mb-5">
+            <h3 class="text-white font-semibold flex items-center">
+              <i data-lucide="layers" class="w-4 h-4 text-cyan-400 mr-2"></i>
+              任务队列状态
+            </h3>
+            <span class="text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded-md flex items-center">
+              <span class="w-1.5 h-1.5 rounded-full bg-green-400 mr-1.5 animate-pulse"></span>
+              实时更新中
+            </span>
+          </div>
+
+          <div class="space-y-4">
+            <!-- 排队中 -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center">
+                  <div class="w-8 h-8 rounded-lg bg-yellow-500/10 flex items-center justify-center mr-3">
+                    <i data-lucide="loader" class="w-4 h-4 text-yellow-400"></i>
+                  </div>
+                  <div>
+                    <div class="text-sm text-white">排队中</div>
+                    <div class="text-xs text-text-muted">等待执行的任务</div>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <div class="text-lg font-bold text-yellow-400 font-mono">47</div>
+                </div>
+              </div>
+              <div class="w-full h-2 bg-[#2A2A3E] rounded-full overflow-hidden">
+                <div class="h-full bg-yellow-400 rounded-full" style="width: 23%"></div>
+              </div>
+            </div>
+
+            <!-- 运行中 -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center">
+                  <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center mr-3">
+                    <i data-lucide="play-circle" class="w-4 h-4 text-blue-400"></i>
+                  </div>
+                  <div>
+                    <div class="text-sm text-white">运行中</div>
+                    <div class="text-xs text-text-muted">正在执行的任务</div>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <div class="text-lg font-bold text-blue-400 font-mono">34</div>
+                </div>
+              </div>
+              <div class="w-full h-2 bg-[#2A2A3E] rounded-full overflow-hidden">
+                <div class="h-full bg-blue-400 rounded-full progress-bar-running" style="width: 68%"></div>
+              </div>
+            </div>
+
+            <!-- 成功 -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center">
+                  <div class="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center mr-3">
+                    <i data-lucide="check-circle-2" class="w-4 h-4 text-green-400"></i>
+                  </div>
+                  <div>
+                    <div class="text-sm text-white">成功</div>
+                    <div class="text-xs text-text-muted">今日已完成任务</div>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <div class="text-lg font-bold text-green-400 font-mono">2,847</div>
+                </div>
+              </div>
+              <div class="w-full h-2 bg-[#2A2A3E] rounded-full overflow-hidden">
+                <div class="h-full bg-green-400 rounded-full" style="width: 94%"></div>
+              </div>
+            </div>
+
+            <!-- 失败 -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center">
+                  <div class="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center mr-3">
+                    <i data-lucide="x-circle" class="w-4 h-4 text-red-400"></i>
+                  </div>
+                  <div>
+                    <div class="text-sm text-white">失败</div>
+                    <div class="text-xs text-text-muted">执行失败的任务</div>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <div class="text-lg font-bold text-red-400 font-mono">126</div>
+                </div>
+              </div>
+              <div class="w-full h-2 bg-[#2A2A3E] rounded-full overflow-hidden">
+                <div class="h-full bg-red-400 rounded-full" style="width: 4.2%"></div>
+              </div>
+            </div>
+
+            <!-- 死信 -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center">
+                  <div class="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center mr-3">
+                    <i data-lucide="alert-triangle" class="w-4 h-4 text-purple-400"></i>
+                  </div>
+                  <div>
+                    <div class="text-sm text-white">死信</div>
+                    <div class="text-xs text-text-muted">无法处理的任务</div>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <div class="text-lg font-bold text-purple-400 font-mono">8</div>
+                </div>
+              </div>
+              <div class="w-full h-2 bg-[#2A2A3E] rounded-full overflow-hidden">
+                <div class="h-full bg-purple-400 rounded-full" style="width: 0.3%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: 最近活动日志 -->
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-white font-semibold flex items-center">
+              <i data-lucide="scroll-text" class="w-4 h-4 text-amber-gold mr-2"></i>
+              最近活动日志
+            </h3>
+            <a href="#" class="text-xs text-text-muted hover:text-amber-gold transition-colors">查看全部</a>
+          </div>
+
+          <div class="space-y-0 max-h-[320px] overflow-y-auto -mx-2 px-2">
+            <!-- Log items -->
+            <div class="log-item flex items-start gap-3 py-3 border-b border-[#2A2A3E]/50 px-2 rounded">
+              <div class="w-2 h-2 rounded-full bg-green-400 mt-1.5 flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white"><span class="text-amber-gold">李逍遥</span> 发布了新作品 <span class="text-blue-400">《都市巅峰》</span></div>
+                <div class="text-xs text-text-muted mt-0.5">作品审核 · 待处理</div>
+              </div>
+              <div class="text-xs text-text-muted flex-shrink-0">2 分钟前</div>
+            </div>
+
+            <div class="log-item flex items-start gap-3 py-3 border-b border-[#2A2A3E]/50 px-2 rounded">
+              <div class="w-2 h-2 rounded-full bg-blue-400 mt-1.5 flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white">系统完成 <span class="text-amber-gold">128</span> 个视频生成任务</div>
+                <div class="text-xs text-text-muted mt-0.5">算力任务 · 自动调度</div>
+              </div>
+              <div class="text-xs text-text-muted flex-shrink-0">5 分钟前</div>
+            </div>
+
+            <div class="log-item flex items-start gap-3 py-3 border-b border-[#2A2A3E]/50 px-2 rounded">
+              <div class="w-2 h-2 rounded-full bg-yellow-400 mt-1.5 flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white"><span class="text-amber-gold">周芷若</span> 申请升级 SVIP 会员</div>
+                <div class="text-xs text-text-muted mt-0.5">财务审核 · 待处理</div>
+              </div>
+              <div class="text-xs text-text-muted flex-shrink-0">12 分钟前</div>
+            </div>
+
+            <div class="log-item flex items-start gap-3 py-3 border-b border-[#2A2A3E]/50 px-2 rounded">
+              <div class="w-2 h-2 rounded-full bg-red-400 mt-1.5 flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white">作品 <span class="text-red-400">《违规内容示例》</span> 审核未通过</div>
+                <div class="text-xs text-text-muted mt-0.5">内容审核 · 管理员操作</div>
+              </div>
+              <div class="text-xs text-text-muted flex-shrink-0">28 分钟前</div>
+            </div>
+
+            <div class="log-item flex items-start gap-3 py-3 border-b border-[#2A2A3E]/50 px-2 rounded">
+              <div class="w-2 h-2 rounded-full bg-green-400 mt-1.5 flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white">新注册用户 <span class="text-amber-gold">256</span> 人，今日累计 <span class="text-amber-gold">1,847</span> 人</div>
+                <div class="text-xs text-text-muted mt-0.5">用户增长 · 实时统计</div>
+              </div>
+              <div class="text-xs text-text-muted flex-shrink-0">35 分钟前</div>
+            </div>
+
+            <div class="log-item flex items-start gap-3 py-3 border-b border-[#2A2A3E]/50 px-2 rounded">
+              <div class="w-2 h-2 rounded-full bg-purple-400 mt-1.5 flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white">系统自动清理 <span class="text-purple-400">3,421</span> 个过期缓存文件</div>
+                <div class="text-xs text-text-muted mt-0.5">系统维护 · 自动任务</div>
+              </div>
+              <div class="text-xs text-text-muted flex-shrink-0">1 小时前</div>
+            </div>
+
+            <div class="log-item flex items-start gap-3 py-3 border-b border-[#2A2A3E]/50 px-2 rounded">
+              <div class="w-2 h-2 rounded-full bg-amber-gold mt-1.5 flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white">今日收入突破 <span class="text-amber-gold">¥80,000</span>，同比增长 18.6%</div>
+                <div class="text-xs text-text-muted mt-0.5">财务数据 · 里程碑</div>
+              </div>
+              <div class="text-xs text-text-muted flex-shrink-0">2 小时前</div>
+            </div>
+
+            <div class="log-item flex items-start gap-3 py-3 border-b border-[#2A2A3E]/50 px-2 rounded">
+              <div class="w-2 h-2 rounded-full bg-cyan-400 mt-1.5 flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white">GPU 集群扩容完成，新增 <span class="text-cyan-400">8</span> 张 A100 显卡</div>
+                <div class="text-xs text-text-muted mt-0.5">算力资源 · 管理员操作</div>
+              </div>
+              <div class="text-xs text-text-muted flex-shrink-0">3 小时前</div>
+            </div>
+
+            <div class="log-item flex items-start gap-3 py-3 border-b border-[#2A2A3E]/50 px-2 rounded">
+              <div class="w-2 h-2 rounded-full bg-green-400 mt-1.5 flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white">作品 <span class="text-blue-400">《重生之都市修仙》</span> 播放量突破百万</div>
+                <div class="text-xs text-text-muted mt-0.5">内容数据 · 热门通知</div>
+              </div>
+              <div class="text-xs text-text-muted flex-shrink-0">4 小时前</div>
+            </div>
+
+            <div class="log-item flex items-start gap-3 py-3 px-2 rounded">
+              <div class="w-2 h-2 rounded-full bg-text-muted mt-1.5 flex-shrink-0"></div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-white">平台配置更新：视频生成单价调整</div>
+                <div class="text-xs text-text-muted mt-0.5">平台配置 · Admin 操作</div>
+              </div>
+              <div class="text-xs text-text-muted flex-shrink-0">6 小时前</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="mt-8 pt-4 border-t border-[#2A2A3E] text-center">
+        <p class="text-xs text-text-muted">Empty Broken Admin v1.0 · © 2025 Empty Broken 创作平台</p>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+  // Initialize Lucide icons
+  lucide.createIcons();
+
+  // Simulate live data updates
+  function animateNumber(el, target, duration = 1000) {
+    const start = parseInt(el.textContent.replace(/[^\d]/g, '')) || 0;
+    const startTime = performance.now();
+    const prefix = el.textContent.match(/^[^\d]*/)?.[0] || '';
+    const suffix = el.textContent.match(/[^\d]*$/)?.[0] || '';
+
+    function update(currentTime) {
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const easeOut = 1 - Math.pow(1 - progress, 3);
+      const current = Math.floor(start + (target - start) * easeOut);
+      el.textContent = prefix + current.toLocaleString() + suffix;
+      if (progress < 1) requestAnimationFrame(update);
+    }
+    requestAnimationFrame(update);
+  }
+
+  // Simulate real-time task queue updates
+  setInterval(() => {
+    const runningEl = document.querySelector('.text-blue-400.font-mono');
+    if (runningEl) {
+      const current = parseInt(runningEl.textContent);
+      const delta = Math.floor(Math.random() * 5) - 2;
+      runningEl.textContent = Math.max(20, Math.min(50, current + delta));
+    }
+  }, 3000);
+</script>
+
+</body>
+</html>

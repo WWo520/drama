@@ -1,0 +1,2033 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark" style="height:100vh; overflow:hidden;">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>发现 - LuxReal</title>
+    <style id="theme-vars">
+/* LuxReal Clone - Design Tokens */
+/* Dark cinematic theme inspired by LuxReal AI Short Drama platform */
+
+:root {
+  /* Brand prefix: luxreal */
+  --luxreal-background: #030911;
+  --luxreal-foreground: #F0F0F5;
+  --luxreal-card: #0D1119;
+  --luxreal-card-foreground: #E8E8F0;
+  --luxreal-popover: #111525;
+  --luxreal-popover-foreground: #F0F0F5;
+  --luxreal-primary: #4C7FF8;
+  --luxreal-primary-foreground: #FFFFFF;
+  --luxreal-muted: #0F1420;
+  --luxreal-muted-foreground: #6B7088;
+  --luxreal-border: #1A1F2E;
+  --luxreal-input: #0F1420;
+  --luxreal-ring: #4C7FF8;
+  --luxreal-accent: #131828;
+  --luxreal-accent-foreground: #F0F0F5;
+  --luxreal-destructive: #EF4444;
+  --luxreal-destructive-foreground: #FFFFFF;
+  --luxreal-success: #10B981;
+  --luxreal-warning: #F59E0B;
+
+  /* Radius scale */
+  --luxreal-radius-sm: 6px;
+  --luxreal-radius-md: 10px;
+  --luxreal-radius-lg: 16px;
+  --luxreal-radius-xl: 24px;
+  --luxreal-radius-full: 9999px;
+
+  /* Gradient accents */
+  --luxreal-gradient-neon: linear-gradient(135deg, #8B5CF6 0%, #4C7FF8 50%, #06B6D4 100%);
+  --luxreal-gradient-glow: linear-gradient(180deg, rgba(76,127,248,0.15) 0%, rgba(139,92,246,0.05) 100%);
+  --luxreal-gradient-card: linear-gradient(145deg, rgba(22,25,38,0.85) 0%, rgba(17,19,24,0.95) 100%);
+  --luxreal-gradient-banner1: linear-gradient(135deg, #0F2E2A 0%, #134E4A 40%, #0F2E2A 100%);
+  --luxreal-gradient-banner2: linear-gradient(135deg, #2A1506 0%, #5C3A1E 40%, #2A1506 100%);
+  --luxreal-gradient-banner3: linear-gradient(135deg, #1A1F3A 0%, #243060 40%, #1A1F3A 100%);
+  --luxreal-gradient-banner4: linear-gradient(135deg, #1E1B4B 0%, #312E81 40%, #1E1B4B 100%);
+
+  /* Shadows */
+  --luxreal-shadow-glow: 0 0 30px rgba(76,127,248,0.15);
+  --luxreal-shadow-card: 0 4px 24px rgba(0,0,0,0.4);
+  --luxreal-shadow-elevated: 0 8px 40px rgba(0,0,0,0.5);
+
+  /* Sidebar */
+  --luxreal-sidebar: #0A0A14;
+  --luxreal-sidebar-foreground: #B0B0C8;
+  --luxreal-sidebar-accent: #4C7FF8;
+  --luxreal-sidebar-width: 72px;
+
+  /* Top banner */
+  --luxreal-banner-height: 36px;
+}
+
+/* Base typography */
+html {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--luxreal-background);
+  color: var(--luxreal-foreground);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--luxreal-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--luxreal-muted-foreground);
+}
+
+/* Glass card effect */
+.luxreal-glass {
+  background: var(--luxreal-gradient-card);
+  border: 1px solid var(--luxreal-border);
+  backdrop-filter: blur(12px);
+}
+
+/* Neon glow effect for primary elements */
+.luxreal-glow {
+  box-shadow: var(--luxreal-shadow-glow);
+}
+
+/* Gradient text */
+.luxreal-gradient-text {
+  background: var(--luxreal-gradient-neon);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Tab capsule style */
+.luxreal-tab-capsule {
+  border-radius: var(--luxreal-radius-full);
+  padding: 6px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--luxreal-muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.luxreal-tab-capsule.active {
+  background: var(--luxreal-primary);
+  color: var(--luxreal-primary-foreground);
+}
+.luxreal-tab-capsule:hover:not(.active) {
+  color: var(--luxreal-foreground);
+  background: var(--luxreal-muted);
+}
+
+/* Button styles */
+.luxreal-btn-primary {
+  background: var(--luxreal-primary);
+  color: var(--luxreal-primary-foreground);
+  border: none;
+  border-radius: var(--luxreal-radius-full);
+  padding: 10px 28px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.luxreal-btn-primary:hover {
+  background: #2563EB;
+  box-shadow: 0 0 24px rgba(59,130,246,0.35);
+}
+.luxreal-btn-secondary {
+  background: transparent;
+  color: var(--luxreal-foreground);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-full);
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.luxreal-btn-secondary:hover {
+  border-color: var(--luxreal-primary);
+  color: var(--luxreal-primary);
+}
+.luxreal-btn-ghost {
+  background: transparent;
+  color: var(--luxreal-muted-foreground);
+  border: none;
+  border-radius: var(--luxreal-radius-md);
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.luxreal-btn-ghost:hover {
+  color: var(--luxreal-foreground);
+  background: var(--luxreal-muted);
+}
+
+/* Input styles */
+.luxreal-input {
+  background: var(--luxreal-input);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-md);
+  padding: 10px 14px;
+  color: var(--luxreal-foreground);
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+.luxreal-input:focus {
+  border-color: var(--luxreal-primary);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+}
+.luxreal-input::placeholder {
+  color: var(--luxreal-muted-foreground);
+}
+
+/* Select/Dropdown trigger style */
+.luxreal-select {
+  background: var(--luxreal-input);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-full);
+  padding: 6px 14px;
+  color: var(--luxreal-foreground);
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.luxreal-select:hover {
+  border-color: var(--luxreal-primary);
+}
+
+/* Sidebar navigation item */
+.luxreal-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--luxreal-radius-md);
+  color: var(--luxreal-sidebar-foreground);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  gap: 3px;
+  text-decoration: none;
+  font-size: 11px;
+  position: relative;
+}
+.luxreal-nav-item:hover {
+  color: var(--luxreal-foreground);
+  background: rgba(255,255,255,0.05);
+}
+.luxreal-nav-item.active {
+  color: var(--luxreal-primary);
+  background: rgba(59,130,246,0.12);
+}
+.luxreal-nav-item.nav-recharge {
+  color: #A78BFA;
+  background: rgba(139,92,246,0.08);
+}
+.luxreal-nav-item.nav-recharge:hover {
+  color: #C4B5FD;
+  background: rgba(139,92,246,0.14);
+}
+
+/* Sidebar Avatar */
+.sidebar-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+.sidebar-avatar:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 12px rgba(76, 127, 248, 0.4);
+}
+
+/* Sidebar Credits & Recharge */
+.sidebar-credits {
+    font-size: 13px;
+    font-weight: 500;
+    color: #F0F0F5;
+    line-height: 1.2;
+    margin: 4px 0 2px;
+    flex-shrink: 0;
+}
+.sidebar-recharge {
+    font-size: 12px;
+    font-weight: 500;
+    color: #fff;
+    background: linear-gradient(135deg, #A78BFA, #8B5CF6);
+    padding: 4px 12px;
+    border-radius: 9999px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+.sidebar-recharge:hover {
+    background: linear-gradient(135deg, #C4B5FD, #A78BFA);
+    transform: translateY(-1px);
+}
+
+/* Profile Panel */
+.profile-panel {
+    position: fixed;
+    top: 0;
+    left: 84px;
+    width: 240px;
+    background: #1A1A2E;
+    border: 1px solid #2A2A3E;
+    border-radius: 20px;
+    padding: 16px;
+    z-index: 100;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03) inset;
+}
+.profile-panel::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 50%;
+    transform: translateY(-50%) rotate(45deg);
+    width: 10px;
+    height: 10px;
+    background: #1A1A2E;
+    border-left: 1px solid #2A2A3E;
+    border-bottom: 1px solid #2A2A3E;
+}
+.profile-panel.hidden {
+    display: none;
+}
+.profile-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+.profile-avatar-lg {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 18px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+.profile-avatar-lg::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 12px;
+    height: 12px;
+    background: #22C55E;
+    border: 2px solid #1A1A2E;
+    border-radius: 50%;
+}
+.profile-info {
+    flex: 1;
+    min-width: 0;
+}
+.profile-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 2px;
+}
+.profile-id {
+    font-size: 12px;
+    color: #6B7088;
+}
+.profile-panel-divider {
+    height: 1px;
+    background: rgba(255,255,255,0.06);
+    margin: 12px 0;
+}
+.profile-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.profile-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    color: #C0C0CC;
+    font-size: 13px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.profile-menu-item:hover {
+    background: rgba(255,255,255,0.05);
+    color: #fff;
+}
+.profile-menu-item:hover .profile-menu-arrow {
+    color: #4C7FF8;
+    transform: translateX(2px);
+}
+.profile-menu-arrow {
+    margin-left: auto;
+    color: #4A4A5A;
+    transition: all 0.2s;
+}
+.profile-logout {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 10px;
+    color: #EF4444;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.profile-logout:hover {
+    background: rgba(239,68,68,0.1);
+}
+
+/* Nav badge */
+.nav-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--luxreal-destructive);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  line-height: 1;
+}
+
+/* Badge */
+.luxreal-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--luxreal-radius-full);
+  font-size: 11px;
+  font-weight: 500;
+}
+.luxreal-badge-beta {
+  background: linear-gradient(135deg, #8B5CF6, #3B82F6);
+  color: white;
+}
+.luxreal-badge-vip {
+  background: linear-gradient(135deg, #F59E0B, #EF4444);
+  color: white;
+}
+
+/* Card hover effect */
+.luxreal-card-hover {
+  transition: all 0.3s ease;
+}
+.luxreal-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--luxreal-shadow-elevated);
+  border-color: rgba(59,130,246,0.3);
+}
+
+/* Announcement banner */
+.announcement-gradient {
+  background: linear-gradient(90deg, #7C3AED 0%, #3B82F6 35%, #06B6D4 70%, #8B5CF6 100%);
+  background-size: 200% 100%;
+  animation: bannerShift 8s ease infinite;
+}
+@keyframes bannerShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Drag & drop zone */
+.luxreal-dropzone {
+  border: 2px dashed var(--luxreal-border);
+  border-radius: var(--luxreal-radius-lg);
+  transition: all 0.3s ease;
+  background: rgba(59,130,246,0.02);
+}
+.luxreal-dropzone:hover, .luxreal-dropzone.dragover {
+  border-color: var(--luxreal-primary);
+  background: rgba(59,130,246,0.06);
+}
+
+/* Divider */
+.luxreal-divider {
+  height: 1px;
+  background: var(--luxreal-border);
+  margin: 16px 0;
+}
+.v-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--luxreal-border);
+  flex-shrink: 0;
+}
+
+/* Section title */
+.luxreal-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--luxreal-foreground);
+  margin-bottom: 12px;
+}
+
+/* Segmented control */
+.segmented-group {
+  display: inline-flex;
+  background: var(--luxreal-input);
+  border-radius: var(--luxreal-radius-full);
+  padding: 3px;
+  gap: 2px;
+}
+.segmented-btn {
+  background: transparent;
+  border: none;
+  color: var(--luxreal-muted-foreground);
+  font-size: 13px;
+  padding: 5px 14px;
+  border-radius: var(--luxreal-radius-full);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.segmented-btn:hover:not(.active) {
+  color: var(--luxreal-foreground);
+}
+.segmented-btn.active {
+  background: var(--luxreal-primary);
+  color: white;
+}
+
+/* Model sub-tabs */
+.model-subtab {
+  background: transparent;
+  border: none;
+  color: var(--luxreal-muted-foreground);
+  font-size: 13px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-bottom: 2px solid transparent;
+  font-weight: 500;
+}
+.model-subtab:hover:not(.active) {
+  color: var(--luxreal-foreground);
+}
+.model-subtab.active {
+  color: var(--luxreal-primary);
+  border-bottom-color: var(--luxreal-primary);
+}
+
+/* Model tab panel */
+.model-tab-panel {
+  animation: fadeIn 0.2s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Project cover gradients */
+.cover-1 {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 40%, #0f3460 100%);
+  position: relative;
+}
+.cover-1::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(239,68,68,0.25) 0%, transparent 60%);
+}
+.cover-2 {
+  background: linear-gradient(135deg, #1a1a0e 0%, #2d2a15 40%, #4a3f1a 100%);
+  position: relative;
+}
+.cover-2::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(245,158,11,0.2) 0%, transparent 60%);
+}
+.cover-3 {
+  background: linear-gradient(135deg, #1a0e1e 0%, #2d1530 40%, #4a1a3a 100%);
+  position: relative;
+}
+.cover-3::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(236,72,153,0.2) 0%, transparent 60%);
+}
+.cover-4 {
+  background: linear-gradient(135deg, #0e1a1e 0%, #152d30 40%, #1a4a4a 100%);
+  position: relative;
+}
+.cover-4::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(6,182,212,0.2) 0%, transparent 60%);
+}
+
+/* Decorative tilted block for upload zone */
+.upload-deco-block {
+  width: 120px;
+  height: 120px;
+  background: linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(139,92,246,0.08) 100%);
+  border: 1px solid rgba(59,130,246,0.2);
+  border-radius: 16px;
+  transform: rotate(-8deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* Play button overlay */
+.play-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.2);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.project-card:hover .play-overlay {
+  opacity: 1;
+}
+.play-btn-circle {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255,255,255,0.3);
+}
+
+/* Avatar circle */
+.avatar-circle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+  border: 2px solid rgba(255,255,255,0.1);
+  transition: all 0.2s ease;
+}
+.avatar-circle:hover {
+  border-color: rgba(59,130,246,0.5);
+}
+
+/* Logo text vertical */
+.logo-text {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  background: var(--luxreal-gradient-neon);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+}
+
+/* Quick config bar */
+.config-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--luxreal-card);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-full);
+  padding: 6px 8px;
+  overflow-x: auto;
+}
+
+/* Banner cards */
+.rec-banner {
+  border-radius: var(--luxreal-radius-lg);
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--luxreal-border);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.rec-banner:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--luxreal-shadow-elevated);
+}
+.rec-banner-teal {
+  background: var(--luxreal-gradient-banner1);
+}
+.rec-banner-gold {
+  background: var(--luxreal-gradient-banner2);
+}
+.rec-banner-blue {
+  background: var(--luxreal-gradient-banner3);
+}
+
+/* Footer */
+.site-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 24px 0;
+  margin-top: 32px;
+  border-top: 1px solid var(--luxreal-border);
+  font-size: 12px;
+  color: var(--luxreal-muted-foreground);
+  flex-wrap: wrap;
+}
+.site-footer a {
+  color: var(--luxreal-muted-foreground);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.site-footer a:hover {
+  color: var(--luxreal-foreground);
+}
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-background: var(--luxreal-background);
+    --color-foreground: var(--luxreal-foreground);
+    --color-card: var(--luxreal-card);
+    --color-card-foreground: var(--luxreal-card-foreground);
+    --color-popover: var(--luxreal-popover);
+    --color-popover-foreground: var(--luxreal-popover-foreground);
+    --color-primary: var(--luxreal-primary);
+    --color-primary-foreground: var(--luxreal-primary-foreground);
+    --color-muted: var(--luxreal-muted);
+    --color-muted-foreground: var(--luxreal-muted-foreground);
+    --color-accent: var(--luxreal-accent);
+    --color-accent-foreground: var(--luxreal-accent-foreground);
+    --color-destructive: var(--luxreal-destructive);
+    --color-destructive-foreground: var(--luxreal-destructive-foreground);
+    --color-border: var(--luxreal-border);
+    --color-input: var(--luxreal-input);
+    --color-ring: var(--luxreal-ring);
+    --color-sidebar: var(--luxreal-sidebar);
+    --color-sidebar-foreground: var(--luxreal-sidebar-foreground);
+    --color-sidebar-accent: var(--luxreal-sidebar-accent);
+    --radius-sm: var(--luxreal-radius-sm);
+    --radius-md: var(--luxreal-radius-md);
+    --radius-lg: var(--luxreal-radius-lg);
+    --radius-xl: var(--luxreal-radius-xl);
+  }
+  @layer base {
+    body { background: var(--luxreal-background); color: var(--luxreal-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style id="semantic-token-fallback">
+      .bg-background { background-color: var(--luxreal-background); }
+      .text-background { color: var(--luxreal-background); }
+      .border-background { border-color: var(--luxreal-background); }
+      .ring-background { --tw-ring-color: var(--luxreal-background); }
+      .bg-foreground { background-color: var(--luxreal-foreground); }
+      .text-foreground { color: var(--luxreal-foreground); }
+      .border-foreground { border-color: var(--luxreal-foreground); }
+      .ring-foreground { --tw-ring-color: var(--luxreal-foreground); }
+      .bg-card { background-color: var(--luxreal-card); }
+      .text-card { color: var(--luxreal-card); }
+      .border-card { border-color: var(--luxreal-card); }
+      .ring-card { --tw-ring-color: var(--luxreal-card); }
+      .bg-card-foreground { background-color: var(--luxreal-card-foreground); }
+      .text-card-foreground { color: var(--luxreal-card-foreground); }
+      .border-card-foreground { border-color: var(--luxreal-card-foreground); }
+      .ring-card-foreground { --tw-ring-color: var(--luxreal-card-foreground); }
+      .bg-popover { background-color: var(--luxreal-popover); }
+      .text-popover { color: var(--luxreal-popover); }
+      .border-popover { border-color: var(--luxreal-popover); }
+      .ring-popover { --tw-ring-color: var(--luxreal-popover); }
+      .bg-popover-foreground { background-color: var(--luxreal-popover-foreground); }
+      .text-popover-foreground { color: var(--luxreal-popover-foreground); }
+      .border-popover-foreground { border-color: var(--luxreal-popover-foreground); }
+      .ring-popover-foreground { --tw-ring-color: var(--luxreal-popover-foreground); }
+      .bg-primary { background-color: var(--luxreal-primary); }
+      .text-primary { color: var(--luxreal-primary); }
+      .border-primary { border-color: var(--luxreal-primary); }
+      .ring-primary { --tw-ring-color: var(--luxreal-primary); }
+      .bg-primary-foreground { background-color: var(--luxreal-primary-foreground); }
+      .text-primary-foreground { color: var(--luxreal-primary-foreground); }
+      .border-primary-foreground { border-color: var(--luxreal-primary-foreground); }
+      .ring-primary-foreground { --tw-ring-color: var(--luxreal-primary-foreground); }
+      .bg-muted { background-color: var(--luxreal-muted); }
+      .text-muted { color: var(--luxreal-muted); }
+      .border-muted { border-color: var(--luxreal-muted); }
+      .ring-muted { --tw-ring-color: var(--luxreal-muted); }
+      .bg-muted-foreground { background-color: var(--luxreal-muted-foreground); }
+      .text-muted-foreground { color: var(--luxreal-muted-foreground); }
+      .border-muted-foreground { border-color: var(--luxreal-muted-foreground); }
+      .ring-muted-foreground { --tw-ring-color: var(--luxreal-muted-foreground); }
+      .bg-accent { background-color: var(--luxreal-accent); }
+      .text-accent { color: var(--luxreal-accent); }
+      .border-accent { border-color: var(--luxreal-accent); }
+      .ring-accent { --tw-ring-color: var(--luxreal-accent); }
+      .bg-accent-foreground { background-color: var(--luxreal-accent-foreground); }
+      .text-accent-foreground { color: var(--luxreal-accent-foreground); }
+      .border-accent-foreground { border-color: var(--luxreal-accent-foreground); }
+      .ring-accent-foreground { --tw-ring-color: var(--luxreal-accent-foreground); }
+      .bg-destructive { background-color: var(--luxreal-destructive); }
+      .text-destructive { color: var(--luxreal-destructive); }
+      .border-destructive { border-color: var(--luxreal-destructive); }
+      .ring-destructive { --tw-ring-color: var(--luxreal-destructive); }
+      .bg-destructive-foreground { background-color: var(--luxreal-destructive-foreground); }
+      .text-destructive-foreground { color: var(--luxreal-destructive-foreground); }
+      .border-destructive-foreground { border-color: var(--luxreal-destructive-foreground); }
+      .ring-destructive-foreground { --tw-ring-color: var(--luxreal-destructive-foreground); }
+      .bg-border { background-color: var(--luxreal-border); }
+      .text-border { color: var(--luxreal-border); }
+      .border-border { border-color: var(--luxreal-border); }
+      .ring-border { --tw-ring-color: var(--luxreal-border); }
+      .bg-input { background-color: var(--luxreal-input); }
+      .text-input { color: var(--luxreal-input); }
+      .border-input { border-color: var(--luxreal-input); }
+      .ring-input { --tw-ring-color: var(--luxreal-input); }
+      .bg-ring { background-color: var(--luxreal-ring); }
+      .text-ring { color: var(--luxreal-ring); }
+      .border-ring { border-color: var(--luxreal-ring); }
+      .ring-ring { --tw-ring-color: var(--luxreal-ring); }
+      .bg-sidebar { background-color: var(--luxreal-sidebar); }
+      .text-sidebar { color: var(--luxreal-sidebar); }
+      .border-sidebar { border-color: var(--luxreal-sidebar); }
+      .ring-sidebar { --tw-ring-color: var(--luxreal-sidebar); }
+      .bg-sidebar-foreground { background-color: var(--luxreal-sidebar-foreground); }
+      .text-sidebar-foreground { color: var(--luxreal-sidebar-foreground); }
+      .border-sidebar-foreground { border-color: var(--luxreal-sidebar-foreground); }
+      .ring-sidebar-foreground { --tw-ring-color: var(--luxreal-sidebar-foreground); }
+      .bg-sidebar-accent { background-color: var(--luxreal-sidebar-accent); }
+      .text-sidebar-accent { color: var(--luxreal-sidebar-accent); }
+      .border-sidebar-accent { border-color: var(--luxreal-sidebar-accent); }
+      .ring-sidebar-accent { --tw-ring-color: var(--luxreal-sidebar-accent); }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="font-sans antialiased" style="height:100vh; overflow:hidden;">
+    <style>
+      /* Spotlight effect */
+      .spotlight-overlay {
+        position: fixed;
+        top: 0;
+        left: 72px;
+        right: 0;
+        height: 700px;
+        pointer-events: none;
+        z-index: 1;
+        background:
+          radial-gradient(ellipse 65% 45% at 50% 0%, rgba(76,127,248,0.12) 0%, rgba(100,80,255,0.06) 25%, rgba(6,182,212,0.03) 45%, transparent 70%),
+          radial-gradient(ellipse 40% 30% at 35% 5%, rgba(76,127,248,0.06) 0%, transparent 50%),
+          radial-gradient(ellipse 30% 25% at 65% 8%, rgba(139,92,246,0.05) 0%, transparent 50%);
+      }
+      /* Sidebar logo */
+      .sidebar-logo-mark {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #4C7FF8, #7C3AED);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 16px rgba(76,127,248,0.3);
+      }
+      /* Discover page masonry cards */
+      .discover-card {
+        break-inside: avoid;
+        margin-bottom: 16px;
+        border-radius: 12px;
+        overflow: hidden;
+        background: #0D1119;
+        border: 1px solid #1A1F2E;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        position: relative;
+      }
+      .discover-card:hover {
+        border-color: rgba(76,127,248,0.4);
+        transform: translateY(-4px);
+        box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 0 20px rgba(76,127,248,0.1);
+      }
+      .discover-card .card-play-btn {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(0.8);
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.15);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border: 2px solid rgba(255,255,255,0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        transition: all 0.3s ease;
+        z-index: 5;
+        color: white;
+      }
+      .discover-card:hover .card-play-btn {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+      }
+      .discover-card .card-thumb {
+        width: 100%;
+        position: relative;
+      }
+      .discover-card .card-thumb-gradient {
+        width: 100%;
+      }
+      .discover-card .card-overlay {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.1) 40%, transparent 60%);
+        pointer-events: none;
+      }
+      .discover-card .card-badge-video {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-size: 10px;
+        font-weight: 500;
+        background: rgba(0,0,0,0.6);
+        color: white;
+        backdrop-filter: blur(4px);
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .discover-card .card-duration {
+        position: absolute;
+        bottom: 8px;
+        right: 8px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 10px;
+        background: rgba(0,0,0,0.7);
+        color: white;
+      }
+      .discover-card .card-info {
+        padding: 12px;
+      }
+      .discover-card .card-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #F0F0F5;
+        margin-bottom: 8px;
+        line-height: 1.4;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .discover-card .card-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: #6B7088;
+      }
+      .discover-card .card-avatar {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .discover-card .card-author {
+        color: #9CA3AF;
+        flex-shrink: 0;
+      }
+      .discover-card .card-stat {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        color: #6B7088;
+        font-size: 11px;
+      }
+      .discover-card .card-stat i {
+        width: 12px;
+        height: 12px;
+      }
+      /* Thumbnail gradient backgrounds */
+      .thumb-1 { background: linear-gradient(135deg, #1a1a3e 0%, #2d1b69 40%, #1e3a5f 100%); }
+      .thumb-2 { background: linear-gradient(135deg, #2d1b4e 0%, #4a1942 50%, #1a0a2e 100%); }
+      .thumb-3 { background: linear-gradient(135deg, #0c2340 0%, #1e3a5f 40%, #0a1628 100%); }
+      .thumb-4 { background: linear-gradient(135deg, #3b1a1a 0%, #5c2020 40%, #1a0a0a 100%); }
+      .thumb-5 { background: linear-gradient(135deg, #1a3a2a 0%, #0d4a3a 40%, #0a1f18 100%); }
+      .thumb-6 { background: linear-gradient(135deg, #2a1a0a 0%, #5c3a1a 40%, #1f1508 100%); }
+      .thumb-7 { background: linear-gradient(135deg, #1a1a4e 0%, #3b2f7a 50%, #0f0f3a 100%); }
+      .thumb-8 { background: linear-gradient(135deg, #0a2a3a 0%, #1a5a6a 40%, #081820 100%); }
+      .thumb-9 { background: linear-gradient(135deg, #3a1a2a 0%, #6a2a4a 50%, #1f0d18 100%); }
+      .thumb-10 { background: linear-gradient(135deg, #1a2a1a 0%, #2a5a2a 40%, #0d1f0d 100%); }
+      .thumb-11 { background: linear-gradient(135deg, #2a2a0a 0%, #5a5a1a 40%, #1f1f08 100%); }
+      .thumb-12 { background: linear-gradient(135deg, #0a1a3a 0%, #1a3a7a 50%, #050d20 100%); }
+      .thumb-13 { background: linear-gradient(135deg, #3a0a1a 0%, #7a1a3a 50%, #20050f 100%); }
+      .thumb-14 { background: linear-gradient(135deg, #1a3a3a 0%, #2a6a6a 40%, #0d1f1f 100%); }
+      .thumb-15 { background: linear-gradient(135deg, #2a1a3a 0%, #4a2a7a 50%, #150d20 100%); }
+      /* Highlight overlay on cards */
+      .card-highlight {
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 60%;
+        background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, transparent 100%);
+        pointer-events: none;
+      }
+      /* Search input */
+      .search-input {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid #1A1F2E;
+        border-radius: 9999px;
+        height: 36px;
+        padding: 0 16px 0 40px;
+        color: #F0F0F5;
+        font-size: 13px;
+        width: 100%;
+        outline: none;
+        transition: border-color 0.2s;
+      }
+      .search-input::placeholder { color: #6B7088; }
+      .search-input:focus { border-color: #4C7FF8; box-shadow: 0 0 0 3px rgba(76,127,248,0.12); }
+      .search-wrapper { position: relative; }
+      .search-wrapper .search-icon {
+        position: absolute;
+        left: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #6B7088;
+        pointer-events: none;
+      }
+      /* Masonry columns responsive */
+      .masonry-grid {
+        columns: 5;
+        column-gap: 16px;
+      }
+      @media (max-width: 1400px) { .masonry-grid { columns: 4; } }
+      @media (max-width: 1100px) { .masonry-grid { columns: 3; } }
+      @media (max-width: 768px) { .masonry-grid { columns: 2; } }
+    </style>
+
+    <!-- App Shell -->
+    <div data-viewport-mode="app-shell" class="flex flex-col h-screen w-screen overflow-hidden">
+
+        <!-- Spotlight overlay -->
+        <div class="spotlight-overlay"></div>
+
+        <!-- Main row: sidebar + content -->
+        <div class="flex flex-1 min-h-0 min-w-0">
+
+            <!-- Sidebar (72px, fixed dark bg #0A0A14, right border) -->
+            <aside id="sidebar-nav" class="flex flex-col items-center py-3 gap-1 flex-shrink-0 z-10" style="width:72px; background: var(--luxreal-sidebar); border-right: 1px solid var(--luxreal-border);">
+
+                <!-- Top: Logo mark -->
+                <div class="flex items-center justify-center flex-shrink-0" style="height:56px; margin-bottom: 4px;">
+                    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M6 4H22V8H10V24H6V4Z" fill="white"/>
+                        <path d="M14 12H22V16H18V24H14V12Z" fill="white" opacity="0.7"/>
+                    </svg>
+                </div>
+
+                <!-- Spacer to push main nav down -->
+                <div class="flex-1" style="min-height: 20px;"></div>
+
+                <!-- Center nav (创作 active blue, 发现, 作品) - vertically centered -->
+                <nav class="flex flex-col items-center gap-2 flex-shrink-0">
+                    <a id="nav-create" href="create-video.html" class="luxreal-nav-item" title="创作">
+                        <i data-lucide="sparkles" class="w-[22px] h-[22px]"></i>
+                        <span>创作</span>
+                    </a>
+                    <a id="nav-discover" href="discover.html" class="luxreal-nav-item active" title="发现">
+                        <i data-lucide="compass" class="w-[22px] h-[22px]"></i>
+                        <span>发现</span>
+                    </a>
+                    <a id="nav-projects" href="works.html" class="luxreal-nav-item" title="作品">
+                        <i data-lucide="folder" class="w-[22px] h-[22px]"></i>
+                        <span>作品</span>
+                    </a>
+                </nav>
+
+                <!-- Spacer to push lower nav down -->
+                <div class="flex-1" style="min-height: 20px;"></div>
+
+                <!-- Avatar (click to show profile panel) -->
+                <div id="sidebarAvatar" class="sidebar-avatar" style="margin-bottom: 4px;">
+                    Y
+                </div>
+
+                <!-- Credits number -->
+                <span class="sidebar-credits">2,580</span>
+                <!-- Recharge link -->
+                <a href="recharge.html" class="sidebar-recharge" title="充值">充值</a>
+
+                <!-- Profile Panel (popup from avatar) -->
+                <div id="profilePanel" class="profile-panel hidden">
+                    <div class="profile-panel-header">
+                        <div class="profile-avatar-lg">Y</div>
+                        <div class="profile-info">
+                            <div class="profile-name">夜行者</div>
+                            <div class="profile-id">ID: 10086520</div>
+                        </div>
+                    </div>
+                    <div class="profile-panel-divider"></div>
+                    <div class="profile-menu">
+                        <a href="works.html" class="profile-menu-item">
+                            <i data-lucide="folder" class="w-4 h-4"></i>
+                            <span>我的作品</span>
+                            <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                        </a>
+                        <a href="recharge.html" class="profile-menu-item">
+                            <i data-lucide="gem" class="w-4 h-4"></i>
+                            <span>充值中心</span>
+                            <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                        </a>
+                        <a href="#" class="profile-menu-item">
+                            <i data-lucide="settings" class="w-4 h-4"></i>
+                            <span>账号设置</span>
+                            <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                        </a>
+                        <a href="#" class="profile-menu-item">
+                            <i data-lucide="help-circle" class="w-4 h-4"></i>
+                            <span>帮助中心</span>
+                            <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                        </a>
+                    </div>
+                    <div class="profile-panel-divider"></div>
+                    <div class="profile-logout">
+                        <i data-lucide="log-out" class="w-4 h-4"></i>
+                        <span>退出登录</span>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main content area -->
+            <div class="flex-1 flex flex-col min-w-0 min-h-0">
+
+                <!-- Top Bar (h-14) -->
+                <header class="h-14 flex items-center px-6 flex-shrink-0 z-10" style="background: transparent;">
+                    <!-- Left: Page title -->
+                    <h1 class="text-xl font-semibold text-white mr-8">发现</h1>
+
+                    <!-- Search bar -->
+                    <div class="search-wrapper" style="width: 24rem;">
+                        <i data-lucide="search" class="search-icon w-4 h-4"></i>
+                        <input type="text" class="search-input" placeholder="搜索作品、创作者、风格...">
+                    </div>
+                </header>
+
+                <!-- Scrollable content area -->
+                <main data-scroll-region="primary" class="overflow-y-auto flex-1 p-6">
+
+                    <!-- Masonry grid -->
+                    <div class="masonry-grid">
+
+                        <!-- Card 1 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-1" style="height:220px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">00:32</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">星际迷航：深空觉醒</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #3B82F6, #8B5CF6);"></div>
+                                    <span class="card-author">导演阿泽</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>12.4k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>89.2k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 2 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-2" style="height:180px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="image" class="w-3 h-3"></i>
+                                    <span>AI图片</span>
+                                </div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">末日黄昏</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #EF4444, #F59E0B);"></div>
+                                    <span class="card-author">落日画师</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>8.3k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>45.6k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 3 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-3" style="height:260px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">01:15</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">赛博雨林：数字绿洲</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #10B981, #06B6D4);"></div>
+                                    <span class="card-author">青空影像</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>23.1k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>156k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 4 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-4" style="height:200px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">00:45</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">紫水晶传说</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #8B5CF6, #EC4899);"></div>
+                                    <span class="card-author">幻梦工坊</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>18.7k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>102k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 5 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-5" style="height:240px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="image" class="w-3 h-3"></i>
+                                    <span>AI图片</span>
+                                </div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">玫瑰战争：血色婚礼</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #EC4899, #EF4444);"></div>
+                                    <span class="card-author">绯红视觉</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>31.2k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>203k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 6 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-6" style="height:180px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">00:28</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">深海巨兽：深渊回响</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #0369A1, #0284C7);"></div>
+                                    <span class="card-author">深蓝叙事</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>9.6k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>67.8k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 7 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-7" style="height:220px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="image" class="w-3 h-3"></i>
+                                    <span>AI图片</span>
+                                </div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">黄沙古道：丝路遗梦</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #D97706, #F59E0B);"></div>
+                                    <span class="card-author">金色卷轴</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>14.5k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>88.3k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 8 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-8" style="height:200px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">00:52</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">翡翠森林：精灵守护</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #16A34A, #10B981);"></div>
+                                    <span class="card-author">绿野仙踪</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>16.8k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>112k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 9 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-9" style="height:260px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">01:08</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">霓虹都市：夜行者</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #7C3AED, #A855F7);"></div>
+                                    <span class="card-author">霓虹制片厂</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>42.3k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>287k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 10 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-10" style="height:180px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="image" class="w-3 h-3"></i>
+                                    <span>AI图片</span>
+                                </div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">黑白叙事：无声之城</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #475569, #64748B);"></div>
+                                    <span class="card-author">灰调影像</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>7.2k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>38.9k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 11 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-11" style="height:240px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">00:38</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">苍穹之上：云端之战</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #2563EB, #3B82F6);"></div>
+                                    <span class="card-author">天行者工作室</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>27.5k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>198k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 12 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-12" style="height:200px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="image" class="w-3 h-3"></i>
+                                    <span>AI图片</span>
+                                </div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">旧城记忆：时光碎片</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #78716C, #A8A29E);"></div>
+                                    <span class="card-author">老胶片</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>11.3k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>72.4k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 13 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-13" style="height:220px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">00:41</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">青璃：水光之城</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #0D9488, #14B8A6);"></div>
+                                    <span class="card-author">碧水创作</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>19.2k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>134k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 14 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-14" style="height:260px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">01:22</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">赤焰：龙息降临</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #DC2626, #F97316);"></div>
+                                    <span class="card-author">烈焰影像</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>35.6k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>245k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 15 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-15" style="height:180px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">00:25</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">幻境之门：紫霄诀</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #6D28D9, #8B5CF6);"></div>
+                                    <span class="card-author">云梦泽</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>21.7k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>156k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 16 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-1" style="height:240px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="image" class="w-3 h-3"></i>
+                                    <span>AI图片</span>
+                                </div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">星轨：银河信差</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #1E40AF, #6366F1);"></div>
+                                    <span class="card-author">星尘画社</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>13.8k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>95.2k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 17 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-2" style="height:200px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">00:58</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">烬土：荒原求生</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #9A3412, #EA580C);"></div>
+                                    <span class="card-author">荒原导演</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>18.1k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>127k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 18 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-3" style="height:180px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="image" class="w-3 h-3"></i>
+                                    <span>AI图片</span>
+                                </div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">碧潭幽境</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #0F766E, #2DD4BF);"></div>
+                                    <span class="card-author">山青水秀</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>6.5k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>34.7k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 19 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-4" style="height:220px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">00:35</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">紫罗兰之夜</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #5B21B6, #7C3AED);"></div>
+                                    <span class="card-author">暮光制片厂</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>24.9k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>178k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 20 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-5" style="height:200px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="image" class="w-3 h-3"></i>
+                                    <span>AI图片</span>
+                                </div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">绯樱：落华抄</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #BE185D, #EC4899);"></div>
+                                    <span class="card-author">樱花物语</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>29.4k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>201k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 21 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-6" style="height:260px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">01:12</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">蓝鲸之歌：海洋之心</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #075985, #0EA5E9);"></div>
+                                    <span class="card-author">潮汐映画</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>17.6k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>119k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 22 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-7" style="height:180px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">00:22</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">麦田守望者</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #B45309, #FBBF24);"></div>
+                                    <span class="card-author">秋日叙</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>8.9k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>52.1k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 23 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-8" style="height:240px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="image" class="w-3 h-3"></i>
+                                    <span>AI图片</span>
+                                </div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">竹影清风：隐士录</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #15803D, #4ADE80);"></div>
+                                    <span class="card-author">竹林七贤</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>15.3k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>96.7k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 24 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-9" style="height:200px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">00:48</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">暗紫迷宫：意识边界</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #6B21A8, #C084FC);"></div>
+                                    <span class="card-author">迷墙视觉</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>22.8k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>163k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 25 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-10" style="height:220px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="image" class="w-3 h-3"></i>
+                                    <span>AI图片</span>
+                                </div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">雾都孤儿：工业时代</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #334155, #94A3B8);"></div>
+                                    <span class="card-author">蒸汽故事</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>10.7k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>63.5k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 26 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-11" style="height:180px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">00:30</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">天蓝色的彼岸</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #1D4ED8, #60A5FA);"></div>
+                                    <span class="card-author">晴空万里</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>13.2k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>84.6k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 27 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-12" style="height:260px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">00:55</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">墨色山河：长卷</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #57534E, #A8A29E);"></div>
+                                    <span class="card-author">水墨斋</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>26.1k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>189k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 28 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-13" style="height:200px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="image" class="w-3 h-3"></i>
+                                    <span>AI图片</span>
+                                </div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">冰川之下：秘境</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #0E7490, #22D3EE);"></div>
+                                    <span class="card-author">极地映像</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>9.1k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>58.3k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 29 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-14" style="height:220px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">00:42</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">火焰山：红孩儿传</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #B91C1C, #F87171);"></div>
+                                    <span class="card-author">西游新说</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>33.7k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>231k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 30 -->
+                        <div class="discover-card">
+                            <div class="card-thumb">
+                                <div class="card-thumb-gradient thumb-15" style="height:240px;"></div>
+                                <div class="card-overlay"></div>
+                                <div class="card-badge-video">
+                                    <i data-lucide="video" class="w-3 h-3"></i>
+                                    <span>AI视频</span>
+                                </div>
+                                <div class="card-duration">01:05</div>
+                                <div class="card-play-btn">
+                                    <i data-lucide="play" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+                            <div class="card-info">
+                                <div class="card-title">紫电：雷神之锤</div>
+                                <div class="card-meta">
+                                    <div class="card-avatar" style="background: linear-gradient(135deg, #7C3AED, #A78BFA);"></div>
+                                    <span class="card-author">雷霆制作</span>
+                                    <span class="card-stat"><i data-lucide="heart"></i>28.5k</span>
+                                    <span class="card-stat"><i data-lucide="eye"></i>195k</span>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                    <!-- End masonry grid -->
+
+                    <!-- Loading indicator at bottom -->
+                    <div class="flex items-center justify-center py-8 gap-2" style="color: var(--luxreal-muted-foreground);">
+                        <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
+                        <span class="text-sm">加载更多精彩内容...</span>
+                    </div>
+
+                </main>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // ===== Profile Panel (sidebar avatar) =====
+        const profilePanel = document.getElementById('profilePanel');
+        const sidebarAvatar = document.getElementById('sidebarAvatar');
+
+        function positionProfilePanel() {
+            if (!profilePanel || !sidebarAvatar) return;
+            const avatarRect = sidebarAvatar.getBoundingClientRect();
+            const panelRect = profilePanel.getBoundingClientRect();
+            
+            // 优先：面板顶部与头像顶部对齐（向下展开）
+            let top = avatarRect.top - 8;
+            
+            // 如果下方空间不够（面板底部超出视口），改为从头像底部向上展开
+            if (top + panelRect.height > window.innerHeight - 12) {
+                top = avatarRect.bottom - panelRect.height + 8;
+            }
+            
+            // 上方也不够的话，贴顶
+            if (top < 12) top = 12;
+            
+            profilePanel.style.top = top + 'px';
+        }
+
+        function toggleProfilePanel() {
+            if (!profilePanel) return;
+            if (profilePanel.classList.contains('hidden')) {
+                profilePanel.classList.remove('hidden');
+                positionProfilePanel();
+                lucide.createIcons();
+            } else {
+                profilePanel.classList.add('hidden');
+            }
+        }
+
+        if (sidebarAvatar) {
+            sidebarAvatar.addEventListener('click', function(e) {
+                e.stopPropagation();
+                toggleProfilePanel();
+            });
+        }
+
+        // Close profile panel when clicking outside
+        document.addEventListener('click', function(e) {
+            if (profilePanel && !profilePanel.classList.contains('hidden')) {
+                if (!profilePanel.contains(e.target) && 
+                    e.target !== sidebarAvatar && !sidebarAvatar.contains(e.target)) {
+                    profilePanel.classList.add('hidden');
+                }
+            }
+        });
+
+        // Reposition on resize
+        window.addEventListener('resize', function() {
+            if (profilePanel && !profilePanel.classList.contains('hidden')) {
+                positionProfilePanel();
+            }
+        });
+    </script>
+</body>
+</html>

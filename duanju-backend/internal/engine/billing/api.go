@@ -3,6 +3,7 @@ package billing
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -19,14 +20,14 @@ func NewPointsAPI(store BillStore) *PointsAPI {
 	return &PointsAPI{store: store}
 }
 
-// Me 9.3 我的积分账户。
+// Me 9.3 我的积分账户（无锁查询）。
 func (a *PointsAPI) Me(c *gin.Context) {
 	uid := c.GetInt64(middleware.CtxUserID)
 	if uid == 0 {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
 		return
 	}
-	acc, err := a.store.GetAccountForUpdate(c.Request.Context(), "USER", uid)
+	acc, err := a.store.GetAccount(c.Request.Context(), "USER", uid)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取积分账户失败")
 		return
@@ -37,22 +38,27 @@ func (a *PointsAPI) Me(c *gin.Context) {
 	})
 }
 
-// Transactions 9.4 积分流水。
+// Transactions 9.4 积分流水（分页）。
 func (a *PointsAPI) Transactions(c *gin.Context) {
 	uid := c.GetInt64(middleware.CtxUserID)
 	if uid == 0 {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
 		return
 	}
-	acc, err := a.store.GetAccountForUpdate(c.Request.Context(), "USER", uid)
+	acc, err := a.store.GetAccount(c.Request.Context(), "USER", uid)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取积分账户失败")
 		return
 	}
-	items, total, err := a.store.ListTransactions(c.Request.Context(), acc.ID, 1, 20)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	items, total, err := a.store.ListTransactions(c.Request.Context(), acc.ID, page, pageSize)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取积分流水失败")
 		return
 	}
-	httpx.OK(c, gin.H{"items": items, "pagination": gin.H{"page": 1, "page_size": 20, "total": total, "total_pages": (total + 19) / 20}})
+	if page < 1 {
+		page = 1
+	}
+	httpx.OK(c, gin.H{"items": items, "pagination": gin.H{"page": page, "page_size": pageSize, "total": total, "total_pages": (total + pageSize - 1) / pageSize}})
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/duanju/backend/internal/engine/billing"
 	"github.com/duanju/backend/internal/engine/notify"
 	"github.com/duanju/backend/internal/middleware"
+	"github.com/duanju/backend/internal/pkg/cryptox"
 	"github.com/duanju/backend/internal/pkg/httpx"
 	"github.com/duanju/backend/internal/pkg/jwt"
 	"github.com/duanju/backend/internal/pkg/logger"
@@ -53,27 +54,40 @@ func Setup(cfg *config.Config, lg *zap.Logger, pool *pgxpool.Pool, rdb *redis.Cl
 
 	// 用户端分组 /api/v1（05 A 章 Base URL）
 	v1 := r.Group("/api/v1")
-	v1.Use(middleware.RateLimit(rdb, pool, cfg.App.Env))
 
 	jwtMW := middleware.JWT(jwtMgr, rdb, cfg.App.Env)
 
-	// auth 模块（公开端点 + /auth/me 鉴权）
+	// 公开路由组：仅 IP 限流（未登录 20/min）
+	v1Pub := v1.Group("", middleware.RateLimit(rdb, pool, cfg.App.Env))
+
+	// auth 模块（公开端点 + /auth/me 自带 JWT）
 	authRepo := auth.NewRepo(pool)
 	authSvc := auth.NewService(authRepo, jwtMgr, rdb, cfg.App.Env, lg)
-	auth.NewHandler(authSvc, jwtMgr, rdb, cfg.App.Env).RegisterRoutes(v1)
+	auth.NewHandler(authSvc, jwtMgr, rdb, cfg.App.Env).RegisterRoutes(v1Pub)
 
-	// space 模块（个人空间子集：JWT + 用户 ID 解析）
+	// 受保护路由组：JWT → LoadUserID → 限流（登录用户 60/min；修复限流顺序：先解析身份再限流）
 	spaceRepo := space.NewRepo(pool)
-	spaceBilling := repository.NewSpaceBillingStore(pool)
-	spaceSvc := space.NewService(spaceRepo, spaceBilling)
 	loadUserMW := middleware.LoadUserID(func(ctx context.Context, userUUID string) (int64, error) {
 		return spaceRepo.GetUserIDByUUID(ctx, userUUID)
 	})
-	space.NewHandler(spaceSvc).RegisterRoutes(v1, jwtMW, loadUserMW)
+	v1Auth := v1.Group("", jwtMW, loadUserMW, middleware.RateLimit(rdb, pool, cfg.App.Env))
+
+	// RBAC 角色中间件（L2：admin=SUPER_ADMIN；audit=SUPER_ADMIN/AUDITOR）
+	adminMW := middleware.RequireRole(pool, "SUPER_ADMIN")
+	auditMW := middleware.RequireRole(pool, "SUPER_ADMIN", "AUDITOR")
+
+	// space 模块（个人空间子集：JWT + 用户 ID 解析）
+	spaceBilling := repository.NewSpaceBillingStore(pool)
+	spaceSvc := space.NewService(spaceRepo, spaceBilling)
+	space.NewHandler(spaceSvc).RegisterRoutes(v1Auth)
+
+	// 计费引擎（S1-B09）：任务冻结/结算（API 侧 Freeze + worker Settler）
+	billingStore := repository.NewBillingStore(pool)
+	billingEngine := billing.NewEngine(billingStore)
 
 	// creation 模块（项目 CRUD + 拆分触发 + 层级读，S1-B03）
 	creationRepo := creation.NewRepo(pool)
-	creationSvc := creation.NewService(creationRepo, lg)
+	creationSvc := creation.NewService(creationRepo, lg, billingEngine)
 
 	// 资产引擎 E3（S1-B06：MinIO 预签名）+ 资产服务
 	assetStore := repository.NewAssetStore(pool)
@@ -87,11 +101,11 @@ func Setup(cfg *config.Config, lg *zap.Logger, pool *pgxpool.Pool, rdb *redis.Cl
 	if err != nil {
 		lg.Fatal("S3 客户端初始化失败", logger.F("err", err)...)
 	}
-	assetSvc := creation.NewAssetService(creationRepo, assetClient, assetStore)
+	assetSvc := creation.NewAssetService(creationRepo, assetClient, assetStore, billingEngine)
 
 	// 导出服务（S1-B08）：触发导出 + 列表 + 详情
 	exportStore := repository.NewExportStore(pool)
-	exportSvc := creation.NewExportService(creationRepo, assetClient, exportStore)
+	exportSvc := creation.NewExportService(creationRepo, assetClient, exportStore, billingEngine)
 
 	// 画布服务（S2-B07）：画布 CRUD + 工作流执行
 	canvasStore := repository.NewCanvasStore(pool)
@@ -117,13 +131,40 @@ func Setup(cfg *config.Config, lg *zap.Logger, pool *pgxpool.Pool, rdb *redis.Cl
 	openStore := repository.NewOpenAPIStore(pool)
 	openSvc := creation.NewOpenAPIService(openStore)
 
-	creation.NewHandler(creationSvc, assetSvc, exportSvc, canvasSvc, memberSvc, contentSvc, marketSvc, adminSvc, openSvc).RegisterRoutes(v1, jwtMW, loadUserMW)
+	// S5 补齐服务集（接口覆盖率 89 端点）
+	// 模型配置密钥（model_keys.key_encrypted 加解密；缺失回退 JWT_SECRET，仅开发期）
+	modelEncSecret := os.Getenv("MODEL_KEY_ENC_SECRET")
+	if modelEncSecret == "" {
+		modelEncSecret = cfg.JWT.Secret
+	}
+	modelKeyStore := repository.NewModelKeyStore(pool, cryptox.DeriveKey(modelEncSecret), false)
+	extra := &creation.ExtraServices{
+		Storyboard:  creation.NewStoryboardService(creationRepo),
+		AssetDetail: creation.NewAssetDetailService(creationRepo),
+		Biz:         creation.NewBizService(creationRepo),
+		AdminExtra:  creation.NewAdminExtraService(creationRepo, modelKeyStore),
+		CanvasExtra: creation.NewCanvasExtraService(creationRepo),
+	}
+
+	creation.NewHandler(creationSvc, assetSvc, exportSvc, canvasSvc, memberSvc, contentSvc, marketSvc, adminSvc, openSvc).RegisterRoutes(v1Auth, adminMW, auditMW, extra)
+
+	// 厂商异步生成回调（无鉴权，签名由厂商侧保证）
+	v1Pub.POST("/internal/model-callback/:provider", func(c *gin.Context) {
+		extra.CanvasExtra.ModelCallback(c, c.Param("provider"))
+	})
+
+	// 公开查询端点（7.x 发现 / 9.x 套餐 / 10.x 模型 —— 无需登录）
+	v1Pub.GET("/feed", contentSvc.PublicFeed)
+	v1Pub.GET("/works/public", contentSvc.PublicWorksSearch)
+	v1Pub.GET("/works/:work_id/public", func(c *gin.Context) { contentSvc.PublicWorkDetail(c, c.Param("work_id")) })
+	v1Pub.GET("/packages", extra.Biz.ListPackages)
+	v1Pub.GET("/models", extra.Biz.ListModels)
+	v1Pub.GET("/point-packages", extra.Biz.ListPointPackages)
 
 	// 计费模块（S1-B09）：9.3 积分账户 / 9.4 积分流水
-	billingStore := repository.NewBillingStore(pool)
 	pointsAPI := billing.NewPointsAPI(billingStore)
-	v1.GET("/points", jwtMW, loadUserMW, pointsAPI.Me)
-	v1.GET("/points/transactions", jwtMW, loadUserMW, pointsAPI.Transactions)
+	v1Auth.GET("/points", pointsAPI.Me)
+	v1Auth.GET("/points/transactions", pointsAPI.Transactions)
 
 	// 支付模块（S1-B10）：9.5 下单 / 9.7 回调 / 9.8 状态轮询
 	orderStore := repository.NewOrderStore(pool)
@@ -134,15 +175,17 @@ func Setup(cfg *config.Config, lg *zap.Logger, pool *pgxpool.Pool, rdb *redis.Cl
 		}
 		return def
 	}
+	// 生产环境强制关闭 mock 支付（P0 修复：防伪造回调）；mock 密钥生产环境不使用
+	useMock := cfg.App.Env != "production" && os.Getenv("ALIPAY_USE_MOCK") != "false"
 	alipaySvc := billing.NewAlipayService(orderStore, billing.AlipayConfig{
 		AppID:      envOrDefault("ALIPAY_APP_ID", "2021000000000000"),
 		MockSecret: envOrDefault("ALIPAY_MOCK_SECRET", "dev-alipay-mock-secret"),
-		UseMock:    os.Getenv("ALIPAY_USE_MOCK") != "false",
+		UseMock:    useMock,
 	})
 	payHandler := billing.NewPaymentHandler(alipaySvc)
-	v1.POST("/orders", jwtMW, loadUserMW, payHandler.CreateOrder)
-	v1.GET("/orders/:order_no/status", jwtMW, loadUserMW, payHandler.Status)
-	v1.POST("/orders/:order_no/pay-callback", payHandler.PayCallback) // 支付宝服务端回调（无鉴权）
+	v1Auth.POST("/orders", payHandler.CreateOrder)
+	v1Auth.GET("/orders/:order_no/status", payHandler.Status)
+	v1Pub.POST("/orders/:order_no/pay-callback", payHandler.PayCallback) // 支付宝服务端回调（无鉴权，验签保护）
 
 	// 通知引擎（S1-B11）：WS 端点 + TAG 8 通知 API
 	notifyHub := notify.NewHub()
@@ -151,9 +194,9 @@ func Setup(cfg *config.Config, lg *zap.Logger, pool *pgxpool.Pool, rdb *redis.Cl
 	r.GET("/ws/v1", wsEndpoint.Handle) // WS 升级（token 鉴权）
 	notifyStore := repository.NewNotifyStore(pool)
 	notifyAPI := notify.NewNotifyAPI(notifyStore)
-	v1.GET("/notifications", jwtMW, loadUserMW, notifyAPI.List)
-	v1.PUT("/notifications/:notification_id/read", jwtMW, loadUserMW, notifyAPI.MarkRead)
-	v1.PUT("/notifications/read-all", jwtMW, loadUserMW, notifyAPI.MarkAllRead)
+	v1Auth.GET("/notifications", notifyAPI.List)
+	v1Auth.PUT("/notifications/:notification_id/read", notifyAPI.MarkRead)
+	v1Auth.PUT("/notifications/read-all", notifyAPI.MarkAllRead)
 
 	return r
 }

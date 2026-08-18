@@ -110,7 +110,16 @@ func (s *CanvasStore) SaveNodes(ctx context.Context, canvasID int64, nodes []jso
 	return tx.Commit(ctx)
 }
 
+// SaveSnapshot 保存自动快照（服务端 30s 防抖：同一画布近 30s 已有快照则跳过，防表膨胀）。
 func (s *CanvasStore) SaveSnapshot(ctx context.Context, canvasID int64, data json.RawMessage, version int, userID int64) error {
+	// 30s 防抖检查
+	var lastSec float64
+	if err := s.pool.QueryRow(ctx, `
+		SELECT EXTRACT(EPOCH FROM (NOW() - created_at))
+		FROM canvas_auto_save_snapshots WHERE canvas_id=$1 ORDER BY id DESC LIMIT 1`, canvasID).
+		Scan(&lastSec); err == nil && lastSec < 30 {
+		return nil // 防抖期内跳过
+	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO canvas_auto_save_snapshots (canvas_id, data, version, created_by)
 		VALUES ($1, $2::jsonb, $3, $4)`, canvasID, string(data), version, userID)

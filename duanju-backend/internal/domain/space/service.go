@@ -4,7 +4,6 @@ package space
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -26,7 +25,8 @@ type BillingOps interface {
 	ListSpaceTxns(ctx context.Context, spaceID, viewerID int64, isFull bool, page, pageSize int) ([]map[string]any, int, error)
 	MemberConsumptionReport(ctx context.Context, spaceID int64) ([]map[string]any, error)
 	CreateSpaceOrder(ctx context.Context, userID, spaceID int64, pkgCode, amountYuan string, points int) (string, error)
-	PaySpaceOrder(ctx context.Context, orderNo string, points int) error
+	// PaySpaceOrder 仅订单创建者可触发入账。
+	PaySpaceOrder(ctx context.Context, orderNo string, points int, requesterID int64) error
 }
 
 func NewService(repo *Repo, billingOps BillingOps) *Service {
@@ -328,25 +328,29 @@ func (s *Service) TeamRecharge(c *gin.Context, spaceUUID string) {
 	}
 	orderNo, err := s.billingOps.CreateSpaceOrder(c.Request.Context(), uid, space.ID, req.PackageCode, req.AmountYuan, req.Points)
 	if err != nil {
-		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建团队充值订单失败")
+		// 档位校验/参数问题透传明确提示（P0 修复）
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "下单失败："+err.Error())
 		return
 	}
 	httpx.OK(c, gin.H{"order_no": orderNo, "amount_yuan": req.AmountYuan, "points": req.Points})
 }
 
-// TeamRechargeCallback 团队订单支付回调（mock HMAC 验签由订单侧完成；此处直接入账）。
+// TeamRechargeCallback 团队订单支付回调（开发期端点：仅订单创建者可触发，防止零元入账）。
 func (s *Service) TeamRechargeCallback(c *gin.Context, orderNo string) {
-	// 开发期：直接入账（生产由支付宝 7 步验签后调用）
-	// 查询积分并入账
+	uid, err := currentUserID(c)
+	if err != nil {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	// 查询积分并入账（PaySpaceOrder 内部校验订单归属 + 幂等）
 	var points int
 	if err := s.repo.pool.QueryRow(c.Request.Context(),
 		`SELECT points_granted_total FROM orders WHERE order_no=$1`, orderNo).Scan(&points); err != nil {
 		httpx.Fail(c, http.StatusNotFound, 80002, "订单不存在")
 		return
 	}
-	if err := s.billingOps.PaySpaceOrder(c.Request.Context(), orderNo, points); err != nil {
-		fmt.Printf("[space-billing-debug] PaySpaceOrder(%s) err=%v\n", orderNo, err)
-		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "入账失败")
+	if err := s.billingOps.PaySpaceOrder(c.Request.Context(), orderNo, points, uid); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, 80002, "入账失败："+err.Error())
 		return
 	}
 	httpx.OK(c, nil)

@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>计费财务 - Empty Broken 管理后台</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          'bg-deep': '#0B0B1A',
+          'bg-card': '#151525',
+          'bg-card-light': '#1A1A2E',
+          'border-dark': '#2A2A3E',
+          'amber-gold': '#fbbf24',
+          'amber-dim': '#d97706',
+          'text-primary': '#ffffff',
+          'text-secondary': '#9ca3af',
+          'text-muted': '#6b7280',
+        },
+        fontFamily: {
+          sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        },
+      }
+    }
+  }
+</script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    background: #0B0B1A;
+    color: #fff;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #151525; }
+  ::-webkit-scrollbar-thumb { background: #2A2A3E; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3a4e; }
+
+  /* Sidebar menu item active */
+  .menu-item.active {
+    background: linear-gradient(90deg, rgba(251, 191, 36, 0.15) 0%, rgba(251, 191, 36, 0.05) 100%);
+    color: #fbbf24;
+    border-left: 3px solid #fbbf24;
+  }
+  .menu-item.active svg { color: #fbbf24; }
+
+  .menu-item:hover {
+    background: rgba(255,255,255,0.05);
+  }
+
+  /* Notification dot */
+  .notif-dot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    background: #ef4444;
+    border-radius: 50%;
+    border: 2px solid #0D0D0D;
+  }
+
+  /* Tab styles */
+  .tab-btn {
+    position: relative;
+    padding: 12px 0;
+    color: #9ca3af;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.2s ease;
+  }
+  .tab-btn:hover {
+    color: #fff;
+  }
+  .tab-btn.active {
+    color: #fbbf24;
+  }
+  .tab-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #fbbf24, #d97706);
+    border-radius: 2px;
+  }
+
+  /* Package card hover */
+  .package-card {
+    transition: all 0.3s ease;
+    border: 1px solid #2A2A3E;
+  }
+  .package-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(251, 191, 36, 0.5);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(251,191,36,0.15), 0 0 30px rgba(251,191,36,0.1);
+  }
+
+  /* Hot tag */
+  .tag-hot {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+    color: #0B0B1A;
+  }
+  .tag-recommend {
+    background: linear-gradient(135deg, #8b5cf6, #6366f1);
+    color: #fff;
+  }
+  .tag-new {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: #fff;
+  }
+
+  /* Status tags */
+  .status-online {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+  .status-offline {
+    background: rgba(107, 114, 128, 0.15);
+    color: #6b7280;
+    border: 1px solid rgba(107, 114, 128, 0.3);
+  }
+
+  /* Price glow */
+  .price-gold {
+    text-shadow: 0 0 20px rgba(251, 191, 36, 0.3);
+  }
+
+  /* Select dropdown custom */
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 32px;
+  }
+
+  /* Glow effect for gold text */
+  .glow-gold {
+    text-shadow: 0 0 20px rgba(251, 191, 36, 0.3);
+  }
+
+  /* Secondary tab dimmed preview */
+  .dimmed-tab {
+    opacity: 0.35;
+    filter: grayscale(40%);
+    pointer-events: none;
+  }
+
+  /* Benefit check icon */
+  .benefit-check {
+    color: #22c55e;
+  }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="flex min-h-screen">
+
+  <!-- ========== SIDEBAR ========== -->
+  <aside class="w-[240px] bg-[#0D0D0D] border-r border-[#2A2A3E] flex flex-col flex-shrink-0 fixed h-full z-20">
+    <!-- Logo -->
+    <div class="h-[60px] flex items-center px-5 border-b border-[#2A2A3E]">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center mr-3">
+        <svg class="w-5 h-5 text-[#0B0B1A]" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M8 5v14l11-7z"/>
+        </svg>
+      </div>
+      <span class="text-white font-bold text-lg tracking-wide">Empty Broken <span class="text-amber-gold">Admin</span></span>
+    </div>
+
+    <!-- Menu -->
+    <nav class="flex-1 py-4 overflow-y-auto">
+      <div class="px-3 mb-2 text-[11px] text-text-muted uppercase tracking-wider font-medium">主菜单</div>
+
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="layout-dashboard" class="w-[18px] h-[18px] mr-3"></i>
+        <span>工作台</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="users" class="w-[18px] h-[18px] mr-3"></i>
+        <span>用户管理</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="shield-check" class="w-[18px] h-[18px] mr-3"></i>
+        <span>内容审核</span>
+        <span class="ml-auto text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">12</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="film" class="w-[18px] h-[18px] mr-3"></i>
+        <span>作品管理</span>
+      </a>
+      <a href="#" class="menu-item active flex items-center px-5 py-3 text-sm cursor-pointer">
+        <i data-lucide="wallet" class="w-[18px] h-[18px] mr-3"></i>
+        <span>计费财务</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="cpu" class="w-[18px] h-[18px] mr-3"></i>
+        <span>算力任务</span>
+        <span class="ml-auto text-[10px] bg-amber-gold/20 text-amber-gold px-2 py-0.5 rounded-full">34</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="settings" class="w-[18px] h-[18px] mr-3"></i>
+        <span>平台配置</span>
+      </a>
+    </nav>
+
+    <!-- Bottom user -->
+    <div class="p-4 border-t border-[#2A2A3E]">
+      <div class="flex items-center">
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center text-[#0B0B1A] font-bold text-sm">
+          A
+        </div>
+        <div class="ml-3 flex-1 min-w-0">
+          <div class="text-sm font-medium text-white truncate">Admin</div>
+          <div class="text-xs text-text-muted truncate">超级管理员</div>
+        </div>
+        <i data-lucide="chevron-up" class="w-4 h-4 text-text-muted"></i>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ========== MAIN WRAPPER ========== -->
+  <div class="flex-1 ml-[240px] flex flex-col min-w-0">
+
+    <!-- ========== TOP BAR ========== -->
+    <header class="h-[60px] bg-[#0D0D0D]/80 backdrop-blur-sm border-b border-[#2A2A3E] flex items-center justify-between px-6 sticky top-0 z-10">
+      <!-- Left: breadcrumb -->
+      <div class="flex items-center">
+        <i data-lucide="home" class="w-4 h-4 text-text-muted mr-2"></i>
+        <span class="text-text-muted text-sm">管理后台</span>
+        <i data-lucide="chevron-right" class="w-4 h-4 text-text-muted mx-2"></i>
+        <span class="text-white text-sm font-medium">计费财务</span>
+      </div>
+
+      <!-- Right: search + notif + avatar -->
+      <div class="flex items-center gap-4">
+        <!-- Search -->
+        <div class="relative">
+          <i data-lucide="search" class="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input type="text" placeholder="搜索..." class="bg-bg-card border border-[#2A2A3E] rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-text-muted focus:outline-none focus:border-amber-gold/50 w-56 transition-colors">
+        </div>
+
+        <!-- Notification -->
+        <button class="relative w-9 h-9 rounded-lg bg-bg-card border border-[#2A2A3E] flex items-center justify-center hover:border-[#3A3A4E] transition-colors">
+          <i data-lucide="bell" class="w-4 h-4 text-text-secondary"></i>
+          <span class="notif-dot"></span>
+        </button>
+
+        <!-- Divider -->
+        <div class="w-px h-6 bg-[#2A2A3E]"></div>
+
+        <!-- Avatar -->
+        <div class="flex items-center cursor-pointer">
+          <div class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center text-[#0B0B1A] font-bold text-sm">
+            A
+          </div>
+          <span class="ml-2 text-sm text-white">Admin</span>
+          <i data-lucide="chevron-down" class="w-4 h-4 text-text-muted ml-1"></i>
+        </div>
+      </div>
+    </header>
+
+    <!-- ========== MAIN CONTENT ========== -->
+    <main class="flex-1 p-6 overflow-auto">
+      <!-- Page title -->
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white mb-1">计费财务</h1>
+          <p class="text-sm text-text-muted">管理平台套餐配置、订单流水与提现审核</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <!-- 导出对账报表 -->
+          <button class="flex items-center px-4 py-2 bg-bg-card border border-[#2A2A3E] rounded-lg text-sm text-text-secondary hover:border-amber-gold/50 hover:text-white transition-colors">
+            <i data-lucide="file-text" class="w-4 h-4 mr-2"></i>
+            导出对账报表
+          </button>
+          <!-- 新增套餐 -->
+          <button class="flex items-center px-4 py-2 bg-gradient-to-r from-amber-gold to-amber-dim rounded-lg text-sm text-[#0B0B1A] font-semibold hover:shadow-lg hover:shadow-amber-gold/20 transition-all">
+            <i data-lucide="plus" class="w-4 h-4 mr-2"></i>
+            新增套餐
+          </button>
+        </div>
+      </div>
+
+      <!-- ========== TABS ========== -->
+      <div class="border-b border-[#2A2A3E] mb-6">
+        <div class="flex items-center gap-8">
+          <div class="tab-btn active" data-tab="packages">
+            <span class="flex items-center gap-2">
+              <i data-lucide="package" class="w-4 h-4"></i>
+              套餐管理
+            </span>
+          </div>
+          <div class="tab-btn" data-tab="orders">
+            <span class="flex items-center gap-2">
+              <i data-lucide="receipt" class="w-4 h-4"></i>
+              订单流水
+            </span>
+          </div>
+          <div class="tab-btn" data-tab="withdraw">
+            <span class="flex items-center gap-2">
+              <i data-lucide="banknote" class="w-4 h-4"></i>
+              提现审核
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========== TAB 1: 套餐管理 ========== -->
+      <div id="tab-packages" class="tab-content">
+        <!-- Filter bar -->
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-4 mb-6">
+          <div class="flex items-center gap-3 flex-wrap">
+            <!-- 搜索框 -->
+            <div class="relative flex-1 min-w-[240px] max-w-[320px]">
+              <i data-lucide="search" class="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2"></i>
+              <input type="text" placeholder="搜索套餐名称..." class="w-full bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-text-muted focus:outline-none focus:border-amber-gold/50 transition-colors">
+            </div>
+
+            <!-- 状态 -->
+            <div class="relative">
+              <select class="bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-gold/50 transition-colors w-[120px]">
+                <option>全部状态</option>
+                <option>上架中</option>
+                <option>已下架</option>
+              </select>
+            </div>
+
+            <!-- 类型 -->
+            <div class="relative">
+              <select class="bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-gold/50 transition-colors w-[130px]">
+                <option>全部类型</option>
+                <option>订阅</option>
+                <option>积分包</option>
+                <option>扩容包</option>
+              </select>
+            </div>
+
+            <!-- 搜索按钮 -->
+            <button class="flex items-center px-4 py-2 bg-gradient-to-r from-amber-gold to-amber-dim rounded-lg text-sm text-[#0B0B1A] font-semibold hover:shadow-lg hover:shadow-amber-gold/20 transition-all">
+              <i data-lucide="search" class="w-4 h-4 mr-2"></i>
+              搜索
+            </button>
+
+            <!-- 重置按钮 -->
+            <button class="flex items-center px-4 py-2 bg-bg-card border border-[#2A2A3E] rounded-lg text-sm text-text-secondary hover:border-[#3A3A4E] hover:text-white transition-colors">
+              <i data-lucide="rotate-ccw" class="w-4 h-4 mr-2"></i>
+              重置
+            </button>
+          </div>
+        </div>
+
+        <!-- Package Grid -->
+        <div class="grid grid-cols-4 gap-5">
+          <!-- Card 1: 旗舰会员 - 热门 -->
+          <div class="package-card bg-bg-card rounded-xl p-5 flex flex-col">
+            <div class="flex items-start justify-between mb-3">
+              <div>
+                <div class="flex items-center gap-2 mb-1">
+                  <h3 class="text-white font-semibold text-base">旗舰会员</h3>
+                  <span class="tag-hot text-[10px] font-bold px-2 py-0.5 rounded-md">热门</span>
+                </div>
+                <div class="text-xs text-text-muted">年度订阅</div>
+              </div>
+              <span class="status-online text-[11px] font-medium px-2 py-0.5 rounded-md">上架中</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex items-baseline gap-1">
+                <span class="text-sm text-amber-gold">¥</span>
+                <span class="text-3xl font-bold text-amber-gold price-gold font-mono">999</span>
+                <span class="text-xs text-text-muted">/年</span>
+              </div>
+              <div class="text-xs text-text-muted mt-1 line-through">原价 ¥1,299</div>
+            </div>
+
+            <div class="mb-4 pb-4 border-b border-[#2A2A3E]">
+              <div class="flex items-center gap-2 mb-2">
+                <i data-lucide="coins" class="w-4 h-4 text-amber-gold"></i>
+                <span class="text-sm text-white font-medium">100,000 积分</span>
+              </div>
+              <div class="text-xs text-text-muted">额外赠送 20,000 积分</div>
+            </div>
+
+            <div class="flex-1 space-y-2 mb-5">
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>无限视频生成</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>高清 4K 画质输出</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>专属客服优先处理</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>商业授权许可</span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-bg-card-light border border-[#2A2A3E] rounded-lg text-xs text-text-secondary hover:border-amber-gold/50 hover:text-amber-gold transition-colors">
+                <i data-lucide="edit-3" class="w-3.5 h-3.5 mr-1.5"></i>
+                编辑
+              </button>
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 hover:bg-red-500/20 transition-colors">
+                <i data-lucide="arrow-down-to-line" class="w-3.5 h-3.5 mr-1.5"></i>
+                下架
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 2: 高级会员 - 推荐 -->
+          <div class="package-card bg-bg-card rounded-xl p-5 flex flex-col">
+            <div class="flex items-start justify-between mb-3">
+              <div>
+                <div class="flex items-center gap-2 mb-1">
+                  <h3 class="text-white font-semibold text-base">高级会员</h3>
+                  <span class="tag-recommend text-[10px] font-bold px-2 py-0.5 rounded-md">推荐</span>
+                </div>
+                <div class="text-xs text-text-muted">月度订阅</div>
+              </div>
+              <span class="status-online text-[11px] font-medium px-2 py-0.5 rounded-md">上架中</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex items-baseline gap-1">
+                <span class="text-sm text-amber-gold">¥</span>
+                <span class="text-3xl font-bold text-amber-gold price-gold font-mono">99</span>
+                <span class="text-xs text-text-muted">/月</span>
+              </div>
+              <div class="text-xs text-text-muted mt-1">连续包月 ¥79/月</div>
+            </div>
+
+            <div class="mb-4 pb-4 border-b border-[#2A2A3E]">
+              <div class="flex items-center gap-2 mb-2">
+                <i data-lucide="coins" class="w-4 h-4 text-amber-gold"></i>
+                <span class="text-sm text-white font-medium">5,000 积分</span>
+              </div>
+              <div class="text-xs text-text-muted">每月自动续期</div>
+            </div>
+
+            <div class="flex-1 space-y-2 mb-5">
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>每日 50 次生成</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>1080P 高清画质</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>标准客服支持</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>去除水印</span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-bg-card-light border border-[#2A2A3E] rounded-lg text-xs text-text-secondary hover:border-amber-gold/50 hover:text-amber-gold transition-colors">
+                <i data-lucide="edit-3" class="w-3.5 h-3.5 mr-1.5"></i>
+                编辑
+              </button>
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 hover:bg-red-500/20 transition-colors">
+                <i data-lucide="arrow-down-to-line" class="w-3.5 h-3.5 mr-1.5"></i>
+                下架
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 3: 基础会员 - 新品 -->
+          <div class="package-card bg-bg-card rounded-xl p-5 flex flex-col">
+            <div class="flex items-start justify-between mb-3">
+              <div>
+                <div class="flex items-center gap-2 mb-1">
+                  <h3 class="text-white font-semibold text-base">基础会员</h3>
+                  <span class="tag-new text-[10px] font-bold px-2 py-0.5 rounded-md">新品</span>
+                </div>
+                <div class="text-xs text-text-muted">月度订阅</div>
+              </div>
+              <span class="status-online text-[11px] font-medium px-2 py-0.5 rounded-md">上架中</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex items-baseline gap-1">
+                <span class="text-sm text-amber-gold">¥</span>
+                <span class="text-3xl font-bold text-amber-gold price-gold font-mono">29</span>
+                <span class="text-xs text-text-muted">/月</span>
+              </div>
+              <div class="text-xs text-text-muted mt-1">入门首选</div>
+            </div>
+
+            <div class="mb-4 pb-4 border-b border-[#2A2A3E]">
+              <div class="flex items-center gap-2 mb-2">
+                <i data-lucide="coins" class="w-4 h-4 text-amber-gold"></i>
+                <span class="text-sm text-white font-medium">1,000 积分</span>
+              </div>
+              <div class="text-xs text-text-muted">每月自动续期</div>
+            </div>
+
+            <div class="flex-1 space-y-2 mb-5">
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>每日 10 次生成</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>720P 画质输出</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>基础模板库</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>社区支持</span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-bg-card-light border border-[#2A2A3E] rounded-lg text-xs text-text-secondary hover:border-amber-gold/50 hover:text-amber-gold transition-colors">
+                <i data-lucide="edit-3" class="w-3.5 h-3.5 mr-1.5"></i>
+                编辑
+              </button>
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 hover:bg-red-500/20 transition-colors">
+                <i data-lucide="arrow-down-to-line" class="w-3.5 h-3.5 mr-1.5"></i>
+                下架
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 4: 季度会员 -->
+          <div class="package-card bg-bg-card rounded-xl p-5 flex flex-col">
+            <div class="flex items-start justify-between mb-3">
+              <div>
+                <div class="flex items-center gap-2 mb-1">
+                  <h3 class="text-white font-semibold text-base">季度会员</h3>
+                </div>
+                <div class="text-xs text-text-muted">季度订阅</div>
+              </div>
+              <span class="status-online text-[11px] font-medium px-2 py-0.5 rounded-md">上架中</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex items-baseline gap-1">
+                <span class="text-sm text-amber-gold">¥</span>
+                <span class="text-3xl font-bold text-amber-gold price-gold font-mono">249</span>
+                <span class="text-xs text-text-muted">/季</span>
+              </div>
+              <div class="text-xs text-text-muted mt-1">省 ¥48，约 ¥83/月</div>
+            </div>
+
+            <div class="mb-4 pb-4 border-b border-[#2A2A3E]">
+              <div class="flex items-center gap-2 mb-2">
+                <i data-lucide="coins" class="w-4 h-4 text-amber-gold"></i>
+                <span class="text-sm text-white font-medium">18,000 积分</span>
+              </div>
+              <div class="text-xs text-text-muted">季度一次性发放</div>
+            </div>
+
+            <div class="flex-1 space-y-2 mb-5">
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>每日 50 次生成</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>1080P 高清画质</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>标准客服支持</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>去除水印</span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-bg-card-light border border-[#2A2A3E] rounded-lg text-xs text-text-secondary hover:border-amber-gold/50 hover:text-amber-gold transition-colors">
+                <i data-lucide="edit-3" class="w-3.5 h-3.5 mr-1.5"></i>
+                编辑
+              </button>
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 hover:bg-red-500/20 transition-colors">
+                <i data-lucide="arrow-down-to-line" class="w-3.5 h-3.5 mr-1.5"></i>
+                下架
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 5: 10万积分包 -->
+          <div class="package-card bg-bg-card rounded-xl p-5 flex flex-col">
+            <div class="flex items-start justify-between mb-3">
+              <div>
+                <div class="flex items-center gap-2 mb-1">
+                  <h3 class="text-white font-semibold text-base">10万积分包</h3>
+                  <span class="tag-hot text-[10px] font-bold px-2 py-0.5 rounded-md">热门</span>
+                </div>
+                <div class="text-xs text-text-muted">积分包 · 永久有效</div>
+              </div>
+              <span class="status-online text-[11px] font-medium px-2 py-0.5 rounded-md">上架中</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex items-baseline gap-1">
+                <span class="text-sm text-amber-gold">¥</span>
+                <span class="text-3xl font-bold text-amber-gold price-gold font-mono">599</span>
+              </div>
+              <div class="text-xs text-text-muted mt-1">约 ¥0.006/积分</div>
+            </div>
+
+            <div class="mb-4 pb-4 border-b border-[#2A2A3E]">
+              <div class="flex items-center gap-2 mb-2">
+                <i data-lucide="coins" class="w-4 h-4 text-amber-gold"></i>
+                <span class="text-sm text-white font-medium">100,000 积分</span>
+              </div>
+              <div class="text-xs text-green-400">限时赠送 10,000 积分</div>
+            </div>
+
+            <div class="flex-1 space-y-2 mb-5">
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>永久有效，无过期</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>可用于所有生成功能</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>支持批量购买优惠</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>可开发票</span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-bg-card-light border border-[#2A2A3E] rounded-lg text-xs text-text-secondary hover:border-amber-gold/50 hover:text-amber-gold transition-colors">
+                <i data-lucide="edit-3" class="w-3.5 h-3.5 mr-1.5"></i>
+                编辑
+              </button>
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 hover:bg-red-500/20 transition-colors">
+                <i data-lucide="arrow-down-to-line" class="w-3.5 h-3.5 mr-1.5"></i>
+                下架
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 6: 1万积分包 -->
+          <div class="package-card bg-bg-card rounded-xl p-5 flex flex-col">
+            <div class="flex items-start justify-between mb-3">
+              <div>
+                <div class="flex items-center gap-2 mb-1">
+                  <h3 class="text-white font-semibold text-base">1万积分包</h3>
+                </div>
+                <div class="text-xs text-text-muted">积分包 · 永久有效</div>
+              </div>
+              <span class="status-online text-[11px] font-medium px-2 py-0.5 rounded-md">上架中</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex items-baseline gap-1">
+                <span class="text-sm text-amber-gold">¥</span>
+                <span class="text-3xl font-bold text-amber-gold price-gold font-mono">69</span>
+              </div>
+              <div class="text-xs text-text-muted mt-1">约 ¥0.0069/积分</div>
+            </div>
+
+            <div class="mb-4 pb-4 border-b border-[#2A2A3E]">
+              <div class="flex items-center gap-2 mb-2">
+                <i data-lucide="coins" class="w-4 h-4 text-amber-gold"></i>
+                <span class="text-sm text-white font-medium">10,000 积分</span>
+              </div>
+              <div class="text-xs text-text-muted">即买即用</div>
+            </div>
+
+            <div class="flex-1 space-y-2 mb-5">
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>永久有效，无过期</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>可用于所有生成功能</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>小额充值灵活使用</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>可开发票</span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-bg-card-light border border-[#2A2A3E] rounded-lg text-xs text-text-secondary hover:border-amber-gold/50 hover:text-amber-gold transition-colors">
+                <i data-lucide="edit-3" class="w-3.5 h-3.5 mr-1.5"></i>
+                编辑
+              </button>
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 hover:bg-red-500/20 transition-colors">
+                <i data-lucide="arrow-down-to-line" class="w-3.5 h-3.5 mr-1.5"></i>
+                下架
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 7: 存储扩容包 100G -->
+          <div class="package-card bg-bg-card rounded-xl p-5 flex flex-col">
+            <div class="flex items-start justify-between mb-3">
+              <div>
+                <div class="flex items-center gap-2 mb-1">
+                  <h3 class="text-white font-semibold text-base">存储扩容 100G</h3>
+                  <span class="tag-new text-[10px] font-bold px-2 py-0.5 rounded-md">新品</span>
+                </div>
+                <div class="text-xs text-text-muted">扩容包 · 年付</div>
+              </div>
+              <span class="status-online text-[11px] font-medium px-2 py-0.5 rounded-md">上架中</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex items-baseline gap-1">
+                <span class="text-sm text-amber-gold">¥</span>
+                <span class="text-3xl font-bold text-amber-gold price-gold font-mono">199</span>
+                <span class="text-xs text-text-muted">/年</span>
+              </div>
+              <div class="text-xs text-text-muted mt-1">100GB 云存储空间</div>
+            </div>
+
+            <div class="mb-4 pb-4 border-b border-[#2A2A3E]">
+              <div class="flex items-center gap-2 mb-2">
+                <i data-lucide="hard-drive" class="w-4 h-4 text-amber-gold"></i>
+                <span class="text-sm text-white font-medium">100 GB 存储空间</span>
+              </div>
+              <div class="text-xs text-text-muted">叠加在基础容量上</div>
+            </div>
+
+            <div class="flex-1 space-y-2 mb-5">
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>额外 100GB 云存储</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>作品文件长期保存</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>可多次购买叠加</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-secondary">
+                <i data-lucide="check" class="w-3.5 h-3.5 benefit-check flex-shrink-0"></i>
+                <span>数据安全加密</span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-bg-card-light border border-[#2A2A3E] rounded-lg text-xs text-text-secondary hover:border-amber-gold/50 hover:text-amber-gold transition-colors">
+                <i data-lucide="edit-3" class="w-3.5 h-3.5 mr-1.5"></i>
+                编辑
+              </button>
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 hover:bg-red-500/20 transition-colors">
+                <i data-lucide="arrow-down-to-line" class="w-3.5 h-3.5 mr-1.5"></i>
+                下架
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 8: 企业定制版 - 已下架 -->
+          <div class="package-card bg-bg-card rounded-xl p-5 flex flex-col">
+            <div class="flex items-start justify-between mb-3">
+              <div>
+                <div class="flex items-center gap-2 mb-1">
+                  <h3 class="text-white font-semibold text-base">企业定制版</h3>
+                </div>
+                <div class="text-xs text-text-muted">企业订阅 · 按年</div>
+              </div>
+              <span class="status-offline text-[11px] font-medium px-2 py-0.5 rounded-md">已下架</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex items-baseline gap-1">
+                <span class="text-sm text-text-muted">¥</span>
+                <span class="text-3xl font-bold text-text-muted font-mono">4,999</span>
+                <span class="text-xs text-text-muted">/年</span>
+              </div>
+              <div class="text-xs text-text-muted mt-1">企业级解决方案</div>
+            </div>
+
+            <div class="mb-4 pb-4 border-b border-[#2A2A3E]">
+              <div class="flex items-center gap-2 mb-2">
+                <i data-lucide="coins" class="w-4 h-4 text-text-muted"></i>
+                <span class="text-sm text-text-secondary font-medium">500,000 积分</span>
+              </div>
+              <div class="text-xs text-text-muted">多席位团队账号</div>
+            </div>
+
+            <div class="flex-1 space-y-2 mb-5">
+              <div class="flex items-center gap-2 text-xs text-text-muted">
+                <i data-lucide="check" class="w-3.5 h-3.5 text-text-muted flex-shrink-0"></i>
+                <span>无限视频生成</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-muted">
+                <i data-lucide="check" class="w-3.5 h-3.5 text-text-muted flex-shrink-0"></i>
+                <span>4K 高清 + 批量渲染</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-muted">
+                <i data-lucide="check" class="w-3.5 h-3.5 text-text-muted flex-shrink-0"></i>
+                <span>专属客户经理</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-text-muted">
+                <i data-lucide="check" class="w-3.5 h-3.5 text-text-muted flex-shrink-0"></i>
+                <span>API 接口调用</span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-bg-card-light border border-[#2A2A3E] rounded-lg text-xs text-text-secondary hover:border-amber-gold/50 hover:text-amber-gold transition-colors">
+                <i data-lucide="edit-3" class="w-3.5 h-3.5 mr-1.5"></i>
+                编辑
+              </button>
+              <button class="flex-1 flex items-center justify-center px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg text-xs text-green-400 hover:bg-green-500/20 transition-colors">
+                <i data-lucide="arrow-up-from-line" class="w-3.5 h-3.5 mr-1.5"></i>
+                上架
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========== 订单流水 Tab 预览（灰色半透明 - 次要Tab示意） ========== -->
+      <div class="mt-10 pt-8 border-t border-[#2A2A3E]">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <i data-lucide="receipt" class="w-4 h-4 text-text-muted"></i>
+            <span class="text-sm text-text-muted">订单流水 Tab 预览</span>
+            <span class="text-[11px] text-text-muted bg-bg-card px-2 py-0.5 rounded-md border border-[#2A2A3E]">次要 Tab</span>
+          </div>
+        </div>
+
+        <div class="dimmed-tab">
+          <!-- Filter bar -->
+          <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-4 mb-6">
+            <div class="flex items-center gap-3 flex-wrap">
+              <div class="relative flex-1 min-w-[240px] max-w-[320px]">
+                <i data-lucide="search" class="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2"></i>
+                <input type="text" placeholder="输入订单号搜索..." class="w-full bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-text-muted focus:outline-none focus:border-amber-gold/50 transition-colors">
+              </div>
+
+              <div class="relative">
+                <select class="bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-gold/50 transition-colors w-[130px]">
+                  <option>全部类型</option>
+                  <option>订阅支付</option>
+                  <option>积分充值</option>
+                  <option>扩容购买</option>
+                </select>
+              </div>
+
+              <div class="relative">
+                <select class="bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-gold/50 transition-colors w-[130px]">
+                  <option>全部状态</option>
+                  <option>待支付</option>
+                  <option>已完成</option>
+                  <option>已退款</option>
+                  <option>已取消</option>
+                </select>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <div class="relative">
+                  <input type="date" class="bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-gold/50 transition-colors">
+                </div>
+                <span class="text-text-muted text-sm">至</span>
+                <div class="relative">
+                  <input type="date" class="bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-gold/50 transition-colors">
+                </div>
+              </div>
+
+              <button class="flex items-center px-4 py-2 bg-gradient-to-r from-amber-gold to-amber-dim rounded-lg text-sm text-[#0B0B1A] font-semibold hover:shadow-lg hover:shadow-amber-gold/20 transition-all">
+                <i data-lucide="search" class="w-4 h-4 mr-2"></i>
+                搜索
+              </button>
+            </div>
+          </div>
+
+          <!-- Table (header only preview) -->
+          <div class="bg-bg-card border border-[#2A2A3E] rounded-xl overflow-hidden">
+            <table class="w-full">
+              <thead>
+                <tr class="bg-bg-card-light border-b border-[#2A2A3E]">
+                  <th class="px-4 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">订单号</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">用户</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">套餐</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-text-muted uppercase tracking-wider">金额</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">支付方式</th>
+                  <th class="px-4 py-3 text-center text-xs font-medium text-text-muted uppercase tracking-wider">状态</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">创建时间</th>
+                  <th class="px-4 py-3 text-center text-xs font-medium text-text-muted uppercase tracking-wider">操作</th>
+                </tr>
+              </thead>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="mt-8 pt-4 border-t border-[#2A2A3E] text-center">
+        <p class="text-xs text-text-muted">Empty Broken Admin v1.0 · © 2025 Empty Broken 创作平台</p>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+  // Initialize Lucide icons
+  lucide.createIcons();
+
+  // Tab button active state (visual only - design mockup presentation)
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', function() {
+      tabBtns.forEach(b => b.classList.remove('active'));
+      this.classList.add('active');
+    });
+  });
+</script>
+
+</body>
+</html>

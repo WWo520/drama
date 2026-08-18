@@ -358,13 +358,14 @@ func (r *Repo) ListShotsByBeat(ctx context.Context, beatID int64) ([]ShotVideoDT
 }
 
 // CreateVideoTasks beat 下所有 PENDING shots 批量建 VIDEO_SEGMENT_GEN 任务（3.3.7a，Outbox 同事务）。
-func (r *Repo) CreateVideoTasks(ctx context.Context, projectID, spaceID, userID, beatID int64, shots []ShotVideoDTO) (int, error) {
+// 返回创建的任务 ID 列表（计费冻结按任务维度进行）。
+func (r *Repo) CreateVideoTasks(ctx context.Context, projectID, spaceID, userID, beatID int64, shots []ShotVideoDTO) ([]int64, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	created := 0
+	taskIDs := make([]int64, 0, len(shots))
 	for _, sh := range shots {
 		if sh.VideoStatus == "SUCCESS" {
 			continue
@@ -376,35 +377,43 @@ func (r *Repo) CreateVideoTasks(ctx context.Context, projectID, spaceID, userID,
 			VALUES ('video-'||gen_random_uuid(), 'video-'||gen_random_uuid(), $1, $2, $3, 'VIDEO_SEGMENT_GEN', 'QUEUED', $4::jsonb)
 			RETURNING id`,
 			spaceID, userID, projectID, string(params)).Scan(&taskID); err != nil {
-			return 0, err
+			return nil, err
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO task_dispatch_outbox (event_type, task_id, dispatch_key, queue_name, payload_json)
 			VALUES ('TASK_DISPATCH', $1::bigint, 'task:'||$1::text||':dispatch:video', 'video',
 			        jsonb_build_object('task_id', $1::int, 'eligible_at_ms', extract(epoch from now())*1000, 'priority', 5, 'attempt_no', 1))`,
 			taskID); err != nil {
-			return 0, err
+			return nil, err
 		}
 		// 预置 shot 状态 RUNNING（幂等：仅 PENDING 可置）
 		if _, err := tx.Exec(ctx, `
 			UPDATE shots SET video_generation_status='RUNNING' WHERE id=$1 AND video_generation_status='PENDING'`,
 			sh.ShotID); err != nil {
-			return 0, err
+			return nil, err
 		}
-		created++
+		taskIDs = append(taskIDs, taskID)
 	}
-	if created > 0 {
+	if len(taskIDs) > 0 {
 		// 项目状态推进：PARTIAL_ASSETS/ALL_ASSETS_READY → VIDEO_GENERATING（03 A.2）
 		if _, err := tx.Exec(ctx, `
 			UPDATE projects SET status='VIDEO_GENERATING', current_step='VIDEO_PRODUCTION'
 			WHERE id=$1 AND status IN ('PARTIAL_ASSETS','ALL_ASSETS_READY')`, projectID); err != nil {
-			return 0, err
+			return nil, err
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return 0, err
+		return nil, err
 	}
-	return created, nil
+	return taskIDs, nil
+}
+
+// MarkTaskFailed 标记任务失败（计费冻结失败等场景回滚任务状态）。
+func (r *Repo) MarkTaskFailed(ctx context.Context, taskID int64, reason string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE generation_tasks SET status='FAILED', error_message=$2, user_display_error=$2, updated_at=NOW()
+		WHERE id=$1`, taskID, reason)
+	return err
 }
 
 // ListBeats 叙事单元列表（3.1.4）。
@@ -527,4 +536,52 @@ func (r *Repo) ResolveVersionID(ctx context.Context, versionUUID string) (int64,
 		return 0, fmt.Errorf("%w: version", ErrNotFound)
 	}
 	return id, err
+}
+
+// ResolveShotID 镜头 uuid → id。
+func (r *Repo) ResolveShotID(ctx context.Context, shotUUID string) (int64, error) {
+	var id int64
+	err := r.pool.QueryRow(ctx, `SELECT id FROM shots WHERE shot_uuid=$1::uuid AND deleted_at IS NULL`, shotUUID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, fmt.Errorf("%w: shot", ErrNotFound)
+	}
+	return id, err
+}
+
+// ResolveShotGroup 镜头块 uuid → (id, project_id)。
+func (r *Repo) ResolveShotGroup(ctx context.Context, sgUUID string) (int64, int64, error) {
+	var id, projectID int64
+	err := r.pool.QueryRow(ctx, `SELECT id, project_id FROM shot_groups WHERE sg_uuid=$1::uuid AND deleted_at IS NULL`, sgUUID).Scan(&id, &projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, 0, fmt.Errorf("%w: shot_group", ErrNotFound)
+	}
+	return id, projectID, err
+}
+
+// ResolveScene 场景 id → (id, project_id)。
+func (r *Repo) ResolveScene(ctx context.Context, sceneIDStr string) (int64, int64, error) {
+	var id, projectID int64
+	sceneID, err := strconv.ParseInt(sceneIDStr, 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%w: scene", ErrNotFound)
+	}
+	err = r.pool.QueryRow(ctx, `SELECT id, project_id FROM scenes WHERE id = $1 AND deleted_at IS NULL`, sceneID).Scan(&id, &projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, 0, fmt.Errorf("%w: scene", ErrNotFound)
+	}
+	return id, projectID, err
+}
+
+// ResolveProp 道具 id → (id, project_id)。
+func (r *Repo) ResolveProp(ctx context.Context, propIDStr string) (int64, int64, error) {
+	var id, projectID int64
+	propID, err := strconv.ParseInt(propIDStr, 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%w: prop", ErrNotFound)
+	}
+	err = r.pool.QueryRow(ctx, `SELECT id, project_id FROM props WHERE id = $1 AND deleted_at IS NULL`, propID).Scan(&id, &projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, 0, fmt.Errorf("%w: prop", ErrNotFound)
+	}
+	return id, projectID, err
 }

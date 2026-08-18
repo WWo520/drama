@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录注册 - Empty Broken</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          primary: '#4C7FF8',
+          'primary-dark': '#3B6BE0',
+          'primary-light': '#6B93FF',
+          'bg-deep': '#030911',
+          'bg-card': 'rgba(15, 23, 42, 0.6)',
+          'bg-glass': 'rgba(15, 23, 42, 0.4)',
+          'border-glass': 'rgba(255, 255, 255, 0.08)',
+          'text-primary': '#ffffff',
+          'text-secondary': '#94a3b8',
+          'text-muted': '#64748b',
+        },
+        fontFamily: {
+          sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        },
+      }
+    }
+  }
+</script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: #030911;
+    color: #fff;
+    overflow: hidden;
+  }
+
+  /* ============================================
+     Video & Animated Background
+     ============================================ */
+  .auth-page {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    background: #030911;
+  }
+
+  /* Background video layer */
+  .video-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 0;
+    display: block;
+    min-width: 100%;
+    min-height: 100%;
+    opacity: 0.9;
+    filter: saturate(1.1) brightness(0.95);
+  }
+
+  /* Animated gradient orbs (always visible, even if video fails) */
+  .anim-orbs {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .anim-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.5;
+    animation: orbFloat 20s ease-in-out infinite;
+  }
+
+  .anim-orb.orb-1 {
+    width: 500px;
+    height: 500px;
+    background: radial-gradient(circle, rgba(139, 92, 246, 0.6) 0%, transparent 70%);
+    top: -150px;
+    left: -100px;
+    animation-duration: 25s;
+    animation-delay: 0s;
+  }
+
+  .anim-orb.orb-2 {
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(circle, rgba(76, 127, 248, 0.55) 0%, transparent 70%);
+    top: 30%;
+    right: -80px;
+    animation-duration: 30s;
+    animation-delay: -5s;
+  }
+
+  .anim-orb.orb-3 {
+    width: 350px;
+    height: 350px;
+    background: radial-gradient(circle, rgba(6, 182, 212, 0.45) 0%, transparent 70%);
+    bottom: -100px;
+    left: 30%;
+    animation-duration: 22s;
+    animation-delay: -10s;
+  }
+
+  .anim-orb.orb-4 {
+    width: 250px;
+    height: 250px;
+    background: radial-gradient(circle, rgba(236, 72, 153, 0.35) 0%, transparent 70%);
+    top: 15%;
+    left: 45%;
+    animation-duration: 18s;
+    animation-delay: -15s;
+  }
+
+  @keyframes orbFloat {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    25% { transform: translate(80px, -60px) scale(1.1); }
+    50% { transform: translate(-40px, 80px) scale(0.95); }
+    75% { transform: translate(-80px, -30px) scale(1.05); }
+  }
+
+  /* Floating particles */
+  .anim-particles {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .anim-particle {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 50%;
+    animation: particleRise linear infinite;
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.5);
+  }
+
+  .anim-particle.p-large {
+    width: 6px;
+    height: 6px;
+    background: rgba(139, 92, 246, 0.7);
+    box-shadow: 0 0 10px rgba(139, 92, 246, 0.6);
+  }
+
+  .anim-particle.p-blue {
+    background: rgba(76, 127, 248, 0.7);
+    box-shadow: 0 0 8px rgba(76, 127, 248, 0.5);
+  }
+
+  @keyframes particleRise {
+    0% { transform: translateY(100vh) rotate(0deg); opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { transform: translateY(-100px) rotate(360deg); opacity: 0; }
+  }
+
+  /* Grid overlay for tech feel */
+  .anim-grid {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(76, 127, 248, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(76, 127, 248, 0.04) 1px, transparent 1px);
+    background-size: 50px 50px;
+    mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  }
+
+  /* Light vignette overlay for depth */
+  .video-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    background:
+      linear-gradient(
+        105deg,
+        rgba(3, 9, 17, 0.6) 0%,
+        rgba(3, 9, 17, 0.35) 35%,
+        rgba(3, 9, 17, 0.15) 60%,
+        rgba(3, 9, 17, 0.1) 100%
+      );
+  }
+
+  /* ============================================
+     Left Brand Section
+     ============================================ */
+  .brand-section {
+    position: relative;
+    z-index: 2;
+    flex: 1.2;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 80px;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 80px;
+  }
+
+  .logo-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #4C7FF8 0%, #8B5CF6 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 32px rgba(76, 127, 248, 0.4);
+  }
+
+  .logo-text {
+    font-size: 22px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero-title {
+    font-size: 52px;
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 24px;
+    letter-spacing: -1px;
+  }
+
+  .hero-title .highlight {
+    background: linear-gradient(135deg, #4C7FF8 0%, #8B5CF6 50%, #ec4899 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero-desc {
+    font-size: 17px;
+    color: #94a3b8;
+    line-height: 1.7;
+    max-width: 480px;
+    margin-bottom: 48px;
+  }
+
+  .feature-list {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .feature-item {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .feature-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: rgba(76, 127, 248, 0.15);
+    border: 1px solid rgba(76, 127, 248, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: #4C7FF8;
+  }
+
+  .feature-text h4 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 3px;
+  }
+
+  .feature-text p {
+    font-size: 13px;
+    color: #64748b;
+  }
+
+  /* ============================================
+     Right Auth Card
+     ============================================ */
+  .auth-section {
+    position: relative;
+    z-index: 2;
+    flex: 0.8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 60px;
+  }
+
+  .auth-card {
+    width: 100%;
+    max-width: 420px;
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    padding: 40px;
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.3),
+      0 0 0 1px rgba(76, 127, 248, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Neon glow top border */
+  .auth-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 20%;
+    right: 20%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #4C7FF8, #8B5CF6, transparent);
+  }
+
+  /* Tab Switcher */
+  .tab-switcher {
+    display: flex;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 4px;
+    margin-bottom: 32px;
+    position: relative;
+  }
+
+  .tab-btn {
+    flex: 1;
+    padding: 10px 16px;
+    border: none;
+    background: transparent;
+    color: #64748b;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+    position: relative;
+    z-index: 1;
+  }
+
+  .tab-btn.active {
+    color: #fff;
+  }
+
+  .tab-indicator {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    width: calc(50% - 4px);
+    background: linear-gradient(135deg, #4C7FF8 0%, #6B93FF 100%);
+    border-radius: 8px;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 12px rgba(76, 127, 248, 0.4);
+    z-index: 0;
+  }
+
+  .tab-indicator.register-mode {
+    transform: translateX(100%);
+  }
+
+  /* Auth Form */
+  .auth-form {
+    display: none;
+    animation: fadeInUp 0.3s ease;
+  }
+
+  .auth-form.active {
+    display: block;
+  }
+
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .form-title {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .form-subtitle {
+    font-size: 14px;
+    color: #64748b;
+    margin-bottom: 28px;
+  }
+
+  .form-group {
+    margin-bottom: 18px;
+  }
+
+  .form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: #cbd5e1;
+    margin-bottom: 8px;
+  }
+
+  .input-wrapper {
+    position: relative;
+  }
+
+  .input-icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #64748b;
+    width: 18px;
+    height: 18px;
+  }
+
+  .form-input {
+    width: 100%;
+    padding: 12px 14px 12px 44px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    font-size: 14px;
+    color: #fff;
+    transition: all 0.2s ease;
+  }
+
+  .form-input::placeholder {
+    color: #475569;
+  }
+
+  .form-input:focus {
+    outline: none;
+    border-color: #4C7FF8;
+    background: rgba(76, 127, 248, 0.05);
+    box-shadow: 0 0 0 3px rgba(76, 127, 248, 0.1);
+  }
+
+  .password-toggle {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #64748b;
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+    transition: color 0.2s;
+  }
+
+  .password-toggle:hover {
+    color: #94a3b8;
+  }
+
+  /* Password strength */
+  .password-strength {
+    margin-top: 8px;
+  }
+
+  .strength-bar {
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+    display: flex;
+    gap: 3px;
+  }
+
+  .strength-segment {
+    flex: 1;
+    height: 100%;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.08);
+    transition: background 0.3s;
+  }
+
+  .strength-text {
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 5px;
+  }
+
+  /* Options row */
+  .options-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+  }
+
+  .remember-me {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #94a3b8;
+    cursor: pointer;
+  }
+
+  .remember-me input {
+    accent-color: #4C7FF8;
+    width: 14px;
+    height: 14px;
+  }
+
+  .forgot-link {
+    font-size: 13px;
+    color: #4C7FF8;
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+
+  .forgot-link:hover {
+    color: #6B93FF;
+  }
+
+  /* Submit button */
+  .submit-btn {
+    width: 100%;
+    padding: 13px;
+    background: linear-gradient(135deg, #4C7FF8 0%, #3B6BE0 100%);
+    border: none;
+    border-radius: 10px;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 16px rgba(76, 127, 248, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .submit-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 24px rgba(76, 127, 248, 0.45);
+  }
+
+  .submit-btn:active {
+    transform: translateY(0);
+  }
+
+  .submit-btn.loading {
+    opacity: 0.8;
+    cursor: not-allowed;
+  }
+
+  .spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* Agreement checkbox */
+  .agreement {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12px;
+    color: #94a3b8;
+    margin-bottom: 20px;
+    line-height: 1.5;
+    cursor: pointer;
+  }
+
+  .agreement input {
+    accent-color: #4C7FF8;
+    width: 14px;
+    height: 14px;
+    margin-top: 2px;
+    flex-shrink: 0;
+  }
+
+  .agreement a {
+    color: #4C7FF8;
+    text-decoration: none;
+  }
+
+  /* Bottom switch link */
+  .auth-switch {
+    text-align: center;
+    font-size: 13px;
+    color: #64748b;
+    margin-top: 24px;
+  }
+
+  .auth-switch a {
+    color: #4C7FF8;
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.2s;
+  }
+
+  .auth-switch a:hover {
+    color: #6B93FF;
+  }
+
+  /* Input shake animation on error */
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-6px); }
+    75% { transform: translateX(6px); }
+  }
+
+  .input-error {
+    animation: shake 0.3s ease;
+    border-color: #ef4444 !important;
+  }
+
+  .error-text {
+    font-size: 12px;
+    color: #f87171;
+    margin-top: 6px;
+  }
+
+  /* ============================================
+     Responsive
+     ============================================ */
+  @media (max-width: 1024px) {
+    .brand-section { padding: 60px 50px; }
+    .hero-title { font-size: 40px; }
+    .auth-section { padding: 40px; }
+  }
+
+  @media (max-width: 768px) {
+    .auth-page { flex-direction: column; overflow-y: auto; }
+    .brand-section { flex: none; padding: 40px 24px 20px; }
+    .logo { margin-bottom: 30px; }
+    .hero-title { font-size: 28px; }
+    .hero-desc { font-size: 14px; margin-bottom: 24px; }
+    .feature-list { display: none; }
+    .auth-section { flex: none; padding: 20px 24px 40px; }
+    .auth-card { padding: 28px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="auth-page">
+
+    <!-- Video Background with animated fallback -->
+    <div class="anim-orbs">
+        <div class="anim-orb orb-1"></div>
+        <div class="anim-orb orb-2"></div>
+        <div class="anim-orb orb-3"></div>
+        <div class="anim-orb orb-4"></div>
+    </div>
+    <div class="anim-particles" id="anim-particles"></div>
+    <div class="anim-grid"></div>
+    <video class="video-bg" autoplay muted loop playsinline preload="auto">
+        <source src="../assets/login-bg.mp4" type="video/mp4">
+    </video>
+    <div class="video-overlay"></div>
+
+    <!-- ========== Left Brand Section ========== -->
+    <div class="brand-section">
+        <div class="logo">
+            <div class="logo-icon">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+            </div>
+            <span class="logo-text">Empty Broken</span>
+        </div>
+
+        <h1 class="hero-title">
+            用 AI 重塑<br>
+            <span class="highlight">短剧创作</span>的未来
+        </h1>
+
+        <p class="hero-desc">
+            从剧本拆分到视频生成，一站式 AI 短剧生产平台。
+            让创意不再受限于技术，每个人都能成为导演。
+        </p>
+
+        <div class="feature-list">
+            <div class="feature-item">
+                <div class="feature-icon">
+                    <i data-lucide="zap" style="width:20px;height:20px;"></i>
+                </div>
+                <div class="feature-text">
+                    <h4>极速生成</h4>
+                    <p>AI 智能生成视频，几分钟完成创作</p>
+                </div>
+            </div>
+            <div class="feature-item">
+                <div class="feature-icon">
+                    <i data-lucide="user-round" style="width:20px;height:20px;"></i>
+                </div>
+                <div class="feature-text">
+                    <h4>虚拟数字人</h4>
+                    <p>海量角色库，支持自定义形象</p>
+                </div>
+            </div>
+            <div class="feature-item">
+                <div class="feature-icon">
+                    <i data-lucide="rocket" style="width:20px;height:20px;"></i>
+                </div>
+                <div class="feature-text">
+                    <h4>一键发布</h4>
+                    <p>多平台同步分发，快速获取流量</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Right Auth Card ========== -->
+    <div class="auth-section">
+        <div class="auth-card">
+
+            <!-- Tab Switcher -->
+            <div class="tab-switcher" id="tabSwitcher">
+                <div class="tab-indicator" id="tabIndicator"></div>
+                <button class="tab-btn active" data-tab="login">登录</button>
+                <button class="tab-btn" data-tab="register">注册</button>
+            </div>
+
+            <!-- Login Form -->
+            <form class="auth-form active" id="loginForm">
+                <h2 class="form-title">欢迎回来 👋</h2>
+                <p class="form-subtitle">登录你的账号继续创作之旅</p>
+
+                <div class="form-group">
+                    <label class="form-label">账号</label>
+                    <div class="input-wrapper">
+                        <i data-lucide="user" class="input-icon"></i>
+                        <input type="text" class="form-input" placeholder="请输入账号 / 邮箱 / 手机号">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">密码</label>
+                    <div class="input-wrapper">
+                        <i data-lucide="lock" class="input-icon"></i>
+                        <input type="password" class="form-input" id="loginPassword" placeholder="请输入密码">
+                        <i data-lucide="eye" class="password-toggle" id="loginPwdToggle"></i>
+                    </div>
+                </div>
+
+                <div class="options-row">
+                    <label class="remember-me">
+                        <input type="checkbox" checked> 记住我
+                    </label>
+                    <a href="#" class="forgot-link">忘记密码？</a>
+                </div>
+
+                <button type="submit" class="submit-btn" id="loginBtn">
+                    <span>登录</span>
+                </button>
+            </form>
+
+            <!-- Register Form -->
+            <form class="auth-form" id="registerForm">
+                <h2 class="form-title">创建账号 ✨</h2>
+                <p class="form-subtitle">加入我们，开启你的 AI 创作之旅</p>
+
+                <div class="form-group">
+                    <label class="form-label">昵称</label>
+                    <div class="input-wrapper">
+                        <i data-lucide="smile" class="input-icon"></i>
+                        <input type="text" class="form-input" placeholder="给自己起个名字吧">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">账号</label>
+                    <div class="input-wrapper">
+                        <i data-lucide="user" class="input-icon"></i>
+                        <input type="text" class="form-input" placeholder="账号 / 邮箱 / 手机号">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">密码</label>
+                    <div class="input-wrapper">
+                        <i data-lucide="lock" class="input-icon"></i>
+                        <input type="password" class="form-input" id="registerPassword" placeholder="设置 8-20 位密码">
+                        <i data-lucide="eye" class="password-toggle" id="registerPwdToggle"></i>
+                    </div>
+                    <div class="password-strength">
+                        <div class="strength-bar">
+                            <div class="strength-segment" id="seg1"></div>
+                            <div class="strength-segment" id="seg2"></div>
+                            <div class="strength-segment" id="seg3"></div>
+                            <div class="strength-segment" id="seg4"></div>
+                        </div>
+                        <div class="strength-text" id="strengthText">密码强度：请输入密码</div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">确认密码</label>
+                    <div class="input-wrapper">
+                        <i data-lucide="shield-check" class="input-icon"></i>
+                        <input type="password" class="form-input" id="confirmPassword" placeholder="再次输入密码">
+                        <i data-lucide="eye" class="password-toggle" id="confirmPwdToggle"></i>
+                    </div>
+                </div>
+
+                <label class="agreement">
+                    <input type="checkbox" checked>
+                    <span>我已阅读并同意 <a href="#">《用户协议》</a> 和 <a href="#">《隐私政策》</a></span>
+                </label>
+
+                <button type="submit" class="submit-btn" id="registerBtn">
+                    <span>创建账号</span>
+                </button>
+            </form>
+
+            <!-- Bottom switch link -->
+            <div class="auth-switch" id="auth-switch">
+                <span id="switchText">还没有账号？</span>
+                <a href="#" id="switchLink">立即注册</a>
+            </div>
+
+        </div>
+    </div>
+
+</div>
+
+<script>
+    // Initialize Lucide icons
+    lucide.createIcons();
+
+    // ===== Generate floating particles =====
+    (function createParticles() {
+        const container = document.getElementById('anim-particles');
+        if (!container) return;
+        const count = 35;
+        for (let i = 0; i < count; i++) {
+            const p = document.createElement('div');
+            const rand = Math.random();
+            let cls = 'anim-particle';
+            if (rand > 0.85) cls += ' p-large';
+            else if (rand > 0.6) cls += ' p-blue';
+            p.className = cls;
+            p.style.left = (Math.random() * 100) + '%';
+            p.style.animationDuration = (8 + Math.random() * 12) + 's';
+            p.style.animationDelay = (Math.random() * 10) + 's';
+            p.style.opacity = (0.3 + Math.random() * 0.7).toFixed(2);
+            const size = 2 + Math.random() * 5;
+            p.style.width = size + 'px';
+            p.style.height = size + 'px';
+            container.appendChild(p);
+        }
+    })();
+
+    // ===== Auth Mode Switch (Login / Register) =====
+    const tabSwitcher = document.getElementById('tabSwitcher');
+    const tabIndicator = document.getElementById('tabIndicator');
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    const switchText = document.getElementById('switchText');
+    const switchLink = document.getElementById('switchLink');
+    const tabBtns = document.querySelectorAll('.tab-btn');
+
+    let isLoginMode = true;
+
+    function switchMode(mode) {
+        isLoginMode = mode === 'login';
+
+        tabBtns.forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === mode);
+        });
+
+        tabIndicator.classList.toggle('register-mode', !isLoginMode);
+
+        loginForm.classList.toggle('active', isLoginMode);
+        registerForm.classList.toggle('active', !isLoginMode);
+
+        if (isLoginMode) {
+            switchText.textContent = '还没有账号？';
+            switchLink.textContent = '立即注册';
+        } else {
+            switchText.textContent = '已有账号？';
+            switchLink.textContent = '立即登录';
+        }
+    }
+
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => switchMode(btn.dataset.tab));
+    });
+
+    switchLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        switchMode(isLoginMode ? 'register' : 'login');
+    });
+
+    // ===== Password Toggle =====
+    function setupPasswordToggle(toggleId, inputId) {
+        const toggle = document.getElementById(toggleId);
+        const input = document.getElementById(inputId);
+        if (!toggle || !input) return;
+
+        toggle.addEventListener('click', () => {
+            const isPassword = input.type === 'password';
+            input.type = isPassword ? 'text' : 'password';
+            toggle.setAttribute('data-lucide', isPassword ? 'eye-off' : 'eye');
+            lucide.createIcons();
+        });
+    }
+
+    setupPasswordToggle('loginPwdToggle', 'loginPassword');
+    setupPasswordToggle('registerPwdToggle', 'registerPassword');
+    setupPasswordToggle('confirmPwdToggle', 'confirmPassword');
+
+    // ===== Password Strength Checker =====
+    const registerPassword = document.getElementById('registerPassword');
+    const seg1 = document.getElementById('seg1');
+    const seg2 = document.getElementById('seg2');
+    const seg3 = document.getElementById('seg3');
+    const seg4 = document.getElementById('seg4');
+    const strengthText = document.getElementById('strengthText');
+
+    registerPassword.addEventListener('input', () => {
+        const val = registerPassword.value;
+        let strength = 0;
+
+        if (val.length >= 8) strength++;
+        if (/[a-z]/.test(val) && /[A-Z]/.test(val)) strength++;
+        if (/\d/.test(val)) strength++;
+        if (/[^a-zA-Z0-9]/.test(val)) strength++;
+
+        const segs = [seg1, seg2, seg3, seg4];
+        const colors = ['#ef4444', '#f59e0b', '#eab308', '#22c55e'];
+        const labels = ['很弱', '较弱', '中等', '很强'];
+
+        segs.forEach((seg, i) => {
+            if (i < strength) {
+                seg.style.background = colors[strength - 1];
+            } else {
+                seg.style.background = 'rgba(255, 255, 255, 0.08)';
+            }
+        });
+
+        if (val.length === 0) {
+            strengthText.textContent = '密码强度：请输入密码';
+            strengthText.style.color = '#64748b';
+        } else {
+            strengthText.textContent = '密码强度：' + labels[Math.max(0, strength - 1)];
+            strengthText.style.color = colors[Math.max(0, strength - 1)];
+        }
+    });
+
+    // ===== Form Submissions =====
+    document.getElementById('loginForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('loginBtn');
+        btn.classList.add('loading');
+        btn.innerHTML = '<div class="spinner"></div><span>登录中...</span>';
+
+        setTimeout(() => {
+            btn.classList.remove('loading');
+            btn.innerHTML = '<span>登录成功</span>';
+            setTimeout(() => {
+                btn.innerHTML = '<span>登录</span>';
+            }, 1500);
+        }, 1500);
+    });
+
+    document.getElementById('registerForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const pwd = document.getElementById('registerPassword').value;
+        const confirmPwd = document.getElementById('confirmPassword').value;
+
+        if (pwd !== confirmPwd) {
+            const input = document.getElementById('confirmPassword');
+            input.classList.add('input-error');
+            setTimeout(() => input.classList.remove('input-error'), 400);
+            return;
+        }
+
+        const btn = document.getElementById('registerBtn');
+        btn.classList.add('loading');
+        btn.innerHTML = '<div class="spinner"></div><span>注册中...</span>';
+
+        setTimeout(() => {
+            btn.classList.remove('loading');
+            btn.innerHTML = '<span>注册成功</span>';
+            setTimeout(() => {
+                btn.innerHTML = '<span>创建账号</span>';
+                switchMode('login');
+            }, 1000);
+        }, 1500);
+    });
+
+    // ===== Enter key submit =====
+    document.querySelectorAll('.form-input').forEach(input => {
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                if (isLoginMode) {
+                    document.getElementById('loginForm').dispatchEvent(new Event('submit'));
+                } else {
+                    document.getElementById('registerForm').dispatchEvent(new Event('submit'));
+                }
+            }
+        });
+    });
+</script>
+</body>
+</html>

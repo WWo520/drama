@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>内容审核 - Empty Broken 管理后台</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          'bg-deep': '#0B0B1A',
+          'bg-card': '#151525',
+          'bg-card-light': '#1A1A2E',
+          'border-dark': '#2A2A3E',
+          'amber-gold': '#fbbf24',
+          'amber-dim': '#d97706',
+          'text-primary': '#ffffff',
+          'text-secondary': '#9ca3af',
+          'text-muted': '#6b7280',
+        },
+        fontFamily: {
+          sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        },
+      }
+    }
+  }
+</script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    background: #0B0B1A;
+    color: #fff;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #151525; }
+  ::-webkit-scrollbar-thumb { background: #2A2A3E; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3a4e; }
+
+  /* Sidebar menu item active */
+  .menu-item.active {
+    background: linear-gradient(90deg, rgba(251, 191, 36, 0.15) 0%, rgba(251, 191, 36, 0.05) 100%);
+    color: #fbbf24;
+    border-left: 3px solid #fbbf24;
+  }
+  .menu-item.active svg { color: #fbbf24; }
+
+  .menu-item:hover {
+    background: rgba(255,255,255,0.05);
+  }
+
+  /* Notification dot */
+  .notif-dot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    background: #ef4444;
+    border-radius: 50%;
+    border: 2px solid #0D0D0D;
+  }
+
+  /* Table row hover */
+  .table-row:hover {
+    background: rgba(251, 191, 36, 0.03);
+  }
+
+  /* Status tags */
+  .tag-pass {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+  .tag-reject {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+  .tag-pending {
+    background: rgba(251, 191, 36, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+  }
+  .tag-draft {
+    background: rgba(107, 114, 128, 0.15);
+    color: #9ca3af;
+    border: 1px solid rgba(107, 114, 128, 0.3);
+  }
+
+  /* Compliance badges */
+  .compliance-pass {
+    background: rgba(34, 197, 94, 0.12);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.25);
+  }
+  .compliance-fail {
+    background: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.25);
+  }
+  .compliance-warn {
+    background: rgba(234, 179, 8, 0.12);
+    color: #eab308;
+    border: 1px solid rgba(234, 179, 8, 0.25);
+  }
+
+  /* Custom checkbox */
+  .custom-checkbox {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid #2A2A3E;
+    border-radius: 4px;
+    background: #0B0B1A;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.15s ease;
+  }
+  .custom-checkbox:checked {
+    background: #fbbf24;
+    border-color: #fbbf24;
+  }
+  .custom-checkbox:checked::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 5px;
+    height: 9px;
+    border: solid #0B0B1A;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+  .custom-checkbox:hover {
+    border-color: #fbbf24;
+  }
+
+  /* Tab styles */
+  .audit-tab {
+    position: relative;
+    padding: 12px 20px;
+    font-size: 14px;
+    color: #9ca3af;
+    cursor: pointer;
+    transition: color 0.15s ease;
+    border-bottom: 2px solid transparent;
+  }
+  .audit-tab:hover {
+    color: #fff;
+  }
+  .audit-tab.active {
+    color: #fbbf24;
+    border-bottom-color: #fbbf24;
+    font-weight: 500;
+  }
+  .audit-tab .tab-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 18px;
+    padding: 0 6px;
+    margin-left: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 9px;
+    background: rgba(251, 191, 36, 0.15);
+    color: #fbbf24;
+  }
+  .audit-tab:not(.active) .tab-badge {
+    background: rgba(107, 114, 128, 0.2);
+    color: #9ca3af;
+  }
+
+  /* View toggle buttons */
+  .view-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #2A2A3E;
+    background: #151525;
+    color: #6b7280;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .view-btn:first-child { border-radius: 6px 0 0 6px; }
+  .view-btn:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+  .view-btn:hover { color: #fbbf24; border-color: #fbbf24; }
+  .view-btn:hover + .view-btn { border-left-color: #fbbf24; }
+  .view-btn.active {
+    background: rgba(251, 191, 36, 0.1);
+    color: #fbbf24;
+    border-color: #fbbf24;
+  }
+
+  /* Glow effect for gold text */
+  .glow-gold {
+    text-shadow: 0 0 20px rgba(251, 191, 36, 0.3);
+  }
+
+  /* Action buttons in table */
+  .btn-pass {
+    background: rgba(34, 197, 94, 0.1);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    transition: all 0.15s ease;
+  }
+  .btn-pass:hover {
+    background: rgba(34, 197, 94, 0.2);
+    border-color: #22c55e;
+  }
+  .btn-reject {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    transition: all 0.15s ease;
+  }
+  .btn-reject:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: #ef4444;
+  }
+  .btn-preview {
+    color: #6b7280;
+    transition: color 0.15s ease;
+  }
+  .btn-preview:hover {
+    color: #fbbf24;
+  }
+
+  /* Pagination button */
+  .page-btn {
+    min-width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #2A2A3E;
+    border-radius: 6px;
+    background: #151525;
+    color: #9ca3af;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .page-btn:hover:not(:disabled) {
+    border-color: #fbbf24;
+    color: #fbbf24;
+  }
+  .page-btn.active {
+    background: #fbbf24;
+    border-color: #fbbf24;
+    color: #0B0B1A;
+    font-weight: 600;
+  }
+  .page-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* Stat mini card */
+  .stat-mini-card {
+    background: linear-gradient(135deg, rgba(251, 191, 36, 0.08) 0%, rgba(251, 191, 36, 0.02) 100%);
+    border: 1px solid rgba(251, 191, 36, 0.15);
+    border-radius: 10px;
+    padding: 10px 16px;
+  }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="flex min-h-screen">
+
+  <!-- ========== SIDEBAR ========== -->
+  <aside class="w-[240px] bg-[#0D0D0D] border-r border-[#2A2A3E] flex flex-col flex-shrink-0 fixed h-full z-20">
+    <!-- Logo -->
+    <div class="h-[60px] flex items-center px-5 border-b border-[#2A2A3E]">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center mr-3">
+        <svg class="w-5 h-5 text-[#0B0B1A]" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M8 5v14l11-7z"/>
+        </svg>
+      </div>
+      <span class="text-white font-bold text-lg tracking-wide">Empty Broken <span class="text-amber-gold">Admin</span></span>
+    </div>
+
+    <!-- Menu -->
+    <nav class="flex-1 py-4 overflow-y-auto">
+      <div class="px-3 mb-2 text-[11px] text-text-muted uppercase tracking-wider font-medium">主菜单</div>
+
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="layout-dashboard" class="w-[18px] h-[18px] mr-3"></i>
+        <span>工作台</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="users" class="w-[18px] h-[18px] mr-3"></i>
+        <span>用户管理</span>
+      </a>
+      <a href="#" class="menu-item active flex items-center px-5 py-3 text-sm cursor-pointer">
+        <i data-lucide="shield-check" class="w-[18px] h-[18px] mr-3"></i>
+        <span>内容审核</span>
+        <span class="ml-auto text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">128</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="film" class="w-[18px] h-[18px] mr-3"></i>
+        <span>作品管理</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="wallet" class="w-[18px] h-[18px] mr-3"></i>
+        <span>计费财务</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="cpu" class="w-[18px] h-[18px] mr-3"></i>
+        <span>算力任务</span>
+        <span class="ml-auto text-[10px] bg-amber-gold/20 text-amber-gold px-2 py-0.5 rounded-full">34</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="settings" class="w-[18px] h-[18px] mr-3"></i>
+        <span>平台配置</span>
+      </a>
+    </nav>
+
+    <!-- Bottom user -->
+    <div class="p-4 border-t border-[#2A2A3E]">
+      <div class="flex items-center">
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center text-[#0B0B1A] font-bold text-sm">
+          A
+        </div>
+        <div class="ml-3 flex-1 min-w-0">
+          <div class="text-sm font-medium text-white truncate">Admin</div>
+          <div class="text-xs text-text-muted truncate">超级管理员</div>
+        </div>
+        <i data-lucide="chevron-up" class="w-4 h-4 text-text-muted"></i>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ========== MAIN WRAPPER ========== -->
+  <div class="flex-1 ml-[240px] flex flex-col min-w-0">
+
+    <!-- ========== TOP BAR ========== -->
+    <header class="h-[60px] bg-[#0D0D0D]/80 backdrop-blur-sm border-b border-[#2A2A3E] flex items-center justify-between px-6 sticky top-0 z-10">
+      <!-- Left: breadcrumb -->
+      <div class="flex items-center">
+        <i data-lucide="home" class="w-4 h-4 text-text-muted mr-2"></i>
+        <span class="text-text-muted text-sm">管理后台</span>
+        <i data-lucide="chevron-right" class="w-4 h-4 text-text-muted mx-2"></i>
+        <span class="text-white text-sm font-medium">内容审核</span>
+      </div>
+
+      <!-- Right: search + notif + avatar -->
+      <div class="flex items-center gap-4">
+        <!-- Search -->
+        <div class="relative">
+          <i data-lucide="search" class="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input type="text" placeholder="搜索..." class="bg-bg-card border border-[#2A2A3E] rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-text-muted focus:outline-none focus:border-amber-gold/50 w-56 transition-colors">
+        </div>
+
+        <!-- Notification -->
+        <button class="relative w-9 h-9 rounded-lg bg-bg-card border border-[#2A2A3E] flex items-center justify-center hover:border-[#3A3A4E] transition-colors">
+          <i data-lucide="bell" class="w-4 h-4 text-text-secondary"></i>
+          <span class="notif-dot"></span>
+        </button>
+
+        <!-- Divider -->
+        <div class="w-px h-6 bg-[#2A2A3E]"></div>
+
+        <!-- Avatar -->
+        <div class="flex items-center cursor-pointer">
+          <div class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center text-[#0B0B1A] font-bold text-sm">
+            A
+          </div>
+          <span class="ml-2 text-sm text-white">Admin</span>
+          <i data-lucide="chevron-down" class="w-4 h-4 text-text-muted ml-1"></i>
+        </div>
+      </div>
+    </header>
+
+    <!-- ========== MAIN CONTENT ========== -->
+    <main class="flex-1 p-6 overflow-auto">
+
+      <!-- ====== PAGE TITLE + STATS ====== -->
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h1 class="text-2xl font-bold text-white mb-1">内容审核</h1>
+          <p class="text-sm text-text-muted">审核平台提交的作品，确保内容合规与质量</p>
+        </div>
+        <!-- Today audit stats -->
+        <div class="flex items-center gap-3">
+          <div class="stat-mini-card flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-green-500/15 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="check-circle-2" class="w-4 h-4 text-green-400"></i>
+            </div>
+            <div>
+              <div class="text-lg font-bold text-green-400 font-mono leading-tight">86</div>
+              <div class="text-[11px] text-text-muted">今日已通过</div>
+            </div>
+          </div>
+          <div class="stat-mini-card flex items-center gap-3" style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(239, 68, 68, 0.02) 100%); border-color: rgba(239, 68, 68, 0.15);">
+            <div class="w-8 h-8 rounded-lg bg-red-500/15 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="x-circle" class="w-4 h-4 text-red-400"></i>
+            </div>
+            <div>
+              <div class="text-lg font-bold text-red-400 font-mono leading-tight">23</div>
+              <div class="text-[11px] text-text-muted">今日已驳回</div>
+            </div>
+          </div>
+          <div class="stat-mini-card flex items-center gap-3" style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(59, 130, 246, 0.02) 100%); border-color: rgba(59, 130, 246, 0.15);">
+            <div class="w-8 h-8 rounded-lg bg-blue-500/15 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="clock-3" class="w-4 h-4 text-blue-400"></i>
+            </div>
+            <div>
+              <div class="text-lg font-bold text-blue-400 font-mono leading-tight">4.2<span class="text-xs font-normal">min</span></div>
+              <div class="text-[11px] text-text-muted">平均耗时</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====== TAB BAR ====== -->
+      <div class="bg-bg-card border border-[#2A2A3E] rounded-xl mb-4 overflow-hidden">
+        <div class="flex items-center border-b border-[#2A2A3E] px-2">
+          <div class="audit-tab active" data-tab="pending">
+            待审核<span class="tab-badge">128</span>
+          </div>
+          <div class="audit-tab" data-tab="approved">
+            已通过<span class="tab-badge">1,247</span>
+          </div>
+          <div class="audit-tab" data-tab="rejected">
+            已驳回<span class="tab-badge">186</span>
+          </div>
+          <div class="audit-tab" data-tab="draft">
+            草稿<span class="tab-badge">32</span>
+          </div>
+        </div>
+
+        <!-- ====== BATCH TOOLBAR (sticky inside card) ====== -->
+        <div class="sticky top-[60px] z-[5] bg-bg-card border-b border-[#2A2A3E] px-4 py-2.5 flex items-center justify-between">
+          <!-- Left: select all + count -->
+          <div class="flex items-center gap-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" class="custom-checkbox" id="selectAll">
+              <span class="text-sm text-text-secondary">全选</span>
+            </label>
+            <span class="text-sm text-text-secondary">
+              已选 <span class="text-amber-gold font-semibold" id="selectedCount">12</span> 项
+            </span>
+          </div>
+
+          <!-- Middle: batch actions -->
+          <div class="flex items-center gap-2">
+            <button class="flex items-center px-3 py-1.5 bg-green-500/10 border border-green-500/30 rounded-md text-xs text-green-400 hover:bg-green-500/20 hover:border-green-500/50 transition-colors">
+              <i data-lucide="check-circle-2" class="w-3.5 h-3.5 mr-1.5"></i>
+              批量通过
+              <kbd class="ml-2 px-1.5 py-0.5 text-[10px] bg-green-500/10 rounded text-green-400/70">Shift+A</kbd>
+            </button>
+            <button class="flex items-center px-3 py-1.5 bg-red-500/10 border border-red-500/30 rounded-md text-xs text-red-400 hover:bg-red-500/20 hover:border-red-500/50 transition-colors">
+              <i data-lucide="x-circle" class="w-3.5 h-3.5 mr-1.5"></i>
+              批量驳回
+              <kbd class="ml-2 px-1.5 py-0.5 text-[10px] bg-red-500/10 rounded text-red-400/70">Shift+R</kbd>
+            </button>
+            <button class="flex items-center px-3 py-1.5 bg-bg-card-light border border-[#2A2A3E] rounded-md text-xs text-text-secondary hover:border-amber-gold/50 hover:text-amber-gold transition-colors">
+              <i data-lucide="download" class="w-3.5 h-3.5 mr-1.5"></i>
+              批量导出
+            </button>
+          </div>
+
+          <!-- Right: search + view toggle + column settings -->
+          <div class="flex items-center gap-3">
+            <div class="relative">
+              <i data-lucide="search" class="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2"></i>
+              <input type="text" placeholder="搜索作品/作者..." class="bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg pl-9 pr-4 py-1.5 text-xs text-white placeholder-text-muted focus:outline-none focus:border-amber-gold/50 w-48 transition-colors">
+            </div>
+            <!-- View toggle -->
+            <div class="flex items-center">
+              <button class="view-btn active" title="列表视图">
+                <i data-lucide="list" class="w-4 h-4"></i>
+              </button>
+              <button class="view-btn" title="卡片视图">
+                <i data-lucide="layout-grid" class="w-4 h-4"></i>
+              </button>
+            </div>
+            <!-- Column settings -->
+            <button class="w-8 h-8 flex items-center justify-center border border-[#2A2A3E] rounded-lg bg-bg-card-light text-text-secondary hover:border-amber-gold/50 hover:text-amber-gold transition-colors" title="列设置">
+              <i data-lucide="settings-2" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- ====== AUDIT TABLE ====== -->
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead>
+              <tr class="bg-bg-card-light border-b border-[#2A2A3E]">
+                <th class="px-4 py-3 text-left w-12">
+                  <input type="checkbox" class="custom-checkbox" id="selectAllHeader">
+                </th>
+                <th class="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider w-16">封面</th>
+                <th class="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">作品名称</th>
+                <th class="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">作者</th>
+                <th class="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">提交时间</th>
+                <th class="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">自动合规检测</th>
+                <th class="px-3 py-3 text-center text-xs font-medium text-text-muted uppercase tracking-wider">审核状态</th>
+                <th class="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">审核员</th>
+                <th class="px-3 py-3 text-center text-xs font-medium text-text-muted uppercase tracking-wider">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-[#2A2A3E]">
+
+              <!-- Row 1 -->
+              <tr class="table-row transition-colors h-16">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check" checked>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="w-10 h-14 rounded bg-gradient-to-br from-purple-600 to-pink-500 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <i data-lucide="play" class="w-4 h-4 text-white/80"></i>
+                  </div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="text-sm text-white font-medium truncate max-w-[200px]">都市巅峰之逆袭归来</div>
+                  <div class="text-xs text-text-muted mt-0.5">80集 · 总时长 120分钟</div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">L</div>
+                    <span class="ml-2 text-sm text-text-secondary">李逍遥</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-20 14:32</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass" title="色情检测通过">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>色情
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass" title="暴力检测通过">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>暴力
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass" title="政治检测通过">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>政治
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-warn" title="版权待确认">
+                      <i data-lucide="alert-triangle" class="w-3 h-3 mr-0.5"></i>版权
+                    </span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-pending">待审核</span>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-muted">—</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-2">
+                    <button class="btn-preview text-xs flex items-center">
+                      <i data-lucide="eye" class="w-3.5 h-3.5 mr-1"></i>预览
+                    </button>
+                    <button class="btn-pass px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="check" class="w-3.5 h-3.5 mr-0.5"></i>通过
+                    </button>
+                    <button class="btn-reject px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="x" class="w-3.5 h-3.5 mr-0.5"></i>驳回
+                    </button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 2 -->
+              <tr class="table-row transition-colors h-16">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check" checked>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="w-10 h-14 rounded bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <i data-lucide="play" class="w-4 h-4 text-white/80"></i>
+                  </div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="text-sm text-white font-medium truncate max-w-[200px]">重生之都市修仙</div>
+                  <div class="text-xs text-text-muted mt-0.5">100集 · 总时长 150分钟</div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">Z</div>
+                    <span class="ml-2 text-sm text-text-secondary">周芷若</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-20 13:18</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>色情
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-fail">
+                      <i data-lucide="x" class="w-3 h-3 mr-0.5"></i>暴力
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>政治
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>版权
+                    </span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-pending">待审核</span>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-muted">—</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-2">
+                    <button class="btn-preview text-xs flex items-center">
+                      <i data-lucide="eye" class="w-3.5 h-3.5 mr-1"></i>预览
+                    </button>
+                    <button class="btn-pass px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="check" class="w-3.5 h-3.5 mr-0.5"></i>通过
+                    </button>
+                    <button class="btn-reject px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="x" class="w-3.5 h-3.5 mr-0.5"></i>驳回
+                    </button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 3 -->
+              <tr class="table-row transition-colors h-16">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check" checked>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="w-10 h-14 rounded bg-gradient-to-br from-rose-600 to-orange-500 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <i data-lucide="play" class="w-4 h-4 text-white/80"></i>
+                  </div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="text-sm text-white font-medium truncate max-w-[200px]">豪门总裁的契约新娘</div>
+                  <div class="text-xs text-text-muted mt-0.5">60集 · 总时长 90分钟</div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">W</div>
+                    <span class="ml-2 text-sm text-text-secondary">王语嫣</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-20 12:45</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>色情
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>暴力
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>政治
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>版权
+                    </span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-pending">待审核</span>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-muted">—</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-2">
+                    <button class="btn-preview text-xs flex items-center">
+                      <i data-lucide="eye" class="w-3.5 h-3.5 mr-1"></i>预览
+                    </button>
+                    <button class="btn-pass px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="check" class="w-3.5 h-3.5 mr-0.5"></i>通过
+                    </button>
+                    <button class="btn-reject px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="x" class="w-3.5 h-3.5 mr-0.5"></i>驳回
+                    </button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 4 -->
+              <tr class="table-row transition-colors h-16">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check" checked>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="w-10 h-14 rounded bg-gradient-to-br from-green-600 to-teal-500 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <i data-lucide="play" class="w-4 h-4 text-white/80"></i>
+                  </div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="text-sm text-white font-medium truncate max-w-[200px]">穿越古代当王爷</div>
+                  <div class="text-xs text-text-muted mt-0.5">120集 · 总时长 180分钟</div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">C</div>
+                    <span class="ml-2 text-sm text-text-secondary">陈长生</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-20 11:22</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>色情
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-warn">
+                      <i data-lucide="alert-triangle" class="w-3 h-3 mr-0.5"></i>暴力
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>政治
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-warn">
+                      <i data-lucide="alert-triangle" class="w-3 h-3 mr-0.5"></i>版权
+                    </span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-pending">待审核</span>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-muted">—</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-2">
+                    <button class="btn-preview text-xs flex items-center">
+                      <i data-lucide="eye" class="w-3.5 h-3.5 mr-1"></i>预览
+                    </button>
+                    <button class="btn-pass px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="check" class="w-3.5 h-3.5 mr-0.5"></i>通过
+                    </button>
+                    <button class="btn-reject px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="x" class="w-3.5 h-3.5 mr-0.5"></i>驳回
+                    </button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 5 -->
+              <tr class="table-row transition-colors h-16">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check" checked>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="w-10 h-14 rounded bg-gradient-to-br from-indigo-600 to-purple-500 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <i data-lucide="play" class="w-4 h-4 text-white/80"></i>
+                  </div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="text-sm text-white font-medium truncate max-w-[200px]">战神归来之凤唳九天</div>
+                  <div class="text-xs text-text-muted mt-0.5">90集 · 总时长 135分钟</div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-purple-400 to-violet-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">H</div>
+                    <span class="ml-2 text-sm text-text-secondary">黄蓉</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-20 10:56</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>色情
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-fail">
+                      <i data-lucide="x" class="w-3 h-3 mr-0.5"></i>暴力
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-fail">
+                      <i data-lucide="x" class="w-3 h-3 mr-0.5"></i>政治
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>版权
+                    </span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-pending">待审核</span>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-muted">—</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-2">
+                    <button class="btn-preview text-xs flex items-center">
+                      <i data-lucide="eye" class="w-3.5 h-3.5 mr-1"></i>预览
+                    </button>
+                    <button class="btn-pass px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="check" class="w-3.5 h-3.5 mr-0.5"></i>通过
+                    </button>
+                    <button class="btn-reject px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="x" class="w-3.5 h-3.5 mr-0.5"></i>驳回
+                    </button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 6 -->
+              <tr class="table-row transition-colors h-16">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check" checked>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="w-10 h-14 rounded bg-gradient-to-br from-red-600 to-rose-500 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <i data-lucide="play" class="w-4 h-4 text-white/80"></i>
+                  </div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="text-sm text-white font-medium truncate max-w-[200px]">暗夜追凶之无间道</div>
+                  <div class="text-xs text-text-muted mt-0.5">75集 · 总时长 112分钟</div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-red-400 to-orange-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">G</div>
+                    <span class="ml-2 text-sm text-text-secondary">郭靖</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-20 09:40</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>色情
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>暴力
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-warn">
+                      <i data-lucide="alert-triangle" class="w-3 h-3 mr-0.5"></i>政治
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>版权
+                    </span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-pending">待审核</span>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-muted">—</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-2">
+                    <button class="btn-preview text-xs flex items-center">
+                      <i data-lucide="eye" class="w-3.5 h-3.5 mr-1"></i>预览
+                    </button>
+                    <button class="btn-pass px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="check" class="w-3.5 h-3.5 mr-0.5"></i>通过
+                    </button>
+                    <button class="btn-reject px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="x" class="w-3.5 h-3.5 mr-0.5"></i>驳回
+                    </button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 7 -->
+              <tr class="table-row transition-colors h-16">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check" checked>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="w-10 h-14 rounded bg-gradient-to-br from-teal-600 to-cyan-500 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <i data-lucide="play" class="w-4 h-4 text-white/80"></i>
+                  </div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="text-sm text-white font-medium truncate max-w-[200px]">神医嫡女风华录</div>
+                  <div class="text-xs text-text-muted mt-0.5">85集 · 总时长 128分钟</div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-teal-400 to-cyan-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">X</div>
+                    <span class="ml-2 text-sm text-text-secondary">小龙女</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-20 09:15</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>色情
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>暴力
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>政治
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>版权
+                    </span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-pending">待审核</span>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-muted">—</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-2">
+                    <button class="btn-preview text-xs flex items-center">
+                      <i data-lucide="eye" class="w-3.5 h-3.5 mr-1"></i>预览
+                    </button>
+                    <button class="btn-pass px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="check" class="w-3.5 h-3.5 mr-0.5"></i>通过
+                    </button>
+                    <button class="btn-reject px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="x" class="w-3.5 h-3.5 mr-0.5"></i>驳回
+                    </button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 8 -->
+              <tr class="table-row transition-colors h-16">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check" checked>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="w-10 h-14 rounded bg-gradient-to-br from-amber-600 to-yellow-500 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <i data-lucide="play" class="w-4 h-4 text-white/80"></i>
+                  </div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="text-sm text-white font-medium truncate max-w-[200px]">豪门千金的秘密情人</div>
+                  <div class="text-xs text-text-muted mt-0.5">50集 · 总时长 75分钟</div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-rose-400 to-pink-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">Q</div>
+                    <span class="ml-2 text-sm text-text-secondary">乔峰</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-20 08:28</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-fail">
+                      <i data-lucide="x" class="w-3 h-3 mr-0.5"></i>色情
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>暴力
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>政治
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-warn">
+                      <i data-lucide="alert-triangle" class="w-3 h-3 mr-0.5"></i>版权
+                    </span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-pending">待审核</span>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-muted">—</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-2">
+                    <button class="btn-preview text-xs flex items-center">
+                      <i data-lucide="eye" class="w-3.5 h-3.5 mr-1"></i>预览
+                    </button>
+                    <button class="btn-pass px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="check" class="w-3.5 h-3.5 mr-0.5"></i>通过
+                    </button>
+                    <button class="btn-reject px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="x" class="w-3.5 h-3.5 mr-0.5"></i>驳回
+                    </button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 9 -->
+              <tr class="table-row transition-colors h-16">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check" checked>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="w-10 h-14 rounded bg-gradient-to-br from-violet-600 to-purple-500 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <i data-lucide="play" class="w-4 h-4 text-white/80"></i>
+                  </div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="text-sm text-white font-medium truncate max-w-[200px]">仙帝归来之纵横都市</div>
+                  <div class="text-xs text-text-muted mt-0.5">110集 · 总时长 165分钟</div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-yellow-400 to-amber-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">D</div>
+                    <span class="ml-2 text-sm text-text-secondary">段誉</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-20 07:50</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>色情
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-warn">
+                      <i data-lucide="alert-triangle" class="w-3 h-3 mr-0.5"></i>暴力
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>政治
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>版权
+                    </span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-pending">待审核</span>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-muted">—</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-2">
+                    <button class="btn-preview text-xs flex items-center">
+                      <i data-lucide="eye" class="w-3.5 h-3.5 mr-1"></i>预览
+                    </button>
+                    <button class="btn-pass px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="check" class="w-3.5 h-3.5 mr-0.5"></i>通过
+                    </button>
+                    <button class="btn-reject px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="x" class="w-3.5 h-3.5 mr-0.5"></i>驳回
+                    </button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 10 -->
+              <tr class="table-row transition-colors h-16">
+                <td class="px-4 py-0">
+                  <input type="checkbox" class="custom-checkbox row-check" checked>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="w-10 h-14 rounded bg-gradient-to-br from-pink-600 to-rose-500 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <i data-lucide="play" class="w-4 h-4 text-white/80"></i>
+                  </div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="text-sm text-white font-medium truncate max-w-[200px]">错嫁新娘：总裁的替身妻</div>
+                  <div class="text-xs text-text-muted mt-0.5">65集 · 总时长 98分钟</div>
+                </td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">Y</div>
+                    <span class="ml-2 text-sm text-text-secondary">杨过</span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-secondary">2025-01-20 07:12</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>色情
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>暴力
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-pass">
+                      <i data-lucide="check" class="w-3 h-3 mr-0.5"></i>政治
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium compliance-fail">
+                      <i data-lucide="x" class="w-3 h-3 mr-0.5"></i>版权
+                    </span>
+                  </div>
+                </td>
+                <td class="px-3 py-0 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium tag-pending">待审核</span>
+                </td>
+                <td class="px-3 py-0 text-sm text-text-muted">—</td>
+                <td class="px-3 py-0">
+                  <div class="flex items-center justify-center gap-2">
+                    <button class="btn-preview text-xs flex items-center">
+                      <i data-lucide="eye" class="w-3.5 h-3.5 mr-1"></i>预览
+                    </button>
+                    <button class="btn-pass px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="check" class="w-3.5 h-3.5 mr-0.5"></i>通过
+                    </button>
+                    <button class="btn-reject px-2 py-1 rounded text-xs font-medium flex items-center">
+                      <i data-lucide="x" class="w-3.5 h-3.5 mr-0.5"></i>驳回
+                    </button>
+                  </div>
+                </td>
+              </tr>
+
+            </tbody>
+          </table>
+        </div>
+
+        <!-- ====== PAGINATION ====== -->
+        <div class="flex items-center justify-between px-4 py-3 border-t border-[#2A2A3E]">
+          <div class="text-sm text-text-muted">
+            显示第 <span class="text-white">1-10</span> 条，共 <span class="text-white">128</span> 条待审核
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="page-btn" disabled>
+              <i data-lucide="chevron-left" class="w-4 h-4"></i>
+            </button>
+            <button class="page-btn active">1</button>
+            <button class="page-btn">2</button>
+            <button class="page-btn">3</button>
+            <button class="page-btn">4</button>
+            <button class="page-btn">5</button>
+            <span class="text-text-muted text-sm px-1">...</span>
+            <button class="page-btn">13</button>
+            <button class="page-btn">
+              <i data-lucide="chevron-right" class="w-4 h-4"></i>
+            </button>
+            <div class="flex items-center gap-2 ml-3">
+              <span class="text-xs text-text-muted">跳至</span>
+              <input type="number" value="1" class="w-12 h-8 bg-bg-card border border-[#2A2A3E] rounded-md text-center text-sm text-white focus:outline-none focus:border-amber-gold/50">
+              <span class="text-xs text-text-muted">页</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="mt-8 pt-4 border-t border-[#2A2A3E] text-center">
+        <p class="text-xs text-text-muted">Empty Broken Admin v1.0 · © 2025 Empty Broken 创作平台</p>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+  // Initialize Lucide icons
+  lucide.createIcons();
+
+  // Select all checkbox logic
+  const selectAll = document.getElementById('selectAll');
+  const selectAllHeader = document.getElementById('selectAllHeader');
+  const rowChecks = document.querySelectorAll('.row-check');
+  const selectedCountEl = document.getElementById('selectedCount');
+
+  function updateSelectedCount() {
+    const checked = document.querySelectorAll('.row-check:checked').length;
+    selectedCountEl.textContent = checked;
+  }
+
+  function syncSelectAll(state) {
+    selectAll.checked = state;
+    selectAllHeader.checked = state;
+  }
+
+  selectAll.addEventListener('change', function() {
+    rowChecks.forEach(cb => cb.checked = this.checked);
+    selectAllHeader.checked = this.checked;
+    updateSelectedCount();
+  });
+
+  selectAllHeader.addEventListener('change', function() {
+    rowChecks.forEach(cb => cb.checked = this.checked);
+    selectAll.checked = this.checked;
+    updateSelectedCount();
+  });
+
+  rowChecks.forEach(cb => {
+    cb.addEventListener('change', function() {
+      const allChecked = Array.from(rowChecks).every(c => c.checked);
+      syncSelectAll(allChecked);
+      updateSelectedCount();
+    });
+  });
+
+  // Tab switching
+  const tabs = document.querySelectorAll('.audit-tab');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', function() {
+      tabs.forEach(t => t.classList.remove('active'));
+      this.classList.add('active');
+    });
+  });
+
+  // View toggle
+  const viewBtns = document.querySelectorAll('.view-btn');
+  viewBtns.forEach(btn => {
+    btn.addEventListener('click', function() {
+      viewBtns.forEach(b => b.classList.remove('active'));
+      this.classList.add('active');
+    });
+  });
+</script>
+
+</body>
+</html>

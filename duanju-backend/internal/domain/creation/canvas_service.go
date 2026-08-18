@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -219,5 +218,3 @@ func ExecuteNode(nodeType string, config map[string]any) (map[string]any, error)
 		"is_mock":   true,
 	}, nil
 }
-
-var _ = strconv.Itoa

@@ -42,7 +42,8 @@ func (h *PaymentHandler) CreateOrder(c *gin.Context) {
 	}
 	resp, err := h.svc.CreateOrder(c.Request.Context(), uid, "POINTS_PACKAGE", req.PackageCode, req.AmountYuan, req.Points, req.IdempotencyKey)
 	if err != nil {
-		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建订单失败")
+		// 档位校验/参数问题透传明确提示（P0 修复）
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "下单失败："+err.Error())
 		return
 	}
 	httpx.OK(c, resp)
@@ -73,14 +74,19 @@ func (h *PaymentHandler) PayCallback(c *gin.Context) {
 	c.String(http.StatusOK, result)
 }
 
-// Status 9.8 订单状态轮询。
+// Status 9.8 订单状态轮询（仅订单所有者可见）。
 func (h *PaymentHandler) Status(c *gin.Context) {
+	uid := c.GetInt64(middleware.CtxUserID)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
 	orderNo := c.Param("order_no")
 	if orderNo == "" {
 		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "缺少 order_no")
 		return
 	}
-	order, err := h.svc.store.GetOrderByNo(c.Request.Context(), orderNo)
+	order, err := h.svc.store.GetOrderByNoForUser(c.Request.Context(), orderNo, uid)
 	if err != nil {
 		httpx.Fail(c, http.StatusNotFound, 80002, "订单不存在")
 		return

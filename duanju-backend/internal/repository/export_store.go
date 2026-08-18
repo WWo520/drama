@@ -34,10 +34,11 @@ func (s *ExportStore) CreateExportRecord(ctx context.Context, userID, spaceID, p
 }
 
 // CreateExportTask 创建导出记录 + 生成任务（QUEUED + Outbox 同一事务）。
-func (s *ExportStore) CreateExportTask(ctx context.Context, userID, spaceID, projectID int64, exportID int64, resolution string, watermark bool) (int64, error) {
+// 返回 (exportID, taskID, error)——taskID 供计费冻结使用。
+func (s *ExportStore) CreateExportTask(ctx context.Context, userID, spaceID, projectID int64, exportID int64, resolution string, watermark bool) (int64, int64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer tx.Rollback(ctx)
 
@@ -52,7 +53,7 @@ func (s *ExportStore) CreateExportTask(ctx context.Context, userID, spaceID, pro
 		RETURNING id`,
 		spaceID, userID, projectID, string(params)).Scan(&taskID)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
 	// 创建导出记录关联任务
@@ -62,14 +63,14 @@ func (s *ExportStore) CreateExportTask(ctx context.Context, userID, spaceID, pro
 		VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7) RETURNING id`,
 		userID, spaceID, projectID, "FINAL_VIDEO_MP4", resolution, watermark, taskID).Scan(&eid)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
 	// 用 eid 更新任务参数（export_id=实际导出记录 ID）
 	fixedParams, _ := json.Marshal(map[string]any{"export_id": eid, "resolution": resolution, "watermark": watermark})
 	_, err = tx.Exec(ctx, `UPDATE generation_tasks SET request_params_json=$2 WHERE id=$1`, taskID, string(fixedParams))
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
 	// Outbox
@@ -78,9 +79,12 @@ func (s *ExportStore) CreateExportTask(ctx context.Context, userID, spaceID, pro
 		VALUES ('TASK_DISPATCH', $1::bigint, 'task:'||$1::text||':dispatch:export', 'export',
 		        jsonb_build_object('task_id', $1::int))`, taskID)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return eid, tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, err
+	}
+	return eid, taskID, nil
 }
 
 func (s *ExportStore) CompleteExport(ctx context.Context, exportID int64, outputURL string, fileSize int64) error {
@@ -91,8 +95,8 @@ func (s *ExportStore) CompleteExport(ctx context.Context, exportID int64, output
 	return err
 }
 
-// GetExportByUUID 导出详情（3.4.2）。
-func (s *ExportStore) GetExportByUUID(ctx context.Context, exportUUID string) (map[string]any, error) {
+// GetExportByUUID 导出详情（3.4.2；归属校验：仅导出者可见）。
+func (s *ExportStore) GetExportByUUID(ctx context.Context, exportUUID string, userID int64) (map[string]any, error) {
 	var uuid, status, etype, res, url string
 	var wm bool
 	var size int64
@@ -100,7 +104,7 @@ func (s *ExportStore) GetExportByUUID(ctx context.Context, exportUUID string) (m
 	err := s.pool.QueryRow(ctx, `
 		SELECT export_uuid::text, status::text, export_type::text, config_resolution::text, config_watermark,
 		       COALESCE(output_file_url,''), COALESCE(output_file_size_bytes,0), expire_at, created_at
-		FROM export_records WHERE export_uuid=$1 AND deleted_at IS NULL`, exportUUID).
+		FROM export_records WHERE export_uuid=$1 AND user_id=$2 AND deleted_at IS NULL`, exportUUID, userID).
 		Scan(&uuid, &status, &etype, &res, &wm, &url, &size, &exp, &created)
 	if err != nil {
 		return nil, err

@@ -19,11 +19,11 @@ export interface OrderStatus {
   points: number;
 }
 
-// 积分包 3 档（03 E.6.2 默认；S-01 定值后替换）
+// 积分包 3 档（与后端 point_packages 表价目一致：档位校验以服务端为唯一真源）
 export const POINT_PACKAGES = [
-  { code: "POINTS_PKG_SMALL", name: "小包", points: 100, amount_yuan: "9.90", desc: "尝鲜体验", badge: null },
-  { code: "POINTS_PKG_MEDIUM", name: "中包", points: 1000, amount_yuan: "99.00", desc: "创作主力", badge: "首购 +50% 加赠" },
-  { code: "POINTS_PKG_LARGE", name: "大包", points: 3000, amount_yuan: "299.00", desc: "批量生产", badge: "最划算" },
+  { code: "POINTS_PKG_SMALL", name: "小包", points: 500, amount_yuan: "49.00", desc: "尝鲜体验", badge: null },
+  { code: "POINTS_PKG_MEDIUM", name: "中包", points: 3750, amount_yuan: "199.00", desc: "创作主力", badge: "含 1250 加赠积分" },
+  { code: "POINTS_PKG_LARGE", name: "大包", points: 22500, amount_yuan: "999.00", desc: "批量生产", badge: "含 7500 加赠积分" },
 ] as const;
 
 export const pointsApi = {

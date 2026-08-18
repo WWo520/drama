@@ -1,0 +1,487 @@
+{
+  "data": [
+    {
+      "id": "page-create-video",
+      "title": "AI创作 - EmptyBroken",
+      "type": "page",
+      "version": 2,
+      "createdAt": 1755072000000,
+      "canvasData": {
+        "x": 0,
+        "y": 0,
+        "group": 0,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1198,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-6cca0c91",
+          "measuredAt": 1786952842937
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/create-video.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-discover",
+      "title": "发现 - EmptyBroken",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1755072000000,
+      "canvasData": {
+        "x": 480,
+        "y": 0,
+        "group": 0,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 2030,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-90f53304",
+          "measuredAt": 1786948355678
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/discover.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-works",
+      "title": "我的作品 - EmptyBroken",
+      "type": "page",
+      "version": 2,
+      "createdAt": 1755072000000,
+      "canvasData": {
+        "x": 960,
+        "y": 0,
+        "group": 0,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1341,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-37e5e5ce",
+          "measuredAt": 1786948355678
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/works.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-workbench-script",
+      "title": "剧本拆分 - EmptyBroken",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1786678000000,
+      "canvasData": {
+        "x": 0,
+        "y": 373,
+        "group": 1,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1033,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-e5650fa0",
+          "measuredAt": 1786947610892
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/workbench-script.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-workbench-assets",
+      "title": "资产生成 - EmptyBroken",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1786678000000,
+      "canvasData": {
+        "x": 480,
+        "y": 373,
+        "group": 1,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1352,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-bb617b26",
+          "measuredAt": 1786948355678
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/workbench-assets.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-workbench-video",
+      "title": "视频制作 - EmptyBroken",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1786678000000,
+      "canvasData": {
+        "x": 960,
+        "y": 373,
+        "group": 1,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 901,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-23bc46a8",
+          "measuredAt": 1786948355678
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/workbench-video.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-workbench-preview",
+      "title": "成片预览 - EmptyBroken",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1786678000000,
+      "canvasData": {
+        "x": 1440,
+        "y": 373,
+        "group": 1,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 900,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-9ef11015",
+          "measuredAt": 1786948355678
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/workbench-preview.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-recharge",
+      "title": "套餐定价 - Empty Broken",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1786760002000,
+      "canvasData": {
+        "x": 1212,
+        "y": 816,
+        "group": 2,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 2933,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-d074fbe5",
+          "measuredAt": 1786948355678
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/recharge.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-login-register",
+      "title": "登录注册 - Empty Broken",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1786953600000,
+      "canvasData": {
+        "x": 720,
+        "y": 816,
+        "group": 3,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 900,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-00000000",
+          "measuredAt": 1786953600000
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/login-register.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-admin-login",
+      "title": "管理端登录 - DUANJU Admin",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1786940400000,
+      "canvasData": {
+        "x": -96,
+        "y": 1260,
+        "group": 4,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 900,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-ad4a3501",
+          "measuredAt": 1786947610892
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/admin-login.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-admin-dashboard",
+      "title": "工作台 - 管理后台",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1786940401000,
+      "canvasData": {
+        "x": 480,
+        "y": 1188,
+        "group": 4,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1935,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-2c7b9ccf",
+          "measuredAt": 1786952842937
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/admin-dashboard.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-admin-users",
+      "title": "用户管理 - 管理后台",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1786940402000,
+      "canvasData": {
+        "x": 984,
+        "y": 1188,
+        "group": 4,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 971,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-5d4805d1",
+          "measuredAt": 1786947610892
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/admin-users.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-admin-audit",
+      "title": "内容审核 - 管理后台",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1786940403000,
+      "canvasData": {
+        "x": 1476,
+        "y": 1188,
+        "group": 4,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1103,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-d8381c21",
+          "measuredAt": 1786947610892
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/admin-audit.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-admin-billing",
+      "title": "计费财务 - 管理后台",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1786940404000,
+      "canvasData": {
+        "x": 1956,
+        "y": 1188,
+        "group": 4,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1469,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-f3ed5912",
+          "measuredAt": 1786947610892
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/admin-billing.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-admin-works",
+      "title": "作品管理 - 管理后台",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1786948200000,
+      "canvasData": {
+        "x": 2916,
+        "y": 1188,
+        "group": 4,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1200,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-adminworks01",
+          "measuredAt": 1786948200000
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/admin-works.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-admin-tasks",
+      "title": "算力任务 - 管理后台",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1786948210000,
+      "canvasData": {
+        "x": 3876,
+        "y": 1188,
+        "group": 4,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1600,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-admintasks01",
+          "measuredAt": 1786948210000
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/admin-tasks.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-admin-config",
+      "title": "平台配置 - 管理后台",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1786948220000,
+      "canvasData": {
+        "x": 4836,
+        "y": 1188,
+        "group": 4,
+        "deviceType": "freeSize",
+        "windowSize": {
+          "width": 1440,
+          "height": 900
+        },
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1800,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-adminconfig01",
+          "measuredAt": 1786948220000
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/admin-config.html",
+        "interactions": []
+      }
+    }
+  ],
+  "config": {
+    "autoLayout": false,
+    "deviceType": "desktop",
+    "projectName": "EmptyBroken - AI短剧创作",
+    "visualEditorEnabled": true,
+    "showEdge": false
+  }
+}

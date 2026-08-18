@@ -33,7 +33,7 @@ func (s *ContentStore) Feed(ctx context.Context, page, pageSize int) ([]map[stri
 		pageSize = 20
 	}
 	var total int
-	s.pool.QueryRow(ctx, `SELECT count(*) FROM works WHERE publish_status='PUBLISHED'`).Scan(&total)
+	s.pool.QueryRow(ctx, `SELECT count(*) FROM works WHERE publish_status='PUBLISHED' AND is_deleted_recyclebin=FALSE`).Scan(&total)
 	rows, err := s.pool.Query(ctx, `
 		SELECT w.work_uuid::text, w.title, COALESCE(w.cover_url,''), w.view_count, w.like_count,
 		       w.favorite_count, w.comment_count, w.duration_sec,

@@ -17,6 +17,7 @@ import (
 	"github.com/duanju/backend/internal/engine/billing"
 	"github.com/duanju/backend/internal/engine/model"
 	"github.com/duanju/backend/internal/engine/task"
+	"github.com/duanju/backend/internal/pkg/cryptox"
 	"github.com/duanju/backend/internal/pkg/db"
 	"github.com/duanju/backend/internal/pkg/logger"
 	"github.com/duanju/backend/internal/pkg/redisx"
@@ -54,9 +55,18 @@ func main() {
 	store := repository.NewTaskStore(pool)
 	queue := task.NewQueue(rdb, cfg.App.Env)
 
-	// 模型引擎（B06）：开发期注册 mock provider（KeyStore 用内存固定 Key；生产接入 DB 表驱动）
+	// 模型引擎（B06）：DB 表驱动（model_providers/models/model_keys）+ mock 降级。
+	// 管理端配置了厂商/模型/Key 后自动切真实调用；无配置时降级 mock 链路（开发期）。
+	// 加密密钥：MODEL_KEY_ENC_SECRET（缺失回退 JWT_SECRET，仅开发期可用）。
+	encSecret := os.Getenv("MODEL_KEY_ENC_SECRET")
+	if encSecret == "" {
+		encSecret = cfg.JWT.Secret
+	}
+	keyStore := repository.NewModelKeyStore(pool, cryptox.DeriveKey(encSecret), true)
+	// 真实 LLM Provider（OpenAI 兼容：DeepSeek/Qwen/GLM 等，按厂商 name 匹配注册）
+	realLLM := model.NewOpenAICompatProvider("openai-compat", model.CapLLM)
 	mockLLM := model.NewMockProvider("mock-llm", model.CapLLM)
-	modelEngine := model.NewEngine([]model.Provider{mockLLM}, memoryKeyStore{})
+	modelEngine := model.NewEngine([]model.Provider{realLLM, mockLLM}, keyStore)
 
 	// Agent 引擎（S1-B05）：SplitHandler 注册为 SCRIPT_SPLIT 执行器
 	splitStore := repository.NewSplitStore(pool)

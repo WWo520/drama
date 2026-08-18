@@ -15,11 +15,20 @@ import (
 type fakeOrderStore struct {
 	orders   map[string]*Order // orderNo → order
 	idemKeys map[string]string // idemKey → orderNo
+	pkgs     map[string]*Package
 	seq      int64
 }
 
 func newFakeOrderStore() *fakeOrderStore {
-	return &fakeOrderStore{orders: map[string]*Order{}, idemKeys: map[string]string{}}
+	return &fakeOrderStore{
+		orders:   map[string]*Order{},
+		idemKeys: map[string]string{},
+		pkgs: map[string]*Package{
+			"POINTS_PKG_SMALL":  {PkgCode: "POINTS_PKG_SMALL", Points: 500, BonusPoints: 0, PriceYuan: "49.00", Status: "ON"},
+			"POINTS_PKG_MEDIUM": {PkgCode: "POINTS_PKG_MEDIUM", Points: 2500, BonusPoints: 1250, PriceYuan: "199.00", Status: "ON"},
+			"POINTS_PKG_LARGE":  {PkgCode: "POINTS_PKG_LARGE", Points: 15000, BonusPoints: 7500, PriceYuan: "999.00", Status: "ON"},
+		},
+	}
 }
 
 func (f *fakeOrderStore) CreateOrder(_ context.Context, userID int64, orderType, planCode, amountYuan string, points int, idemKey string) (int64, string, error) {
@@ -40,6 +49,22 @@ func (f *fakeOrderStore) GetOrderByNo(_ context.Context, orderNo string) (*Order
 		return nil, errors.New("订单不存在")
 	}
 	return o, nil
+}
+
+func (f *fakeOrderStore) GetOrderByNoForUser(_ context.Context, orderNo string, userID int64) (*Order, error) {
+	o, ok := f.orders[orderNo]
+	if !ok || o.UserID != userID {
+		return nil, errors.New("订单不存在")
+	}
+	return o, nil
+}
+
+func (f *fakeOrderStore) GetPackage(_ context.Context, pkgCode string) (*Package, error) {
+	p, ok := f.pkgs[pkgCode]
+	if !ok {
+		return nil, errors.New("套餐不存在")
+	}
+	return p, nil
 }
 
 func (f *fakeOrderStore) PayCallback(_ context.Context, orderNo, payTransactionID string, points int) (bool, error) {
@@ -91,9 +116,9 @@ func TestCreateOrderAndCallback(t *testing.T) {
 func TestRepeatedCallbackRejected(t *testing.T) {
 	svc := testAlipay()
 	ctx := context.Background()
-	resp, _ := svc.CreateOrder(ctx, 1, "POINTS_PACKAGE", "PKG", "19.90", 200, "idem-2")
+	resp, _ := svc.CreateOrder(ctx, 1, "POINTS_PACKAGE", "POINTS_PKG_MEDIUM", "199.00", 3750, "idem-2")
 
-	cb := svc.BuildMockCallback(resp.OrderNo, "19.90", "TXN-2001")
+	cb := svc.BuildMockCallback(resp.OrderNo, "199.00", "TXN-2001")
 	assert.Equal(t, "success", svc.HandleCallback(ctx, cb))
 	// 重复回调（同一交易号）→ 幂等 success，不重复入账
 	assert.Equal(t, "success", svc.HandleCallback(ctx, cb))
@@ -102,32 +127,57 @@ func TestRepeatedCallbackRejected(t *testing.T) {
 func TestForgedCallbackRejected(t *testing.T) {
 	svc := testAlipay()
 	ctx := context.Background()
-	resp, _ := svc.CreateOrder(ctx, 1, "POINTS_PACKAGE", "PKG", "9.90", 100, "idem-3")
+	resp, _ := svc.CreateOrder(ctx, 1, "POINTS_PACKAGE", "POINTS_PKG_LARGE", "999.00", 22500, "idem-3")
 
 	// 伪造：篡改金额（签名不匹配）→ 步1 验签失败 → fail
-	cb := svc.BuildMockCallback(resp.OrderNo, "9.90", "TXN-3001")
+	cb := svc.BuildMockCallback(resp.OrderNo, "999.00", "TXN-3001")
 	cb["total_amount"] = "0.01" // 篡改
 	assert.Equal(t, "fail", svc.HandleCallback(ctx, cb))
 
 	// 金额不匹配（正确签名但金额错误）→ 步2 金额字符串比较 → fail
-	cb2 := svc.BuildMockCallback(resp.OrderNo, "9.90", "TXN-3002")
-	// 重新签名正确金额，但订单实际金额 9.90 与回调 8.90 不符
+	cb2 := svc.BuildMockCallback(resp.OrderNo, "999.00", "TXN-3002")
+	// 重新签名正确金额，但订单实际金额 999.00 与回调 8.90 不符
 	cb2["total_amount"] = "8.90"
 	// 重签：用新金额重新构建（需完整签名）——直接构造错误的
-	cb3 := svc.BuildMockCallback(resp.OrderNo, "9.90", "TXN-3003")
+	cb3 := svc.BuildMockCallback(resp.OrderNo, "999.00", "TXN-3003")
 	cb3["total_amount"] = "8.90"
 	// 修改后签名失效 → 应 fail
 	assert.Equal(t, "fail", svc.HandleCallback(ctx, cb3))
 
 	// 伪造交易号（正确签名但 trade_no 与订单无关）→ 仍 success 幂等（同一订单首付）
-	cb4 := svc.BuildMockCallback(resp.OrderNo, "9.90", "TXN-FORGED")
+	cb4 := svc.BuildMockCallback(resp.OrderNo, "999.00", "TXN-FORGED")
 	assert.Equal(t, "success", svc.HandleCallback(ctx, cb4))
 }
 
 func TestCreateOrderIdempotent(t *testing.T) {
 	svc := testAlipay()
 	ctx := context.Background()
-	r1, _ := svc.CreateOrder(ctx, 1, "POINTS_PACKAGE", "PKG", "29.90", 300, "idem-4")
-	r2, _ := svc.CreateOrder(ctx, 1, "POINTS_PACKAGE", "PKG", "29.90", 300, "idem-4")
+	r1, _ := svc.CreateOrder(ctx, 1, "POINTS_PACKAGE", "POINTS_PKG_SMALL", "49.00", 500, "idem-4")
+	r2, _ := svc.CreateOrder(ctx, 1, "POINTS_PACKAGE", "POINTS_PKG_SMALL", "49.00", 500, "idem-4")
 	assert.Equal(t, r1.OrderNo, r2.OrderNo, "同幂等键返回同一订单")
+}
+
+// TestCreateOrderTierValidation 档位校验（P0 修复）：金额/积分与价目表不符必须拒绝。
+func TestCreateOrderTierValidation(t *testing.T) {
+	svc := testAlipay()
+	ctx := context.Background()
+
+	// 金额篡改：0.01 元买 500 积分 → 拒绝
+	_, err := svc.CreateOrder(ctx, 1, "POINTS_PACKAGE", "POINTS_PKG_SMALL", "0.01", 500, "idem-tier-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "金额与套餐价目不符")
+
+	// 积分篡改：49 元买 100 万积分 → 拒绝
+	_, err = svc.CreateOrder(ctx, 1, "POINTS_PACKAGE", "POINTS_PKG_SMALL", "49.00", 1000000, "idem-tier-2")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "积分与套餐价目不符")
+
+	// 套餐不存在 → 拒绝
+	_, err = svc.CreateOrder(ctx, 1, "POINTS_PACKAGE", "NOT_EXIST_PKG", "1.00", 10, "idem-tier-3")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "套餐不存在")
+
+	// 正确档位 → 成功
+	_, err = svc.CreateOrder(ctx, 1, "POINTS_PACKAGE", "POINTS_PKG_SMALL", "49.00", 500, "idem-tier-4")
+	require.NoError(t, err)
 }

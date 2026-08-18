@@ -35,6 +35,10 @@ func (f *fakeBillStore) GetAccountForUpdate(_ context.Context, ownerType string,
 	return a, nil // 返回共享指针（模拟 FOR UPDATE 行锁语义）
 }
 
+func (f *fakeBillStore) GetAccount(_ context.Context, ownerType string, ownerID int64) (*Account, error) {
+	return f.GetAccountForUpdate(context.Background(), ownerType, ownerID)
+}
+
 func (f *fakeBillStore) Freeze(_ context.Context, a *Account, amount int, _ int64, _ *TxnMeta) error {
 	a.CurrentBalance -= amount
 	a.FrozenBalance += amount

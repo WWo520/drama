@@ -17,8 +17,8 @@ type MembershipStore interface {
 	GetMembership(ctx context.Context, userID int64) (map[string]any, error)
 	// Purchase 购买：创建订单（subscription_days_granted + related_membership_id 预留）。
 	Purchase(ctx context.Context, userID int64, planCode, billingCycle, amountYuan string) (orderNo string, err error)
-	// Activate 支付回调后激活/续期会员。
-	Activate(ctx context.Context, orderNo string) error
+	// Activate 支付回调后激活/续期会员（归属校验：仅订单所有者）。
+	Activate(ctx context.Context, orderNo string, userID int64) error
 	// Cancel 取消续订（cancel_at_period_end=true）。
 	Cancel(ctx context.Context, userID int64) error
 }
@@ -57,10 +57,15 @@ func (s *MembershipService) Purchase(c *gin.Context) {
 	httpx.OK(c, gin.H{"order_no": orderNo, "amount_yuan": amount, "plan_code": req.PlanCode, "billing_cycle": req.BillingCycle})
 }
 
-// Activate 支付回调（开发期端点）→ 激活会员。
+// Activate 支付回调（开发期端点）→ 激活会员（仅订单所有者可触发）。
 func (s *MembershipService) Activate(c *gin.Context, orderNo string) {
-	if err := s.store.Activate(c.Request.Context(), orderNo); err != nil {
-		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "激活失败")
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	if err := s.store.Activate(c.Request.Context(), orderNo, uid); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, 20009, "激活失败："+err.Error())
 		return
 	}
 	httpx.OK(c, nil)
@@ -115,5 +120,3 @@ func (s *MembershipService) AIDialogSSE(c *gin.Context) {
 	c.SSEvent("done", map[string]any{"status": "ok", "is_mock": true})
 	flusher.Flush()
 }
-
-var _ = time.Second

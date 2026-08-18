@@ -1,0 +1,2239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>资产生成 - LuxReal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+            overflow: hidden;
+        }
+        .workflow-active {
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            box-shadow: 0 0 20px rgba(76, 127, 248, 0.4), 0 0 40px rgba(139, 92, 246, 0.2);
+        }
+        .nav-active {
+            background: linear-gradient(135deg, #1a1a3e, #252550);
+        }
+        .scrollbar-thin::-webkit-scrollbar {
+            width: 4px;
+        }
+        .scrollbar-thin::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .scrollbar-thin::-webkit-scrollbar-thumb {
+            background: #2A2A35;
+            border-radius: 2px;
+        }
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+            background: #3A3A4A;
+        }
+        .tooltip {
+            position: relative;
+        }
+        .tooltip::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: calc(100% + 12px);
+            top: 50%;
+            transform: translateY(-50%);
+            background: #1A1A2E;
+            color: #fff;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s;
+            z-index: 100;
+            border: 1px solid #2A2A3E;
+        }
+        .tooltip::before {
+            content: '';
+            position: absolute;
+            left: calc(100% + 6px);
+            top: 50%;
+            transform: translateY(-50%);
+            border: 5px solid transparent;
+            border-right-color: #1A1A2E;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s;
+            z-index: 100;
+        }
+        .tooltip:hover::after,
+        .tooltip:hover::before {
+            opacity: 1;
+        }
+        .char-silhouette {
+            background: linear-gradient(135deg, #2A2A3E 0%, #1A1A2E 100%);
+            position: relative;
+        }
+        .char-silhouette::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(ellipse at center 40%, rgba(76, 127, 248, 0.08) 0%, transparent 60%);
+        }
+        .scene-placeholder {
+            background: linear-gradient(135deg, #252535 0%, #1A1A24 100%);
+        }
+        .prop-placeholder {
+            background: linear-gradient(135deg, #2A2A38 0%, #1A1E28 100%);
+        }
+        /* Sidebar design tokens */
+        :root {
+            --luxreal-sidebar: #0A0A14;
+            --luxreal-sidebar-foreground: #B0B0C8;
+            --luxreal-border: #1A1F2E;
+            --luxreal-primary: #4C7FF8;
+            --luxreal-foreground: #F0F0F5;
+        }
+        /* Sidebar navigation item */
+        .luxreal-nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 56px;
+            height: 56px;
+            border-radius: 10px;
+            color: var(--luxreal-sidebar-foreground);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            gap: 3px;
+            text-decoration: none;
+            font-size: 11px;
+            position: relative;
+        }
+        .luxreal-nav-item:hover {
+            color: var(--luxreal-foreground);
+            background: rgba(255,255,255,0.05);
+        }
+        .luxreal-nav-item.active {
+            color: var(--luxreal-primary);
+            background: rgba(59,130,246,0.12);
+        }
+        .luxreal-nav-item.nav-recharge {
+            color: #A78BFA;
+            background: rgba(139,92,246,0.08);
+        }
+        .luxreal-nav-item.nav-recharge:hover {
+            color: #C4B5FD;
+            background: rgba(139,92,246,0.14);
+        }
+        /* Nav badge */
+        .nav-badge {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            background: #EF4444;
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+            min-width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 5px;
+            line-height: 1;
+        }
+        /* Avatar circle */
+        .avatar-circle {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            flex-shrink: 0;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        /* Top bar unified styles */
+        .topbar-container {
+            height: 64px;
+            background: rgba(13, 17, 25, 0.8);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid #1A1F2E;
+        }
+        /* Workflow Pill Bar optimized */
+        .workflow-pill-bar {
+            background: rgba(13, 17, 25, 0.8) !important;
+            border: 1px solid #1A1F2E !important;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+        .workflow-active {
+            box-shadow: 0 0 16px rgba(76, 127, 248, 0.5), 0 0 32px rgba(139, 92, 246, 0.25) !important;
+        }
+        /* Unified topbar right buttons */
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            height: 32px;
+        }
+        .topbar-btn {
+            height: 32px;
+            padding: 0 12px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 1px solid #1A1F2E;
+            background: #0D1119;
+            color: #8B8B9A;
+            white-space: nowrap;
+        }
+        .topbar-btn:hover {
+            border-color: #2A2F3E;
+            color: #F0F0F5;
+        }
+        .topbar-btn-primary {
+            border-color: rgba(76, 127, 248, 0.4);
+            color: #4C7FF8;
+        }
+        .topbar-btn-primary:hover {
+            border-color: rgba(76, 127, 248, 0.6);
+            color: #6B9BFF;
+        }
+        .topbar-icon-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6B7088;
+            cursor: pointer;
+            transition: all 0.15s;
+            background: transparent;
+            border: none;
+            flex-shrink: 0;
+            position: relative;
+        }
+        .topbar-icon-btn:hover {
+            color: #F0F0F5;
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .topbar-icon-btn .notification-dot {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #EF4444;
+        }
+        /* Recharge button with gradient text */
+        .topbar-recharge-btn {
+            height: 32px;
+            padding: 0 12px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            text-decoration: none;
+        }
+        .topbar-recharge-btn:hover {
+            background: rgba(139, 92, 246, 0.18);
+            border-color: rgba(139, 92, 246, 0.5);
+        }
+        .topbar-recharge-btn span {
+            background: linear-gradient(135deg, #A78BFA, #8B5CF6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        /* Topbar avatar */
+        .topbar-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            flex-shrink: 0;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.15s;
+            border: 2px solid transparent;
+        }
+        .topbar-avatar:hover {
+            border-color: rgba(76, 127, 248, 0.5);
+        }
+        /* Profile Panel */
+        .profile-panel {
+            position: fixed;
+            top: 0;
+            left: 84px;
+            width: 240px;
+            background: #1A1A2E;
+            border: 1px solid #2A2A3E;
+            border-radius: 20px;
+            padding: 16px;
+            z-index: 100;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03) inset;
+        }
+        .profile-panel::before {
+            content: '';
+            position: absolute;
+            left: -6px;
+            top: 50%;
+            transform: translateY(-50%) rotate(45deg);
+            width: 10px;
+            height: 10px;
+            background: #1A1A2E;
+            border-left: 1px solid #2A2A3E;
+            border-bottom: 1px solid #2A2A3E;
+        }
+        .profile-panel.hidden {
+            display: none;
+        }
+        .profile-panel-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 4px;
+        }
+        .profile-avatar-lg {
+            position: relative;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 18px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+        .profile-avatar-lg::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 12px;
+            height: 12px;
+            background: #22C55E;
+            border: 2px solid #1A1A2E;
+            border-radius: 50%;
+        }
+        .profile-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .profile-name {
+            font-size: 15px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 2px;
+        }
+        .profile-id {
+            font-size: 12px;
+            color: #6B7088;
+        }
+        .profile-upgrade-btn {
+            font-size: 11px;
+            font-weight: 500;
+            color: #fff;
+            background: linear-gradient(135deg, #A78BFA, #8B5CF6);
+            padding: 4px 10px;
+            border-radius: 9999px;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: all 0.15s;
+            white-space: nowrap;
+            text-decoration: none;
+        }
+        .profile-upgrade-btn:hover {
+            opacity: 0.9;
+            box-shadow: 0 2px 8px rgba(139, 92, 246, 0.4);
+        }
+        .profile-credit-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: rgba(139, 92, 246, 0.08);
+            border: 1px solid rgba(139, 92, 246, 0.15);
+            border-radius: 10px;
+            margin-top: 12px;
+        }
+        .profile-credit-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #C0C0CC;
+        }
+        .profile-credit-info .credit-num {
+            color: #A78BFA;
+            font-weight: 600;
+        }
+        .profile-credit-divider {
+            width: 1px;
+            height: 12px;
+            background: rgba(255,255,255,0.1);
+        }
+        .profile-plan-info {
+            font-size: 12px;
+            color: #6B7088;
+        }
+        .profile-panel-divider {
+            height: 1px;
+            background: rgba(255,255,255,0.06);
+            margin: 12px 0;
+        }
+        .profile-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .profile-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            color: #C0C0CC;
+            font-size: 13px;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .profile-menu-item:hover {
+            background: rgba(255,255,255,0.05);
+            color: #fff;
+        }
+        .profile-menu-item:hover .profile-menu-arrow {
+            color: #4C7FF8;
+            transform: translateX(2px);
+        }
+        .profile-menu-arrow {
+            margin-left: auto;
+            color: #4A4A5A;
+            transition: all 0.2s;
+        }
+        .profile-logout {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px;
+            border-radius: 10px;
+            color: #EF4444;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .profile-logout:hover {
+            background: rgba(239,68,68,0.1);
+        }
+        /* === Sidebar Credits & Recharge === */
+        .sidebar-credits {
+            font-size: 12px;
+            font-weight: 500;
+            color: #F0F0F5;
+            line-height: 1.2;
+            margin: 4px 0 6px;
+            flex-shrink: 0;
+        }
+        .sidebar-recharge {
+            font-size: 12px;
+            font-weight: 500;
+            color: #fff;
+            background: linear-gradient(135deg, #A78BFA, #8B5CF6);
+            padding: 4px 12px;
+            border-radius: 9999px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+        .sidebar-recharge:hover {
+            background: linear-gradient(135deg, #C4B5FD, #A78BFA);
+            transform: translateY(-1px);
+        }
+        /* Sidebar spacer */
+        .sidebar-spacer {
+            flex: 1;
+            min-height: 8px;
+        }
+        /* Sidebar avatar */
+        .sidebar-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .sidebar-avatar:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 0 2px rgba(76, 127, 248, 0.3);
+        }
+        /* Sidebar bottom section - fixed at bottom */
+        .sidebar-bottom-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            margin-top: auto;
+        }
+        .sidebar-icon-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            position: relative;
+            flex-shrink: 0;
+            color: #B0B0C8;
+        }
+        .sidebar-icon-btn:hover {
+            background: rgba(255,255,255,0.05);
+            color: #F0F0F5;
+        }
+        .sidebar-icon-btn .sidebar-badge {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            background: #EF4444;
+            color: white;
+            font-size: 9px;
+            font-weight: 600;
+            min-width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 4px;
+            line-height: 1;
+        }
+        /* === Workflow Navigation (pill style, LuxReal aligned) === */
+        .workflow-steps {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .workflow-nav {
+            display: flex;
+            align-items: center;
+            background: rgba(26, 26, 46, 0.8);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 999px;
+            padding: 4px;
+            backdrop-filter: blur(12px);
+        }
+        .workflow-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 18px;
+            border-radius: 999px;
+            font-size: 13px;
+            color: #8B8B9A;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+            white-space: nowrap;
+        }
+        .workflow-nav-item:hover {
+            color: #fff;
+            background: rgba(255,255,255,0.04);
+        }
+        .workflow-nav-item.active {
+            background: linear-gradient(135deg, #4C7FF8, #6366F1);
+            color: #fff;
+            font-weight: 500;
+            box-shadow: 0 2px 12px rgba(76, 127, 248, 0.35);
+        }
+        .workflow-nav-item.active:hover {
+            background: linear-gradient(135deg, #5C8FFF, #7376F9);
+            box-shadow: 0 4px 16px rgba(76, 127, 248, 0.5);
+        }
+        .workflow-nav-num {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.08);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: #6B7088;
+            transition: all 0.2s ease;
+        }
+        .workflow-nav-item.active .workflow-nav-num {
+            background: rgba(255,255,255,0.25);
+            color: #fff;
+        }
+        .workflow-nav-text {
+            line-height: 1;
+        }
+        /* === Recharge Popup Modal === */
+        .recharge-modal {
+            position: fixed;
+            z-index: 200;
+            width: 420px;
+            background: #0D1119;
+            border: 1px solid #1A1F2E;
+            border-radius: 16px;
+            box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.03);
+            overflow: hidden;
+        }
+        .recharge-modal.hidden {
+            display: none;
+        }
+        .recharge-modal-header {
+            padding: 20px 20px 16px;
+            border-bottom: 1px solid #1A1F2E;
+        }
+        .recharge-modal-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .recharge-modal-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .recharge-modal-close {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6B7088;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .recharge-modal-close:hover {
+            background: rgba(255,255,255,0.06);
+            color: #F0F0F5;
+        }
+        .recharge-modal-balance {
+            font-size: 13px;
+            color: #8B8B9A;
+        }
+        .recharge-modal-balance strong {
+            color: #F59E0B;
+            font-weight: 500;
+        }
+        .recharge-modal-body {
+            padding: 16px 20px;
+            max-height: 420px;
+            overflow-y: auto;
+        }
+        .recharge-section-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: #F0F0F5;
+            margin-bottom: 10px;
+        }
+        .recharge-package-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        .recharge-package-card {
+            position: relative;
+            padding: 12px 8px;
+            border: 1px solid #1A1F2E;
+            border-radius: 10px;
+            background: #111520;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: center;
+        }
+        .recharge-package-card:hover {
+            border-color: #2A3A5A;
+        }
+        .recharge-package-card.selected {
+            border-color: #4C7FF8;
+            background: rgba(76, 127, 248, 0.08);
+        }
+        .recharge-package-card.hot {
+            border-color: rgba(249, 115, 22, 0.4);
+            box-shadow: 0 0 12px rgba(249, 115, 22, 0.15);
+            overflow: hidden;
+        }
+        .recharge-package-card.hot::before {
+            content: '';
+            position: absolute;
+            top: -18px;
+            right: -18px;
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #F59E0B, #EF4444);
+            transform: rotate(45deg);
+            z-index: 0;
+        }
+        .recharge-package-card.hot::after {
+            content: '热门';
+            position: absolute;
+            top: 5px;
+            right: 3px;
+            font-size: 8px;
+            font-weight: 600;
+            color: white;
+            z-index: 1;
+            transform: rotate(45deg);
+            line-height: 1;
+            pointer-events: none;
+        }
+        .recharge-package-amount {
+            font-size: 18px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 2px;
+        }
+        .recharge-package-bonus {
+            font-size: 10px;
+            color: #10B981;
+            margin-bottom: 6px;
+            height: 14px;
+        }
+        .recharge-package-bonus:empty {
+            display: none;
+        }
+        .recharge-package-price {
+            font-size: 14px;
+            color: #F59E0B;
+            font-weight: 500;
+        }
+        .recharge-subscription-section {
+            margin-bottom: 20px;
+        }
+        .recharge-subscription-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        .recharge-sub-card {
+            padding: 14px 10px;
+            border: 1px solid #1A1F2E;
+            border-radius: 10px;
+            background: #111520;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: left;
+            position: relative;
+        }
+        .recharge-sub-card:hover {
+            border-color: #2A3A5A;
+        }
+        .recharge-sub-card.selected {
+            border-color: #4C7FF8;
+            background: rgba(76, 127, 248, 0.08);
+        }
+        .recharge-sub-card.featured {
+            border-color: rgba(139, 92, 246, 0.4);
+            background: linear-gradient(135deg, rgba(139,92,246,0.08), rgba(76,127,248,0.06));
+            box-shadow: 0 0 12px rgba(139, 92, 246, 0.12);
+        }
+        .recharge-sub-card.featured::before {
+            content: '推荐';
+            position: absolute;
+            top: -1px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 2px 8px;
+            font-size: 9px;
+            font-weight: 600;
+            color: white;
+            background: linear-gradient(135deg, #8B5CF6, #4C7FF8);
+            border-radius: 0 0 8px 8px;
+            line-height: 1.2;
+        }
+        .recharge-sub-header {
+            text-align: center;
+            margin-bottom: 10px;
+            margin-top: 4px;
+        }
+        .recharge-sub-name {
+            font-size: 12px;
+            color: #8B8B9A;
+            margin-bottom: 4px;
+        }
+        .recharge-sub-card.featured .recharge-sub-name {
+            color: #A78BFA;
+        }
+        .recharge-sub-price {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            display: inline;
+        }
+        .recharge-sub-period {
+            font-size: 10px;
+            color: #6B7088;
+            display: inline;
+        }
+        .recharge-sub-features {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .recharge-sub-feature {
+            display: flex;
+            align-items: flex-start;
+            gap: 5px;
+            font-size: 10px;
+            color: #8B8B9A;
+            line-height: 1.4;
+        }
+        .recharge-sub-feature-check {
+            color: #10B981;
+            font-size: 11px;
+            line-height: 1.4;
+            flex-shrink: 0;
+        }
+        .recharge-payment-section {
+            margin-bottom: 16px;
+        }
+        .recharge-payment-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+        .recharge-payment-card {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px;
+            border: 1px solid #1A1F2E;
+            border-radius: 10px;
+            background: #111520;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .recharge-payment-card:hover {
+            border-color: #2A3A5A;
+        }
+        .recharge-payment-card.selected {
+            border-color: #4C7FF8;
+            background: rgba(76, 127, 248, 0.08);
+        }
+        .recharge-payment-card .payment-icon {
+            width: 20px;
+            height: 20px;
+        }
+        .recharge-payment-card .payment-name {
+            font-size: 13px;
+            color: #C0C0CC;
+        }
+        .recharge-modal-footer {
+            padding: 14px 20px 20px;
+            border-top: 1px solid #1A1F2E;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .recharge-total-label {
+            font-size: 12px;
+            color: #6B7088;
+            margin-bottom: 4px;
+        }
+        .recharge-total-amount {
+            font-size: 24px;
+            font-weight: 600;
+            color: #F59E0B;
+        }
+        .recharge-total-amount span {
+            font-size: 14px;
+            font-weight: 400;
+        }
+        .recharge-pay-btn {
+            padding: 10px 28px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 500;
+            color: white;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s;
+            box-shadow: 0 4px 16px rgba(76, 127, 248, 0.3);
+            min-width: 110px;
+        }
+        .recharge-pay-btn:hover {
+            box-shadow: 0 6px 24px rgba(76, 127, 248, 0.45);
+            transform: translateY(-1px);
+        }
+        .recharge-pay-btn.processing {
+            background: #4A5568;
+            cursor: wait;
+            opacity: 0.8;
+            transform: none;
+            box-shadow: none;
+        }
+        .recharge-pay-btn.success {
+            background: linear-gradient(135deg, #10B981, #059669);
+            cursor: default;
+            box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);
+        }
+        .recharge-pay-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        /* === Top Bar adjusted === */
+        .topbar-container {
+            position: relative;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex text-white">
+
+    <!-- Column 1: Far Left Main Nav (72px) -->
+    <aside id="sidebar-nav" class="flex flex-col items-center py-3 gap-1 flex-shrink-0 z-10" style="width:72px; background: var(--luxreal-sidebar); border-right: 1px solid var(--luxreal-border);">
+        <!-- Top: Logo mark -->
+        <div class="flex items-center justify-center flex-shrink-0" style="height:56px; margin-bottom: 4px;">
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M6 4H22V8H10V24H6V4Z" fill="white"/>
+                <path d="M14 12H22V16H18V24H14V12Z" fill="white" opacity="0.7"/>
+            </svg>
+        </div>
+
+        <!-- Spacer to push main nav down -->
+        <div class="flex-1" style="min-height: 20px;"></div>
+
+        <!-- Center nav (创作 active blue, 发现, 作品) - vertically centered -->
+        <nav class="flex flex-col items-center gap-2 flex-shrink-0">
+            <a id="nav-create" href="create-video.html" class="luxreal-nav-item active" title="创作">
+                <i data-lucide="sparkles" class="w-[22px] h-[22px]"></i>
+                <span>创作</span>
+            </a>
+            <a id="nav-discover" href="discover.html" class="luxreal-nav-item" title="发现">
+                <i data-lucide="compass" class="w-[22px] h-[22px]"></i>
+                <span>发现</span>
+            </a>
+            <a id="nav-projects" href="works.html" class="luxreal-nav-item" title="作品">
+                <i data-lucide="folder" class="w-[22px] h-[22px]"></i>
+                <span>作品</span>
+            </a>
+        </nav>
+
+        <!-- Spacer to push lower nav down -->
+        <div class="flex-1" style="min-height: 20px;"></div>
+
+        <!-- Avatar (click to show profile panel) -->
+        <div id="sidebarAvatar" class="sidebar-avatar" style="margin-bottom: 4px;">
+            Y
+        </div>
+
+        <!-- Credits number -->
+        <span class="sidebar-credits">2,580</span>
+        <!-- Recharge link -->
+        <a href="recharge.html" class="sidebar-recharge" title="充值">充值</a>
+
+        <!-- Profile Panel (popup from avatar) -->
+        <div id="profilePanel" class="profile-panel hidden">
+            <div class="profile-panel-header">
+                <div class="profile-avatar-lg">Y</div>
+                <div class="profile-info">
+                    <div class="profile-name">夜行者</div>
+                    <div class="profile-id">ID: 10086520</div>
+                </div>
+            </div>
+            <div class="profile-panel-divider"></div>
+            <div class="profile-menu">
+                <a href="works.html" class="profile-menu-item">
+                    <i data-lucide="folder" class="w-4 h-4"></i>
+                    <span>我的作品</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                </a>
+                <a href="recharge.html" class="profile-menu-item">
+                    <i data-lucide="gem" class="w-4 h-4"></i>
+                    <span>充值中心</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                </a>
+                <a href="#" class="profile-menu-item">
+                    <i data-lucide="settings" class="w-4 h-4"></i>
+                    <span>账号设置</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                </a>
+                <a href="#" class="profile-menu-item">
+                    <i data-lucide="help-circle" class="w-4 h-4"></i>
+                    <span>帮助中心</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                </a>
+            </div>
+            <div class="profile-panel-divider"></div>
+            <div class="profile-logout">
+                <i data-lucide="log-out" class="w-4 h-4"></i>
+                <span>退出登录</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Column 2: Episode Sidebar (~220px) -->
+    <aside class="flex flex-col flex-shrink-0 scrollbar-thin" style="width: 220px; background: #111111;">
+        <!-- Top Row -->
+        <div class="flex items-center h-12 px-3 flex-shrink-0" style="height: 48px;">
+            <a href="works.html" class="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/5 transition-colors mr-1 flex-shrink-0">
+                <i data-lucide="chevron-left" class="w-5 h-5 text-[#8B8B9A]"></i>
+            </a>
+            <span class="text-white text-sm font-medium truncate flex-1">剑魂觉醒：弃子归来</span>
+        </div>
+
+        <!-- Episode List (scrollable) -->
+        <div class="flex-1 overflow-y-auto px-3 py-2 scrollbar-thin">
+            <!-- Episode 1 - Active -->
+            <div class="rounded-xl p-3 cursor-pointer transition-all mb-2" style="background: #1A1A2E; border: 2px solid rgba(76, 127, 248, 0.6);">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs text-[#6B7088]">第1集</span>
+                    <div class="w-2 h-2 rounded-full bg-green-500"></div>
+                </div>
+                <div class="text-sm text-white font-medium mt-1">废柴跳崖，剑魂觉醒</div>
+            </div>
+            <!-- Episode 2 -->
+            <div class="rounded-xl p-3 cursor-pointer transition-all mb-2 hover:border-[#4C7FF8]/40" style="background: #1A1A2E; border: 1px solid #2A2A35;">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs text-[#6B7088]">第2集</span>
+                </div>
+                <div class="text-sm text-[#8B8B9A] font-medium mt-1">青衫归来，震惊全宗</div>
+            </div>
+            <!-- Episode 3 -->
+            <div class="rounded-xl p-3 cursor-pointer transition-all mb-2 hover:border-[#4C7FF8]/40" style="background: #1A1A2E; border: 1px solid #2A2A35;">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs text-[#6B7088]">第3集</span>
+                </div>
+                <div class="text-sm text-[#8B8B9A] font-medium mt-1">剑指长老，真相大白</div>
+            </div>
+        </div>
+
+        <!-- Bottom: Add Episode Button -->
+        <div class="mx-3 mb-3 mt-2 flex-shrink-0">
+            <button class="w-full h-9 rounded-lg border border-dashed text-xs flex items-center justify-center gap-1 transition-colors hover:border-[#4C7FF8] hover:text-[#4C7FF8]" style="border-color: #333; color: #6B7088;">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                新增剧集
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 flex flex-col overflow-hidden" style="background: #030911;">
+        <!-- Top Bar Area -->
+        <div class="topbar-container flex items-center justify-between px-6 relative flex-shrink-0">
+            <!-- Left: Empty spacer (~200px) -->
+            <div class="w-[200px] flex-shrink-0"></div>
+
+            <!-- Center: Workflow Steps Navigation -->
+            <div class="workflow-steps">
+                <div class="workflow-nav">
+                    <a href="workbench-script.html" class="workflow-nav-item">
+                        <span class="workflow-nav-num">1</span>
+                        <span class="workflow-nav-text">剧本拆分</span>
+                    </a>
+                    <a href="workbench-assets.html" class="workflow-nav-item active">
+                        <span class="workflow-nav-num">2</span>
+                        <span class="workflow-nav-text">资产生成</span>
+                    </a>
+                    <a href="workbench-video.html" class="workflow-nav-item">
+                        <span class="workflow-nav-num">3</span>
+                        <span class="workflow-nav-text">视频制作</span>
+                    </a>
+                    <a href="workbench-preview.html" class="workflow-nav-item">
+                        <span class="workflow-nav-num">4</span>
+                        <span class="workflow-nav-text">成片预览</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Right: Canvas mode button only -->
+            <div class="topbar-right">
+                <!-- 3D Studio button -->
+                <button class="topbar-btn topbar-btn-primary">
+                    <i data-lucide="box" class="w-3.5 h-3.5"></i>
+                    3D 片场
+                </button>
+            </div>
+        </div>
+
+
+
+
+
+        <!-- Project Settings Bar -->
+        <div class="mx-6 mt-2 flex items-center justify-between h-9 px-4 rounded-xl" style="background: #16161C; border: 1px solid #2A2A35;">
+            <span class="text-white font-medium text-sm">剑魂觉醒：弃子归来</span>
+            <div class="flex items-center gap-2">
+                <button class="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1 text-white/80 transition-colors hover:text-white" style="background: #1E1E24; border: 1px solid #2A2A35;">
+                    Lux Image 2
+                    <i data-lucide="chevron-down" class="w-3 h-3"></i>
+                </button>
+                <button class="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1 text-white/80 transition-colors hover:text-white" style="background: #1E1E24; border: 1px solid #2A2A35;">
+                    武侠仙侠
+                    <i data-lucide="chevron-down" class="w-3 h-3"></i>
+                </button>
+                <button class="flex items-center gap-1 text-xs text-[#6B7088] hover:text-white transition-colors">
+                    管理模板
+                </button>
+            </div>
+        </div>
+
+        <!-- Sub Tabs -->
+        <div class="flex items-center gap-0 px-6 border-b border-[#1E1E2E]" id="sub-tabs">
+            <button data-tab="overview" class="sub-tab-btn px-4 py-3 text-sm text-white border-b-2 border-[#4C7FF8] font-medium">概览</button>
+            <button data-tab="characters" class="sub-tab-btn px-4 py-3 text-sm text-[#6B7088] border-b-2 border-transparent hover:text-white cursor-pointer transition-colors">角色</button>
+            <button data-tab="scenes" class="sub-tab-btn px-4 py-3 text-sm text-[#6B7088] border-b-2 border-transparent hover:text-white cursor-pointer transition-colors">场景</button>
+            <button data-tab="props" class="sub-tab-btn px-4 py-3 text-sm text-[#6B7088] border-b-2 border-transparent hover:text-white cursor-pointer transition-colors">道具</button>
+            <button data-tab="shots" class="sub-tab-btn px-4 py-3 text-sm text-[#6B7088] border-b-2 border-transparent hover:text-white cursor-pointer transition-colors">智能镜头</button>
+            <button data-tab="materials" class="sub-tab-btn px-4 py-3 text-sm text-[#6B7088] border-b-2 border-transparent hover:text-white cursor-pointer transition-colors">通用素材</button>
+        </div>
+
+        <!-- Content Scroll Area -->
+        <div class="flex-1 overflow-y-auto scrollbar-thin px-6 py-4 pb-24">
+
+            <!-- Asset Stats Row -->
+            <div class="flex gap-3 mb-6">
+                <!-- 角色总数 -->
+                <div class="bg-[#1E1E24] border border-[#2A2A35] rounded-xl p-4 flex-1 relative">
+                    <div class="absolute top-3 right-3 text-[#4C7FF8]">
+                        <i data-lucide="user" class="w-4 h-4"></i>
+                    </div>
+                    <div class="text-2xl text-white font-bold">3</div>
+                    <div class="text-xs text-[#6B7088] mt-1">角色总数</div>
+                </div>
+                <!-- 场景总数 -->
+                <div class="bg-[#1E1E24] border border-[#2A2A35] rounded-xl p-4 flex-1 relative">
+                    <div class="absolute top-3 right-3 text-[#4C7FF8]">
+                        <i data-lucide="map-pin" class="w-4 h-4"></i>
+                    </div>
+                    <div class="text-2xl text-white font-bold">4</div>
+                    <div class="text-xs text-[#6B7088] mt-1">场景总数</div>
+                </div>
+                <!-- 道具总数 -->
+                <div class="bg-[#1E1E24] border border-[#2A2A35] rounded-xl p-4 flex-1 relative">
+                    <div class="absolute top-3 right-3 text-[#4C7FF8]">
+                        <i data-lucide="package" class="w-4 h-4"></i>
+                    </div>
+                    <div class="text-2xl text-white font-bold">4</div>
+                    <div class="text-xs text-[#6B7088] mt-1">道具总数</div>
+                </div>
+                <!-- 智能镜头 -->
+                <div class="bg-[#1E1E24] border border-[#2A2A35] rounded-xl p-4 flex-1 relative">
+                    <div class="absolute top-3 right-3 text-[#4C7FF8]">
+                        <i data-lucide="video" class="w-4 h-4"></i>
+                    </div>
+                    <div class="text-2xl text-white font-bold">2</div>
+                    <div class="text-xs text-[#6B7088] mt-1">智能镜头</div>
+                </div>
+            </div>
+
+            <!-- Section: 角色 -->
+            <div class="mb-6">
+                <h3 class="text-sm text-[#8B8B9A] font-medium mb-3">角色</h3>
+                <div class="grid grid-cols-3 gap-4">
+
+                    <!-- Character Card 1: 叶惊鸿 -->
+                    <div class="bg-[#1E1E24] rounded-xl border border-[#2A2A35] overflow-hidden hover:border-[#3A3A4A] transition-colors">
+                        <!-- Card Header -->
+                        <div class="flex items-center justify-between px-3 py-2.5">
+                            <span class="text-white font-medium text-sm">叶惊鸿</span>
+                            <div class="flex items-center gap-1">
+                                <span class="btn-extend-edit text-[10px] text-[#6B7088] border border-[#3A3A4A] px-1.5 py-0.5 rounded cursor-pointer hover:border-[#4C7FF8] hover:text-[#4C7FF8] transition-colors">扩展编辑</span>
+                                <button class="w-6 h-6 rounded flex items-center justify-center text-[#6B7088] hover:bg-white/5">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Short Description -->
+                        <div class="px-3 pb-2 text-xs text-[#6B7088] line-clamp-2">青年剑客，面容俊朗，眼神坚毅，身着青色长衫，背负古剑，气质清冷</div>
+                        <!-- Style Tags -->
+                        <div class="px-3 pb-2 flex items-center gap-1.5 flex-wrap">
+                            <span class="bg-[#2A2A4A] text-[#4C7FF8] text-[10px] px-2 py-0.5 rounded">青衫剑装</span>
+                            <button class="btn-add-style w-5 h-5 rounded border border-dashed border-[#3A3A4A] flex items-center justify-center text-[#6B7088] hover:border-[#4C7FF8] hover:text-[#4C7FF8] transition-colors">
+                                <i data-lucide="plus" class="w-3 h-3"></i>
+                            </button>
+                        </div>
+                        <!-- AI 生图 label -->
+                        <div class="px-3 pb-2 text-xs text-[#6B7088] flex items-center gap-1.5">
+                            <i data-lucide="plus-circle" class="w-4 h-4"></i>
+                            AI 生图
+                        </div>
+                        <!-- Character Images: 4 images (3/4 portrait) -->
+                        <div class="px-3 pb-3">
+                            <div class="grid grid-cols-4 gap-1.5">
+                                <div class="aspect-[3/4] rounded-lg char-silhouette overflow-hidden relative group cursor-pointer">
+                                    <div class="absolute inset-0 flex items-center justify-center">
+                                        <i data-lucide="user" class="w-6 h-6 text-[#4C7FF8]/30"></i>
+                                    </div>
+                                    <div class="absolute bottom-1 left-1 right-1 text-[8px] text-white/50 text-center">正面</div>
+                                </div>
+                                <div class="aspect-[3/4] rounded-lg char-silhouette overflow-hidden relative group cursor-pointer">
+                                    <div class="absolute inset-0 flex items-center justify-center">
+                                        <i data-lucide="user" class="w-6 h-6 text-[#4C7FF8]/30"></i>
+                                    </div>
+                                    <div class="absolute bottom-1 left-1 right-1 text-[8px] text-white/50 text-center">侧面</div>
+                                </div>
+                                <div class="aspect-[3/4] rounded-lg char-silhouette overflow-hidden relative group cursor-pointer">
+                                    <div class="absolute inset-0 flex items-center justify-center">
+                                        <i data-lucide="user" class="w-6 h-6 text-[#4C7FF8]/30"></i>
+                                    </div>
+                                    <div class="absolute bottom-1 left-1 right-1 text-[8px] text-white/50 text-center">背面</div>
+                                </div>
+                                <div class="aspect-[3/4] rounded-lg char-silhouette overflow-hidden relative group cursor-pointer">
+                                    <div class="absolute inset-0 flex items-center justify-center">
+                                        <i data-lucide="sword" class="w-6 h-6 text-[#4C7FF8]/30"></i>
+                                    </div>
+                                    <div class="absolute bottom-1 left-1 right-1 text-[8px] text-white/50 text-center">动作</div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Action Buttons -->
+                        <div class="px-3 pb-3 flex items-center gap-1.5">
+                            <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                                重新生成
+                            </button>
+                            <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                                编辑提示词
+                            </button>
+                            <button class="w-7 h-7 flex items-center justify-center bg-[#16161C] border border-[#2A2A35] rounded-lg text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                        <!-- Description -->
+                        <div class="px-3 pb-3 text-[11px] text-[#6B7088] leading-relaxed line-clamp-4">
+                            十七岁少年，原是叶家天才弟子，因故修为尽废沦为宗门弃徒。性格坚韧隐忍，被退婚、受欺辱后跳崖明志，意外唤醒体内沉睡的上古剑魂，获绝世传承。常着青色长衫，背负长剑，眼神由落寞转为锐利。
+                        </div>
+                    </div>
+
+                    <!-- Character Card 2: 长老 -->
+                    <div class="bg-[#1E1E24] rounded-xl border border-[#2A2A35] overflow-hidden hover:border-[#3A3A4A] transition-colors">
+                        <!-- Card Header -->
+                        <div class="flex items-center justify-between px-3 py-2.5">
+                            <span class="text-white font-medium text-sm">长老</span>
+                            <div class="flex items-center gap-1">
+                                <span class="btn-extend-edit text-[10px] text-[#6B7088] border border-[#3A3A4A] px-1.5 py-0.5 rounded cursor-pointer hover:border-[#4C7FF8] hover:text-[#4C7FF8] transition-colors">扩展编辑</span>
+                                <button class="w-6 h-6 rounded flex items-center justify-center text-[#6B7088] hover:bg-white/5">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Short Description -->
+                        <div class="px-3 pb-2 text-xs text-[#6B7088] line-clamp-2">白发老者，面容清癯，身着灰白道袍，手持拂尘，气质古板威严</div>
+                        <!-- Style Tags -->
+                        <div class="px-3 pb-2 flex items-center gap-1.5 flex-wrap">
+                            <span class="bg-[#2A2A4A] text-[#4C7FF8] text-[10px] px-2 py-0.5 rounded">常态</span>
+                            <button class="btn-add-style w-5 h-5 rounded border border-dashed border-[#3A3A4A] flex items-center justify-center text-[#6B7088] hover:border-[#4C7FF8] hover:text-[#4C7FF8] transition-colors">
+                                <i data-lucide="plus" class="w-3 h-3"></i>
+                            </button>
+                        </div>
+                        <!-- 生成进度 -->
+                        <div class="px-3 pb-2">
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="text-[10px] text-[#4C7FF8]">生成中... 60%</span>
+                            </div>
+                            <div class="h-1 bg-[#2A2A35] rounded-full overflow-hidden">
+                                <div class="h-full bg-gradient-to-r from-[#4C7FF8] to-[#8B5CF6] w-[60%] rounded-full"></div>
+                            </div>
+                        </div>
+                        <!-- Character Images: partially generated -->
+                        <div class="px-3 pb-3">
+                            <div class="grid grid-cols-4 gap-1.5">
+                                <div class="aspect-[3/4] rounded-lg char-silhouette overflow-hidden relative group cursor-pointer">
+                                    <div class="absolute inset-0 flex items-center justify-center">
+                                        <i data-lucide="user" class="w-6 h-6 text-[#8B5CF8]/30"></i>
+                                    </div>
+                                </div>
+                                <div class="aspect-[3/4] rounded-lg char-silhouette overflow-hidden relative group cursor-pointer">
+                                    <div class="absolute inset-0 flex items-center justify-center">
+                                        <i data-lucide="user" class="w-6 h-6 text-[#8B5CF8]/30"></i>
+                                    </div>
+                                </div>
+                                <div class="aspect-[3/4] rounded-lg bg-[#1A1A24] border border-dashed border-[#2A2A35] flex items-center justify-center cursor-pointer hover:border-[#4C7FF8]/50 transition-colors">
+                                    <i data-lucide="plus" class="w-5 h-5 text-[#3A3A4A]"></i>
+                                </div>
+                                <div class="aspect-[3/4] rounded-lg bg-[#1A1A24] border border-dashed border-[#2A2A35] flex items-center justify-center cursor-pointer hover:border-[#4C7FF8]/50 transition-colors">
+                                    <i data-lucide="plus" class="w-5 h-5 text-[#3A3A4A]"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Action Buttons -->
+                        <div class="px-3 pb-3 flex items-center gap-1.5">
+                            <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                                重新生成
+                            </button>
+                            <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                                编辑提示词
+                            </button>
+                            <button class="w-7 h-7 flex items-center justify-center bg-[#16161C] border border-[#2A2A35] rounded-lg text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                        <!-- Description -->
+                        <div class="px-3 pb-3 text-[11px] text-[#6B7088] leading-relaxed line-clamp-4">
+                            青云宗执法长老，年逾七旬，须发皆白，面容清癯，身着灰白道袍。性格古板正直，前期对叶惊鸿颇为严厉，实则暗中观察，是宗门中少数心存正义之人。修为深不可测，手持拂尘。
+                        </div>
+                    </div>
+
+                    <!-- Character Card 3: 上古剑魂 -->
+                    <div class="bg-[#1E1E24] rounded-xl border border-[#2A2A35] overflow-hidden hover:border-[#3A3A4A] transition-colors">
+                        <!-- Card Header -->
+                        <div class="flex items-center justify-between px-3 py-2.5">
+                            <span class="text-white font-medium text-sm">上古剑魂</span>
+                            <div class="flex items-center gap-1">
+                                <span class="btn-extend-edit text-[10px] text-[#6B7088] border border-[#3A3A4A] px-1.5 py-0.5 rounded cursor-pointer hover:border-[#4C7FF8] hover:text-[#4C7FF8] transition-colors">扩展编辑</span>
+                                <button class="w-6 h-6 rounded flex items-center justify-center text-[#6B7088] hover:bg-white/5">
+                                    <i data-lucide="minus" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Short Description -->
+                        <div class="px-3 pb-2 text-xs text-[#6B7088] line-clamp-2">半透明灵体女子，银白战裙，长发如瀑，双眸如星辰，气质孤傲清冷</div>
+                        <!-- Style Tags -->
+                        <div class="px-3 pb-2 flex items-center gap-1.5 flex-wrap">
+                            <span class="bg-[#2A2A4A] text-[#4C7FF8] text-[10px] px-2 py-0.5 rounded">灵体状态</span>
+                            <button class="btn-add-style w-5 h-5 rounded border border-dashed border-[#3A3A4A] flex items-center justify-center text-[#6B7088] hover:border-[#4C7FF8] hover:text-[#4C7FF8] transition-colors">
+                                <i data-lucide="plus" class="w-3 h-3"></i>
+                            </button>
+                        </div>
+                        <!-- AI 生图 label -->
+                        <div class="px-3 pb-2 text-xs text-[#6B7088] flex items-center gap-1.5">
+                            <i data-lucide="plus-circle" class="w-4 h-4"></i>
+                            AI 生图
+                        </div>
+                        <!-- Character Images: not generated yet -->
+                        <div class="px-3 pb-3">
+                            <div class="grid grid-cols-4 gap-1.5">
+                                <div class="aspect-[3/4] rounded-lg bg-[#1A1A24] border border-dashed border-[#2A2A35] flex items-center justify-center cursor-pointer hover:border-[#4C7FF8]/50 transition-colors">
+                                    <i data-lucide="plus" class="w-5 h-5 text-[#3A3A4A]"></i>
+                                </div>
+                                <div class="aspect-[3/4] rounded-lg bg-[#1A1A24] border border-dashed border-[#2A2A35] flex items-center justify-center cursor-pointer hover:border-[#4C7FF8]/50 transition-colors">
+                                    <i data-lucide="plus" class="w-5 h-5 text-[#3A3A4A]"></i>
+                                </div>
+                                <div class="aspect-[3/4] rounded-lg bg-[#1A1A24] border border-dashed border-[#2A2A35] flex items-center justify-center cursor-pointer hover:border-[#4C7FF8]/50 transition-colors">
+                                    <i data-lucide="plus" class="w-5 h-5 text-[#3A3A4A]"></i>
+                                </div>
+                                <div class="aspect-[3/4] rounded-lg bg-[#1A1A24] border border-dashed border-[#2A2A35] flex items-center justify-center cursor-pointer hover:border-[#4C7FF8]/50 transition-colors">
+                                    <i data-lucide="plus" class="w-5 h-5 text-[#3A3A4A]"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Action Buttons -->
+                        <div class="px-3 pb-3 flex items-center gap-1.5">
+                            <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                                重新生成
+                            </button>
+                            <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                                编辑提示词
+                            </button>
+                            <button class="w-7 h-7 flex items-center justify-center bg-[#16161C] border border-[#2A2A35] rounded-lg text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                        <!-- Description -->
+                        <div class="px-3 pb-3 text-[11px] text-[#6B7088] leading-relaxed line-clamp-4">
+                            沉睡于叶惊鸿识海深处的远古剑灵，自称是上古神剑之魂。外形为半透明的灵体女子，身着流光溢彩的银白色战裙，长发如瀑，双眸如星辰。性格孤傲清冷，却对叶惊鸿另眼相看，传授其绝世剑法与修炼法门。
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Section: 场景 -->
+            <div class="mb-6">
+                <h3 class="text-sm text-[#8B8B9A] font-medium mb-3">场景</h3>
+                <div class="grid grid-cols-4 gap-4">
+
+                    <!-- Scene Card 1: 宗门演武场 -->
+                    <div class="bg-[#1E1E24] rounded-xl border border-[#2A2A35] overflow-hidden hover:border-[#3A3A4A] transition-colors cursor-pointer">
+                        <!-- Scene Image (16:9) -->
+                        <div class="aspect-video scene-placeholder relative overflow-hidden">
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <i data-lucide="mountain-snow" class="w-10 h-10 text-[#4C7FF8]/20"></i>
+                            </div>
+                            <div class="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent"></div>
+                        </div>
+                        <div class="p-3">
+                            <!-- 3D Studio Button -->
+                            <button class="w-full flex items-center justify-center gap-1.5 text-xs bg-[#4C7FF8]/10 text-[#4C7FF8] rounded-lg px-2 py-1.5 hover:bg-[#4C7FF8]/20 transition-colors mb-2">
+                                <i data-lucide="box" class="w-3.5 h-3.5"></i>
+                                生成3D片场
+                            </button>
+                            <!-- Action Buttons -->
+                            <div class="flex items-center gap-1.5 mb-2">
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                                    重新生成
+                                </button>
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                                    编辑提示词
+                                </button>
+                                <button class="w-7 h-7 flex items-center justify-center bg-[#16161C] border border-[#2A2A35] rounded-lg text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-white text-sm font-medium">宗门演武场</span>
+                            </div>
+                            <div class="text-xs text-[#6B7088] line-clamp-2 mb-2">宗门大比之地，青石板铺就，四周看台环绕，古铜色巨鼎矗立中央</div>
+                            <div class="flex items-center gap-1.5 flex-wrap">
+                                <span class="bg-[#2A2A4A] text-[#4C7FF8] text-[10px] px-2 py-0.5 rounded">日景</span>
+                                <button class="w-5 h-5 rounded border border-dashed border-[#3A3A4A] flex items-center justify-center text-[#6B7088] hover:border-[#4C7FF8]">
+                                    <i data-lucide="plus" class="w-3 h-3"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Scene Card 2: 万丈断崖 -->
+                    <div class="bg-[#1E1E24] rounded-xl border border-[#2A2A35] overflow-hidden hover:border-[#3A3A4A] transition-colors cursor-pointer">
+                        <div class="aspect-video scene-placeholder relative overflow-hidden">
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <i data-lucide="mountain" class="w-10 h-10 text-[#8B5CF8]/20"></i>
+                            </div>
+                            <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
+                        </div>
+                        <div class="p-3">
+                            <!-- 3D Studio Button -->
+                            <button class="w-full flex items-center justify-center gap-1.5 text-xs bg-[#4C7FF8]/10 text-[#4C7FF8] rounded-lg px-2 py-1.5 hover:bg-[#4C7FF8]/20 transition-colors mb-2">
+                                <i data-lucide="box" class="w-3.5 h-3.5"></i>
+                                生成3D片场
+                            </button>
+                            <!-- Action Buttons -->
+                            <div class="flex items-center gap-1.5 mb-2">
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                                    重新生成
+                                </button>
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                                    编辑提示词
+                                </button>
+                                <button class="w-7 h-7 flex items-center justify-center bg-[#16161C] border border-[#2A2A35] rounded-lg text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-white text-sm font-medium">万丈断崖</span>
+                            </div>
+                            <div class="text-xs text-[#6B7088] line-clamp-2 mb-2">云雾缭绕的万仞绝壁，崖下深不见底，怪石嶙峋，黄昏时分残阳如血</div>
+                            <div class="flex items-center gap-1.5 flex-wrap">
+                                <span class="bg-[#2A2A4A] text-[#4C7FF8] text-[10px] px-2 py-0.5 rounded">黄昏</span>
+                                <button class="w-5 h-5 rounded border border-dashed border-[#3A3A4A] flex items-center justify-center text-[#6B7088] hover:border-[#4C7FF8]">
+                                    <i data-lucide="plus" class="w-3 h-3"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Scene Card 3: 后山竹林 -->
+                    <div class="bg-[#1E1E24] rounded-xl border border-[#2A2A35] overflow-hidden hover:border-[#3A3A4A] transition-colors cursor-pointer">
+                        <div class="aspect-video scene-placeholder relative overflow-hidden">
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <i data-lucide="trees" class="w-10 h-10 text-[#22C55E]/20"></i>
+                            </div>
+                            <div class="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent"></div>
+                        </div>
+                        <div class="p-3">
+                            <!-- 3D Studio Button -->
+                            <button class="w-full flex items-center justify-center gap-1.5 text-xs bg-[#4C7FF8]/10 text-[#4C7FF8] rounded-lg px-2 py-1.5 hover:bg-[#4C7FF8]/20 transition-colors mb-2">
+                                <i data-lucide="box" class="w-3.5 h-3.5"></i>
+                                生成3D片场
+                            </button>
+                            <!-- Action Buttons -->
+                            <div class="flex items-center gap-1.5 mb-2">
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                                    重新生成
+                                </button>
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                                    编辑提示词
+                                </button>
+                                <button class="w-7 h-7 flex items-center justify-center bg-[#16161C] border border-[#2A2A35] rounded-lg text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-white text-sm font-medium">后山竹林</span>
+                            </div>
+                            <div class="text-xs text-[#6B7088] line-clamp-2 mb-2">月色下的幽深竹林，竹叶婆娑，青石小径蜿蜒其中，静谧而神秘</div>
+                            <div class="flex items-center gap-1.5 flex-wrap">
+                                <span class="bg-[#2A2A4A] text-[#4C7FF8] text-[10px] px-2 py-0.5 rounded">夜景</span>
+                                <button class="w-5 h-5 rounded border border-dashed border-[#3A3A4A] flex items-center justify-center text-[#6B7088] hover:border-[#4C7FF8]">
+                                    <i data-lucide="plus" class="w-3 h-3"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Scene Card 4: 藏剑阁 -->
+                    <div class="bg-[#1E1E24] rounded-xl border border-[#2A2A35] overflow-hidden hover:border-[#3A3A4A] transition-colors cursor-pointer">
+                        <div class="aspect-video bg-[#1A1A24] border border-dashed border-[#2A2A35] flex items-center justify-center">
+                            <i data-lucide="plus" class="w-8 h-8 text-[#3A3A4A]"></i>
+                        </div>
+                        <div class="p-3">
+                            <!-- Action Buttons -->
+                            <div class="flex items-center gap-1.5 mb-2">
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                                    重新生成
+                                </button>
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                                    编辑提示词
+                                </button>
+                                <button class="w-7 h-7 flex items-center justify-center bg-[#16161C] border border-[#2A2A35] rounded-lg text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-white text-sm font-medium">藏剑阁</span>
+                            </div>
+                            <div class="text-xs text-[#6B7088] line-clamp-2 mb-2">宗门重地，珍藏历代名剑之所，剑气森森，古意盎然</div>
+                            <div class="flex items-center gap-1.5 flex-wrap">
+                                <button class="w-5 h-5 rounded border border-dashed border-[#3A3A4A] flex items-center justify-center text-[#6B7088] hover:border-[#4C7FF8]">
+                                    <i data-lucide="plus" class="w-3 h-3"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Section: 道具 -->
+            <div class="mb-6">
+                <h3 class="text-sm text-[#8B8B9A] font-medium mb-3">道具</h3>
+                <div class="grid grid-cols-4 gap-4">
+
+                    <!-- Prop Card 1: 青钢剑 -->
+                    <div class="bg-[#1E1E24] rounded-xl border border-[#2A2A35] overflow-hidden hover:border-[#3A3A4A] transition-colors cursor-pointer">
+                        <div class="aspect-square prop-placeholder relative overflow-hidden">
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <i data-lucide="sword" class="w-10 h-10 text-[#4C7FF8]/25"></i>
+                            </div>
+                        </div>
+                        <div class="p-3">
+                            <!-- Action Buttons -->
+                            <div class="flex items-center gap-1.5 mb-2">
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                                    重新生成
+                                </button>
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="edit-3" class="w-3 h-3"></i>
+                                    编辑提示词
+                                </button>
+                                <button class="w-7 h-7 flex items-center justify-center bg-[#16161C] border border-[#2A2A35] rounded-lg text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="text-white text-sm font-medium">青钢剑</span>
+                            </div>
+                            <div class="text-xs text-[#6B7088] line-clamp-2">青云宗弟子标配佩剑，剑身青幽，锋锐异常</div>
+                        </div>
+                    </div>
+
+                    <!-- Prop Card 2: 掌门玉佩 -->
+                    <div class="bg-[#1E1E24] rounded-xl border border-[#2A2A35] overflow-hidden hover:border-[#3A3A4A] transition-colors cursor-pointer">
+                        <div class="aspect-square prop-placeholder relative overflow-hidden">
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <i data-lucide="gem" class="w-10 h-10 text-[#22C55E]/25"></i>
+                            </div>
+                        </div>
+                        <div class="p-3">
+                            <!-- Action Buttons -->
+                            <div class="flex items-center gap-1.5 mb-2">
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                                    重新生成
+                                </button>
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="edit-3" class="w-3 h-3"></i>
+                                    编辑提示词
+                                </button>
+                                <button class="w-7 h-7 flex items-center justify-center bg-[#16161C] border border-[#2A2A35] rounded-lg text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="text-white text-sm font-medium">掌门玉佩</span>
+                            </div>
+                            <div class="text-xs text-[#6B7088] line-clamp-2">青云宗掌门信物，温润如玉，内藏宗门秘法</div>
+                        </div>
+                    </div>
+
+                    <!-- Prop Card 3: 纳戒 -->
+                    <div class="bg-[#1E1E24] rounded-xl border border-[#2A2A35] overflow-hidden hover:border-[#3A3A4A] transition-colors cursor-pointer">
+                        <div class="aspect-square prop-placeholder relative overflow-hidden">
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <i data-lucide="circle-dot" class="w-10 h-10 text-[#8B5CF8]/25"></i>
+                            </div>
+                        </div>
+                        <div class="p-3">
+                            <!-- Action Buttons -->
+                            <div class="flex items-center gap-1.5 mb-2">
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                                    重新生成
+                                </button>
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="edit-3" class="w-3 h-3"></i>
+                                    编辑提示词
+                                </button>
+                                <button class="w-7 h-7 flex items-center justify-center bg-[#16161C] border border-[#2A2A35] rounded-lg text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="text-white text-sm font-medium">纳戒</span>
+                            </div>
+                            <div class="text-xs text-[#6B7088] line-clamp-2">储物法器，内部空间广阔，可收纳万物</div>
+                        </div>
+                    </div>
+
+                    <!-- Prop Card 4: 残破卷轴 -->
+                    <div class="bg-[#1E1E24] rounded-xl border border-[#2A2A35] overflow-hidden hover:border-[#3A3A4A] transition-colors cursor-pointer">
+                        <div class="aspect-square bg-[#1A1A24] border border-dashed border-[#2A2A35] flex items-center justify-center">
+                            <i data-lucide="plus" class="w-8 h-8 text-[#3A3A4A]"></i>
+                        </div>
+                        <div class="p-3">
+                            <!-- Action Buttons -->
+                            <div class="flex items-center gap-1.5 mb-2">
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                                    重新生成
+                                </button>
+                                <button class="flex-1 flex items-center justify-center gap-1 text-xs bg-[#16161C] border border-[#2A2A35] rounded-lg px-2 py-1 text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="edit-3" class="w-3 h-3"></i>
+                                    编辑提示词
+                                </button>
+                                <button class="w-7 h-7 flex items-center justify-center bg-[#16161C] border border-[#2A2A35] rounded-lg text-white/70 hover:text-white hover:border-[#3A3A4A] transition-colors">
+                                    <i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="text-white text-sm font-medium">残破卷轴</span>
+                            </div>
+                            <div class="text-xs text-[#6B7088] line-clamp-2">上古遗留的残破卷轴，记载着神秘功法</div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Section: 智能镜头 -->
+            <div class="mb-6">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm text-[#8B8B9A] font-medium">智能镜头</h3>
+                    <div class="flex items-center gap-3">
+                        <!-- Control Shot Toggle -->
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-[#6B7088]">智能镜头模式</span>
+                            <div class="flex items-center gap-1.5">
+                                <div class="w-8 h-4 rounded-full bg-[#4C7FF8] relative cursor-pointer">
+                                    <div class="absolute right-0.5 top-0.5 w-3 h-3 rounded-full bg-white transition-all"></div>
+                                </div>
+                                <span class="text-xs text-[#4C7FF8]">Control Shot</span>
+                            </div>
+                        </div>
+                        <!-- Generate Preview Video Button -->
+                        <button class="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors hover:bg-[#4C7FF8]/20" style="background: rgba(76, 127, 248, 0.1); color: #4C7FF8;">
+                            <i data-lucide="film" class="w-3.5 h-3.5"></i>
+                            生成预演视频
+                        </button>
+                        <button class="text-xs text-[#4C7FF8] hover:text-[#6B8FFF] transition-colors">查看全部</button>
+                    </div>
+                </div>
+                <div class="flex gap-3 overflow-x-auto scrollbar-thin pb-2">
+
+                    <!-- Video Group Card 1 -->
+                    <div class="w-56 flex-shrink-0 rounded-xl bg-[#1E1E24] border border-[#2A2A35] overflow-hidden hover:border-[#3A3A4A] transition-colors cursor-pointer">
+                        <!-- Video Thumbnail -->
+                        <div class="aspect-video relative scene-placeholder">
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <i data-lucide="film" class="w-10 h-10 text-[#4C7FF8]/20"></i>
+                            </div>
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <div class="w-10 h-10 rounded-full bg-black/50 flex items-center justify-center group-hover:bg-black/70 transition-colors">
+                                    <i data-lucide="play" class="w-5 h-5 text-white ml-0.5"></i>
+                                </div>
+                            </div>
+                            <div class="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent"></div>
+                            <!-- 九宫格 Badge -->
+                            <div class="absolute top-2 left-2 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1">
+                                <i data-lucide="grid-3x3" class="w-3 h-3"></i>
+                                九宫格
+                            </div>
+                        </div>
+                        <!-- Card Info -->
+                        <div class="p-3">
+                            <div class="flex items-center justify-between">
+                                <div class="text-sm text-white font-medium">宗门大比受诬陷</div>
+                                <button class="text-[10px] text-[#4C7FF8] hover:text-[#6B8FFF] transition-colors flex-shrink-0">提取关键帧</button>
+                            </div>
+                            <div class="text-xs text-[#6B7088] mt-1">3个关键帧</div>
+                        </div>
+                    </div>
+
+                    <!-- Video Group Card 2 -->
+                    <div class="w-56 flex-shrink-0 rounded-xl bg-[#1E1E24] border border-[#2A2A35] overflow-hidden hover:border-[#3A3A4A] transition-colors cursor-pointer">
+                        <!-- Video Thumbnail -->
+                        <div class="aspect-video relative scene-placeholder">
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <i data-lucide="film" class="w-10 h-10 text-[#8B5CF8]/20"></i>
+                            </div>
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <div class="w-10 h-10 rounded-full bg-black/50 flex items-center justify-center group-hover:bg-black/70 transition-colors">
+                                    <i data-lucide="play" class="w-5 h-5 text-white ml-0.5"></i>
+                                </div>
+                            </div>
+                            <div class="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent"></div>
+                            <!-- 九宫格 Badge -->
+                            <div class="absolute top-2 left-2 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1">
+                                <i data-lucide="grid-3x3" class="w-3 h-3"></i>
+                                九宫格
+                            </div>
+                        </div>
+                        <!-- Card Info -->
+                        <div class="p-3">
+                            <div class="flex items-center justify-between">
+                                <div class="text-sm text-white font-medium">坠崖剑魂苏醒</div>
+                                <button class="text-[10px] text-[#4C7FF8] hover:text-[#6B8FFF] transition-colors flex-shrink-0">提取关键帧</button>
+                            </div>
+                            <div class="text-xs text-[#6B7088] mt-1">3个关键帧</div>
+                        </div>
+                    </div>
+
+                    <!-- Video Group Card 3 (add new) -->
+                    <div class="w-56 flex-shrink-0 rounded-xl bg-[#1E1E24] border border-[#2A2A35] border-dashed overflow-hidden hover:border-[#4C7FF8]/50 transition-colors cursor-pointer flex flex-col items-center justify-center" style="min-height: 200px;">
+                        <div class="w-10 h-10 rounded-full bg-[#1A1A24] flex items-center justify-center mb-2">
+                            <i data-lucide="plus" class="w-5 h-5 text-[#6B7088]"></i>
+                        </div>
+                        <div class="text-xs text-[#6B7088]">新建智能镜头</div>
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Modal Overlay -->
+        <div id="modal-overlay" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50"></div>
+
+        <!-- 3D Studio Modal -->
+        <div id="modal-3d-studio" class="hidden fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+            <div class="bg-[#1A1A2E] border border-[#2A2A3E] rounded-2xl w-[480px] pointer-events-auto shadow-2xl">
+                <div class="flex items-center justify-between px-5 py-4 border-b border-[#2A2A3E]">
+                    <h3 class="text-white font-medium text-base">3D 片场</h3>
+                    <button class="modal-close w-7 h-7 rounded-lg flex items-center justify-center text-[#6B7088] hover:bg-white/5 transition-colors">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+                <div class="p-5">
+                    <p class="text-sm text-[#8B8B9A] mb-4">基于3D空间的场景调度工具，可自由摆机位、调镜头，确保多镜头空间一致性</p>
+                    <!-- Preview Area -->
+                    <div class="aspect-video rounded-xl bg-gradient-to-br from-[#1E2A4A] via-[#1A1A3E] to-[#2A1A4A] flex items-center justify-center mb-4 relative overflow-hidden">
+                        <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(76,127,248,0.15)_0%,transparent_60%)]"></div>
+                        <div class="relative flex flex-col items-center">
+                            <div class="w-16 h-16 rounded-xl bg-gradient-to-br from-[#4C7FF8]/30 to-[#8B5CF6]/30 flex items-center justify-center mb-2 backdrop-blur-sm border border-white/10">
+                                <i data-lucide="box" class="w-8 h-8 text-white/80"></i>
+                            </div>
+                            <span class="text-xs text-white/40">3D 空间预览</span>
+                        </div>
+                    </div>
+                    <!-- Features List -->
+                    <div class="grid grid-cols-2 gap-2 mb-5">
+                        <div class="flex items-center gap-2 text-sm text-[#C0C0CC]">
+                            <i data-lucide="move-3d" class="w-4 h-4 text-[#4C7FF8]"></i>
+                            空间布局自由调度
+                        </div>
+                        <div class="flex items-center gap-2 text-sm text-[#C0C0CC]">
+                            <i data-lucide="user" class="w-4 h-4 text-[#4C7FF8]"></i>
+                            人物白模摆放
+                        </div>
+                        <div class="flex items-center gap-2 text-sm text-[#C0C0CC]">
+                            <i data-lucide="camera" class="w-4 h-4 text-[#4C7FF8]"></i>
+                            机位自由调整
+                        </div>
+                        <div class="flex items-center gap-2 text-sm text-[#C0C0CC]">
+                            <i data-lucide="image" class="w-4 h-4 text-[#4C7FF8]"></i>
+                            一键截取参考图
+                        </div>
+                    </div>
+                    <button class="w-full py-2.5 rounded-lg bg-gradient-to-r from-[#4C7FF8] to-[#8B5CF8] text-white text-sm font-medium hover:shadow-lg hover:shadow-[#4C7FF8]/20 transition-shadow">
+                        进入3D片场
+                    </button>
+                    <p class="text-center text-xs text-[#6B7088] mt-2">Beta 功能，目前仅支持场景资产</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Character Edit Modal -->
+        <div id="modal-char-edit" class="hidden fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+            <div class="bg-[#1A1A2E] border border-[#2A2A3E] rounded-2xl w-[560px] pointer-events-auto shadow-2xl flex flex-col max-h-[80vh]">
+                <div class="flex items-center justify-between px-5 py-4 border-b border-[#2A2A3E] flex-shrink-0">
+                    <h3 class="text-white font-medium text-base">角色编辑 - 叶惊鸿</h3>
+                    <button class="modal-close w-7 h-7 rounded-lg flex items-center justify-center text-[#6B7088] hover:bg-white/5 transition-colors">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+                <!-- Tabs -->
+                <div class="flex items-center gap-1 px-5 pt-3 border-b border-[#2A2A3E] flex-shrink-0">
+                    <button class="char-tab px-3 py-2 text-sm text-white border-b-2 border-[#4C7FF8] font-medium -mb-px" data-char-tab="basic">基础设定</button>
+                    <button class="char-tab px-3 py-2 text-sm text-[#6B7088] border-b-2 border-transparent hover:text-white transition-colors -mb-px" data-char-tab="appearance">外观描述</button>
+                    <button class="char-tab px-3 py-2 text-sm text-[#6B7088] border-b-2 border-transparent hover:text-white transition-colors -mb-px" data-char-tab="reference">参考图</button>
+                    <button class="char-tab px-3 py-2 text-sm text-[#6B7088] border-b-2 border-transparent hover:text-white transition-colors -mb-px" data-char-tab="gen-settings">生成设置</button>
+                </div>
+                <!-- Tab Content -->
+                <div class="p-5 overflow-y-auto scrollbar-thin flex-1">
+                    <div class="space-y-4">
+                        <!-- Name -->
+                        <div>
+                            <label class="text-xs text-[#8B8B9A] mb-1.5 block">角色名称</label>
+                            <input type="text" value="叶惊鸿" class="w-full h-9 px-3 rounded-lg bg-[#0D0D14] border border-[#2A2A3E] text-white text-sm focus:border-[#4C7FF8] focus:outline-none transition-colors">
+                        </div>
+                        <!-- Gender -->
+                        <div>
+                            <label class="text-xs text-[#8B8B9A] mb-1.5 block">性别</label>
+                            <div class="inline-flex rounded-lg p-0.5 bg-[#0D0D14] border border-[#2A2A3E]">
+                                <button class="px-4 py-1.5 text-xs rounded-md bg-gradient-to-r from-[#4C7FF8] to-[#8B5CF6] text-white font-medium">男</button>
+                                <button class="px-4 py-1.5 text-xs rounded-md text-[#6B7088] hover:text-white transition-colors">女</button>
+                            </div>
+                        </div>
+                        <!-- Age -->
+                        <div>
+                            <label class="text-xs text-[#8B8B9A] mb-1.5 block">年龄段</label>
+                            <div class="relative">
+                                <select class="w-full h-9 px-3 rounded-lg bg-[#0D0D14] border border-[#2A2A3E] text-white text-sm focus:border-[#4C7FF8] focus:outline-none transition-colors appearance-none cursor-pointer">
+                                    <option>20-25岁</option>
+                                    <option>15-20岁</option>
+                                    <option>25-30岁</option>
+                                    <option>30-40岁</option>
+                                    <option>40岁以上</option>
+                                </select>
+                                <i data-lucide="chevron-down" class="w-4 h-4 text-[#6B7088] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+                            </div>
+                        </div>
+                        <!-- Personality Tags -->
+                        <div>
+                            <label class="text-xs text-[#8B8B9A] mb-1.5 block">性格标签</label>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="px-3 py-1 rounded-full text-xs text-[#4C7FF8] bg-[#1E2A4A] border border-[#4C7FF8]/30">坚韧</span>
+                                <span class="px-3 py-1 rounded-full text-xs text-[#4C7FF8] bg-[#1E2A4A] border border-[#4C7FF8]/30">隐忍</span>
+                                <span class="px-3 py-1 rounded-full text-xs text-[#4C7FF8] bg-[#1E2A4A] border border-[#4C7FF8]/30">外冷内热</span>
+                                <button class="w-6 h-6 rounded-full border border-dashed border-[#3A3A4A] flex items-center justify-center text-[#6B7088] hover:border-[#4C7FF8] hover:text-[#4C7FF8] transition-colors">
+                                    <i data-lucide="plus" class="w-3 h-3"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Description -->
+                        <div>
+                            <label class="text-xs text-[#8B8B9A] mb-1.5 block">角色描述</label>
+                            <textarea rows="4" class="w-full px-3 py-2 rounded-lg bg-[#0D0D14] border border-[#2A2A3E] text-white text-sm focus:border-[#4C7FF8] focus:outline-none transition-colors resize-none">十七岁少年，原是叶家天才弟子，因故修为尽废沦为宗门弃徒。性格坚韧隐忍，被退婚、受欺辱后跳崖明志，意外唤醒体内沉睡的上古剑魂，获绝世传承。常着青色长衫，背负长剑，眼神由落寞转为锐利。</textarea>
+                        </div>
+                    </div>
+                </div>
+                <!-- Footer -->
+                <div class="flex items-center justify-end gap-2 px-5 py-3 border-t border-[#2A2A3E] flex-shrink-0">
+                    <button class="modal-close px-4 py-2 rounded-lg text-sm text-[#C0C0CC] hover:bg-white/5 transition-colors">取消</button>
+                    <button class="px-5 py-2 rounded-lg bg-gradient-to-r from-[#4C7FF8] to-[#8B5CF6] text-white text-sm font-medium hover:shadow-lg hover:shadow-[#4C7FF8]/20 transition-shadow">保存修改</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Batch Generate Modal -->
+        <div id="modal-batch-generate" class="hidden fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+            <div class="bg-[#1A1A2E] border border-[#2A2A3E] rounded-2xl w-[480px] pointer-events-auto shadow-2xl">
+                <div class="flex items-center justify-between px-5 py-4 border-b border-[#2A2A3E]">
+                    <h3 class="text-white font-medium text-base">批量生成设置</h3>
+                    <button class="modal-close w-7 h-7 rounded-lg flex items-center justify-center text-[#6B7088] hover:bg-white/5 transition-colors">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+                <div class="p-5 space-y-4">
+                    <!-- Generate Range -->
+                    <div>
+                        <label class="text-xs text-[#8B8B9A] mb-2 block">生成范围</label>
+                        <div class="flex rounded-lg p-0.5 bg-[#0D0D14] border border-[#2A2A3E]">
+                            <button class="flex-1 py-1.5 text-xs rounded-md text-[#6B7088] hover:text-white transition-colors">本集全部</button>
+                            <button class="flex-1 py-1.5 text-xs rounded-md bg-gradient-to-r from-[#4C7FF8] to-[#8B5CF6] text-white font-medium">仅角色</button>
+                            <button class="flex-1 py-1.5 text-xs rounded-md text-[#6B7088] hover:text-white transition-colors">仅场景</button>
+                            <button class="flex-1 py-1.5 text-xs rounded-md text-[#6B7088] hover:text-white transition-colors">仅道具</button>
+                        </div>
+                    </div>
+                    <!-- Model -->
+                    <div>
+                        <label class="text-xs text-[#8B8B9A] mb-1.5 block">模型</label>
+                        <div class="relative">
+                            <select class="w-full h-9 px-3 rounded-lg bg-[#0D0D14] border border-[#2A2A3E] text-white text-sm focus:border-[#4C7FF8] focus:outline-none transition-colors appearance-none cursor-pointer">
+                                <option>Lux Image 2 (推荐)</option>
+                                <option>Lux Image 1</option>
+                                <option>Lux Realistic</option>
+                            </select>
+                            <i data-lucide="chevron-down" class="w-4 h-4 text-[#6B7088] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+                        </div>
+                    </div>
+                    <!-- Style -->
+                    <div>
+                        <label class="text-xs text-[#8B8B9A] mb-1.5 block">风格</label>
+                        <div class="relative">
+                            <select class="w-full h-9 px-3 rounded-lg bg-[#0D0D14] border border-[#2A2A3E] text-white text-sm focus:border-[#4C7FF8] focus:outline-none transition-colors appearance-none cursor-pointer">
+                                <option>武侠仙侠</option>
+                                <option>都市现代</option>
+                                <option>古风宫廷</option>
+                                <option>科幻未来</option>
+                            </select>
+                            <i data-lucide="chevron-down" class="w-4 h-4 text-[#6B7088] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+                        </div>
+                    </div>
+                    <!-- Per Asset Count -->
+                    <div>
+                        <label class="text-xs text-[#8B8B9A] mb-2 block">每张生成数量</label>
+                        <div class="flex rounded-lg p-0.5 bg-[#0D0D14] border border-[#2A2A3E] w-48">
+                            <button class="flex-1 py-1.5 text-xs rounded-md text-[#6B7088] hover:text-white transition-colors">2张</button>
+                            <button class="flex-1 py-1.5 text-xs rounded-md bg-gradient-to-r from-[#4C7FF8] to-[#8B5CF6] text-white font-medium">4张</button>
+                            <button class="flex-1 py-1.5 text-xs rounded-md text-[#6B7088] hover:text-white transition-colors">6张</button>
+                        </div>
+                    </div>
+                    <!-- Cost Info -->
+                    <div class="flex items-center justify-between pt-2">
+                        <span class="text-sm text-[#8B8B9A]">预计消耗</span>
+                        <span class="text-base font-bold text-[#4C7FF8]">48 积分</span>
+                    </div>
+                </div>
+                <!-- Footer -->
+                <div class="flex items-center justify-end gap-2 px-5 py-3 border-t border-[#2A2A3E]">
+                    <button class="modal-close px-4 py-2 rounded-lg text-sm text-[#C0C0CC] hover:bg-white/5 transition-colors">取消</button>
+                    <button class="px-5 py-2 rounded-lg bg-gradient-to-r from-[#4C7FF8] to-[#8B5CF6] text-white text-sm font-medium hover:shadow-lg hover:shadow-[#4C7FF8]/20 transition-shadow">开始生成</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Style Modal -->
+        <div id="modal-add-style" class="hidden fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+            <div class="bg-[#1A1A2E] border border-[#2A2A3E] rounded-2xl w-[480px] pointer-events-auto shadow-2xl">
+                <div class="flex items-center justify-between px-5 py-4 border-b border-[#2A2A3E]">
+                    <h3 class="text-white font-medium text-base">添加造型</h3>
+                    <button class="modal-close w-7 h-7 rounded-lg flex items-center justify-center text-[#6B7088] hover:bg-white/5 transition-colors">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+                <div class="p-5 space-y-4">
+                    <!-- Style Name -->
+                    <div>
+                        <label class="text-xs text-[#8B8B9A] mb-1.5 block">造型名称</label>
+                        <input type="text" value="夜行衣造型" class="w-full h-9 px-3 rounded-lg bg-[#0D0D14] border border-[#2A2A3E] text-white text-sm focus:border-[#4C7FF8] focus:outline-none transition-colors">
+                    </div>
+                    <!-- Description -->
+                    <div>
+                        <label class="text-xs text-[#8B8B9A] mb-1.5 block">造型描述</label>
+                        <textarea rows="3" class="w-full px-3 py-2 rounded-lg bg-[#0D0D14] border border-[#2A2A3E] text-white text-sm focus:border-[#4C7FF8] focus:outline-none transition-colors resize-none" placeholder="描述造型的服装、配饰、整体风格..."></textarea>
+                    </div>
+                    <!-- Reference Upload -->
+                    <div>
+                        <label class="text-xs text-[#8B8B9A] mb-2 block">参考图</label>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div class="aspect-[3/4] rounded-lg border-2 border-dashed border-[#2A2A3E] bg-[#0D0D14] flex flex-col items-center justify-center cursor-pointer hover:border-[#4C7FF8]/50 transition-colors">
+                                <i data-lucide="upload" class="w-5 h-5 text-[#6B7088] mb-1"></i>
+                                <span class="text-[10px] text-[#6B7088]">上传参考</span>
+                            </div>
+                            <div class="aspect-[3/4] rounded-lg border-2 border-dashed border-[#2A2A3E] bg-[#0D0D14] flex flex-col items-center justify-center cursor-pointer hover:border-[#4C7FF8]/50 transition-colors">
+                                <i data-lucide="upload" class="w-5 h-5 text-[#6B7088] mb-1"></i>
+                                <span class="text-[10px] text-[#6B7088]">上传参考</span>
+                            </div>
+                            <div class="aspect-[3/4] rounded-lg border-2 border-dashed border-[#2A2A3E] bg-[#0D0D14] flex flex-col items-center justify-center cursor-pointer hover:border-[#4C7FF8]/50 transition-colors">
+                                <i data-lucide="upload" class="w-5 h-5 text-[#6B7088] mb-1"></i>
+                                <span class="text-[10px] text-[#6B7088]">上传参考</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Toggle -->
+                    <div class="flex items-center justify-between pt-2">
+                        <span class="text-sm text-[#C0C0CC]">基于基础造型修改</span>
+                        <button class="w-10 h-6 rounded-full bg-gradient-to-r from-[#4C7FF8] to-[#8B5CF6] relative transition-colors">
+                            <div class="absolute right-0.5 top-0.5 w-5 h-5 rounded-full bg-white shadow"></div>
+                        </button>
+                    </div>
+                </div>
+                <!-- Footer -->
+                <div class="flex items-center justify-end gap-2 px-5 py-3 border-t border-[#2A2A3E]">
+                    <button class="modal-close px-4 py-2 rounded-lg text-sm text-[#C0C0CC] hover:bg-white/5 transition-colors">取消</button>
+                    <button class="px-5 py-2 rounded-lg bg-gradient-to-r from-[#4C7FF8] to-[#8B5CF6] text-white text-sm font-medium hover:shadow-lg hover:shadow-[#4C7FF8]/20 transition-shadow">保存并生成</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Bottom Floating Action Bar -->
+    <div class="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 z-50">
+        <button class="bg-[#1E1E24] border border-[#2A2A35] text-[#C0C0CC] text-sm px-5 py-2.5 rounded-full hover:bg-[#252535] transition-colors flex items-center gap-2">
+            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+            重新提取本集资产
+        </button>
+        <button id="btn-batch-generate" class="bg-gradient-to-r from-[#4C7FF8] to-[#8B5CF8] text-white text-sm px-6 py-2.5 rounded-full font-medium shadow-lg shadow-[#4C7FF8]/20 hover:shadow-[#4C7FF8]/30 transition-shadow flex items-center gap-2">
+            <i data-lucide="wand-2" class="w-4 h-4"></i>
+            批量生成资产图
+        </button>
+        <a href="workbench-video.html" class="bg-gradient-to-r from-[#4C7FF8] to-[#6B8FFF] text-white text-sm px-6 py-2.5 rounded-full font-medium shadow-lg shadow-[#4C7FF8]/20 hover:shadow-[#4C7FF8]/30 transition-shadow flex items-center gap-2">
+            下一步：视频制作
+            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+        </a>
+    </div>
+
+    <!-- Bottom Right Floating Buttons -->
+    <div class="fixed bottom-6 right-6 flex flex-col gap-2 z-20">
+        <button class="w-10 h-10 rounded-full flex items-center justify-center transition-all hover:text-white hover:border-[#4C7FF8]/50" style="background: #1A1A2E; border: 1px solid #2A2A3E; color: #8B8B9A;">
+            <i data-lucide="users" class="w-5 h-5"></i>
+        </button>
+        <button class="w-10 h-10 rounded-full flex items-center justify-center transition-all hover:text-white hover:border-[#4C7FF8]/50" style="background: #1A1A2E; border: 1px solid #2A2A3E; color: #8B8B9A;">
+            <i data-lucide="message-circle" class="w-5 h-5"></i>
+        </button>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        // ===== Modal System =====
+        const modalOverlay = document.getElementById('modal-overlay');
+        const modals = {
+            '3d-studio': document.getElementById('modal-3d-studio'),
+            'char-edit': document.getElementById('modal-char-edit'),
+            'batch-generate': document.getElementById('modal-batch-generate'),
+            'add-style': document.getElementById('modal-add-style')
+        };
+        let activeModal = null;
+
+        function openModal(name) {
+            if (activeModal) closeModal();
+            const modal = modals[name];
+            if (!modal) return;
+            modalOverlay.classList.remove('hidden');
+            modal.classList.remove('hidden');
+            activeModal = name;
+            // Re-create icons for newly shown modal
+            lucide.createIcons();
+        }
+
+        function closeModal() {
+            if (!activeModal) return;
+            const modal = modals[activeModal];
+            if (modal) modal.classList.add('hidden');
+            modalOverlay.classList.add('hidden');
+            activeModal = null;
+        }
+
+        // Overlay click closes modal
+        modalOverlay.addEventListener('click', closeModal);
+
+        // Close buttons
+        document.querySelectorAll('.modal-close').forEach(btn => {
+            btn.addEventListener('click', closeModal);
+        });
+
+        // ===== 3D Studio Button =====
+        document.getElementById('btn-3d-studio').addEventListener('click', () => openModal('3d-studio'));
+
+        // ===== Add Dropdown =====
+        const addBtn = document.getElementById('btn-add');
+        const addDropdown = document.getElementById('add-dropdown');
+        let addDropdownOpen = false;
+
+        function toggleAddDropdown(show) {
+            addDropdownOpen = show;
+            if (show) {
+                addDropdown.classList.remove('hidden');
+            } else {
+                addDropdown.classList.add('hidden');
+            }
+        }
+
+        addBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleAddDropdown(!addDropdownOpen);
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!addDropdown.contains(e.target) && !addBtn.contains(e.target)) {
+                toggleAddDropdown(false);
+            }
+        });
+
+        // ===== Extend Edit Buttons =====
+        document.querySelectorAll('.btn-extend-edit').forEach(btn => {
+            btn.addEventListener('click', () => openModal('char-edit'));
+        });
+
+        // ===== Batch Generate Button =====
+        document.getElementById('btn-batch-generate').addEventListener('click', () => openModal('batch-generate'));
+
+        // ===== Add Style Buttons =====
+        document.querySelectorAll('.btn-add-style').forEach(btn => {
+            btn.addEventListener('click', () => openModal('add-style'));
+        });
+
+        // ===== Sub Tab Navigation =====
+        document.querySelectorAll('.sub-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.sub-tab-btn').forEach(b => {
+                    b.classList.remove('text-white', 'border-[#4C7FF8]', 'font-medium');
+                    b.classList.add('text-[#6B7088]', 'border-transparent');
+                });
+                btn.classList.remove('text-[#6B7088]', 'border-transparent');
+                btn.classList.add('text-white', 'border-[#4C7FF8]', 'font-medium');
+            });
+        });
+
+        // ===== Character Edit Tabs =====
+        document.querySelectorAll('.char-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.char-tab').forEach(t => {
+                    t.classList.remove('text-white', 'border-[#4C7FF8]', 'font-medium');
+                    t.classList.add('text-[#6B7088]', 'border-transparent');
+                });
+                tab.classList.remove('text-[#6B7088]', 'border-transparent');
+                tab.classList.add('text-white', 'border-[#4C7FF8]', 'font-medium');
+            });
+        });
+
+        // ===== ESC key closes modals and dropdowns =====
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                if (activeModal) closeModal();
+                if (addDropdownOpen) toggleAddDropdown(false);
+            }
+        });
+
+        // ===== Profile Panel (sidebar avatar) =====
+        const profilePanel = document.getElementById('profilePanel');
+        const sidebarAvatar = document.getElementById('sidebarAvatar');
+
+        function positionProfilePanel() {
+            if (!profilePanel || !sidebarAvatar) return;
+            const avatarRect = sidebarAvatar.getBoundingClientRect();
+            const panelRect = profilePanel.getBoundingClientRect();
+            
+            // 优先：面板顶部与头像顶部对齐（向下展开）
+            let top = avatarRect.top - 8;
+            
+            // 如果下方空间不够（面板底部超出视口），改为从头像底部向上展开
+            if (top + panelRect.height > window.innerHeight - 12) {
+                top = avatarRect.bottom - panelRect.height + 8;
+            }
+            
+            // 上方也不够的话，贴顶
+            if (top < 12) top = 12;
+            
+            profilePanel.style.top = top + 'px';
+        }
+
+        function toggleProfilePanel() {
+            if (!profilePanel) return;
+            if (profilePanel.classList.contains('hidden')) {
+                profilePanel.classList.remove('hidden');
+                positionProfilePanel();
+                lucide.createIcons();
+            } else {
+                profilePanel.classList.add('hidden');
+            }
+        }
+
+        if (sidebarAvatar) {
+            sidebarAvatar.addEventListener('click', function(e) {
+                e.stopPropagation();
+                toggleProfilePanel();
+            });
+        }
+
+        // Close profile panel when clicking outside
+        document.addEventListener('click', function(e) {
+            if (profilePanel && !profilePanel.classList.contains('hidden')) {
+                if (!profilePanel.contains(e.target) && 
+                    e.target !== sidebarAvatar && !sidebarAvatar.contains(e.target)) {
+                    profilePanel.classList.add('hidden');
+                }
+            }
+        });
+
+        // Reposition on resize
+        window.addEventListener('resize', function() {
+            if (profilePanel && !profilePanel.classList.contains('hidden')) {
+                positionProfilePanel();
+            }
+        });
+
+        // ===== Agent Skill Expand/Collapse =====
+        const skillItems = document.querySelectorAll('.agent-skill-item');
+        skillItems.forEach(item => {
+            item.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const skillId = this.dataset.skill;
+                const expandedEl = document.getElementById('skill-' + skillId);
+                if (expandedEl) {
+                    expandedEl.classList.toggle('open');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

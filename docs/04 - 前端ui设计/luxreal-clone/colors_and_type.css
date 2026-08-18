@@ -1,0 +1,584 @@
+/* LuxReal Clone - Design Tokens */
+/* Dark cinematic theme inspired by LuxReal AI Short Drama platform */
+
+:root {
+  /* Brand prefix: luxreal */
+  --luxreal-background: #030911;
+  --luxreal-foreground: #F0F0F5;
+  --luxreal-card: #0D1119;
+  --luxreal-card-foreground: #E8E8F0;
+  --luxreal-popover: #111525;
+  --luxreal-popover-foreground: #F0F0F5;
+  --luxreal-primary: #4C7FF8;
+  --luxreal-primary-foreground: #FFFFFF;
+  --luxreal-muted: #0F1420;
+  --luxreal-muted-foreground: #6B7088;
+  --luxreal-border: #1A1F2E;
+  --luxreal-input: #0F1420;
+  --luxreal-ring: #4C7FF8;
+  --luxreal-accent: #131828;
+  --luxreal-accent-foreground: #F0F0F5;
+  --luxreal-destructive: #EF4444;
+  --luxreal-destructive-foreground: #FFFFFF;
+  --luxreal-success: #10B981;
+  --luxreal-warning: #F59E0B;
+
+  /* Radius scale */
+  --luxreal-radius-sm: 6px;
+  --luxreal-radius-md: 10px;
+  --luxreal-radius-lg: 16px;
+  --luxreal-radius-xl: 24px;
+  --luxreal-radius-full: 9999px;
+
+  /* Gradient accents */
+  --luxreal-gradient-neon: linear-gradient(135deg, #8B5CF6 0%, #4C7FF8 50%, #06B6D4 100%);
+  --luxreal-gradient-glow: linear-gradient(180deg, rgba(76,127,248,0.15) 0%, rgba(139,92,246,0.05) 100%);
+  --luxreal-gradient-card: linear-gradient(145deg, rgba(22,25,38,0.85) 0%, rgba(17,19,24,0.95) 100%);
+  --luxreal-gradient-banner1: linear-gradient(135deg, #0F2E2A 0%, #134E4A 40%, #0F2E2A 100%);
+  --luxreal-gradient-banner2: linear-gradient(135deg, #2A1506 0%, #5C3A1E 40%, #2A1506 100%);
+  --luxreal-gradient-banner3: linear-gradient(135deg, #1A1F3A 0%, #243060 40%, #1A1F3A 100%);
+  --luxreal-gradient-banner4: linear-gradient(135deg, #1E1B4B 0%, #312E81 40%, #1E1B4B 100%);
+
+  /* Shadows */
+  --luxreal-shadow-glow: 0 0 30px rgba(76,127,248,0.15);
+  --luxreal-shadow-card: 0 4px 24px rgba(0,0,0,0.4);
+  --luxreal-shadow-elevated: 0 8px 40px rgba(0,0,0,0.5);
+
+  /* Sidebar */
+  --luxreal-sidebar: #0A0A14;
+  --luxreal-sidebar-foreground: #B0B0C8;
+  --luxreal-sidebar-accent: #4C7FF8;
+  --luxreal-sidebar-width: 72px;
+
+  /* Top banner */
+  --luxreal-banner-height: 36px;
+}
+
+/* Base typography */
+html {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--luxreal-background);
+  color: var(--luxreal-foreground);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--luxreal-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--luxreal-muted-foreground);
+}
+
+/* Glass card effect */
+.luxreal-glass {
+  background: var(--luxreal-gradient-card);
+  border: 1px solid var(--luxreal-border);
+  backdrop-filter: blur(12px);
+}
+
+/* Neon glow effect for primary elements */
+.luxreal-glow {
+  box-shadow: var(--luxreal-shadow-glow);
+}
+
+/* Gradient text */
+.luxreal-gradient-text {
+  background: var(--luxreal-gradient-neon);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Tab capsule style */
+.luxreal-tab-capsule {
+  border-radius: var(--luxreal-radius-full);
+  padding: 6px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--luxreal-muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.luxreal-tab-capsule.active {
+  background: var(--luxreal-primary);
+  color: var(--luxreal-primary-foreground);
+}
+.luxreal-tab-capsule:hover:not(.active) {
+  color: var(--luxreal-foreground);
+  background: var(--luxreal-muted);
+}
+
+/* Button styles */
+.luxreal-btn-primary {
+  background: var(--luxreal-primary);
+  color: var(--luxreal-primary-foreground);
+  border: none;
+  border-radius: var(--luxreal-radius-full);
+  padding: 10px 28px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.luxreal-btn-primary:hover {
+  background: #2563EB;
+  box-shadow: 0 0 24px rgba(59,130,246,0.35);
+}
+.luxreal-btn-secondary {
+  background: transparent;
+  color: var(--luxreal-foreground);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-full);
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.luxreal-btn-secondary:hover {
+  border-color: var(--luxreal-primary);
+  color: var(--luxreal-primary);
+}
+.luxreal-btn-ghost {
+  background: transparent;
+  color: var(--luxreal-muted-foreground);
+  border: none;
+  border-radius: var(--luxreal-radius-md);
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.luxreal-btn-ghost:hover {
+  color: var(--luxreal-foreground);
+  background: var(--luxreal-muted);
+}
+
+/* Input styles */
+.luxreal-input {
+  background: var(--luxreal-input);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-md);
+  padding: 10px 14px;
+  color: var(--luxreal-foreground);
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+.luxreal-input:focus {
+  border-color: var(--luxreal-primary);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+}
+.luxreal-input::placeholder {
+  color: var(--luxreal-muted-foreground);
+}
+
+/* Select/Dropdown trigger style */
+.luxreal-select {
+  background: var(--luxreal-input);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-full);
+  padding: 6px 14px;
+  color: var(--luxreal-foreground);
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.luxreal-select:hover {
+  border-color: var(--luxreal-primary);
+}
+
+/* Sidebar navigation item */
+.luxreal-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--luxreal-radius-md);
+  color: var(--luxreal-sidebar-foreground);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  gap: 3px;
+  text-decoration: none;
+  font-size: 11px;
+  position: relative;
+}
+.luxreal-nav-item:hover {
+  color: var(--luxreal-foreground);
+  background: rgba(255,255,255,0.05);
+}
+.luxreal-nav-item.active {
+  color: var(--luxreal-primary);
+  background: rgba(59,130,246,0.12);
+}
+.luxreal-nav-item.nav-recharge {
+  color: #A78BFA;
+  background: rgba(139,92,246,0.08);
+}
+.luxreal-nav-item.nav-recharge:hover {
+  color: #C4B5FD;
+  background: rgba(139,92,246,0.14);
+}
+
+/* Nav badge */
+.nav-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--luxreal-destructive);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  line-height: 1;
+}
+
+/* Badge */
+.luxreal-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--luxreal-radius-full);
+  font-size: 11px;
+  font-weight: 500;
+}
+.luxreal-badge-beta {
+  background: linear-gradient(135deg, #8B5CF6, #3B82F6);
+  color: white;
+}
+.luxreal-badge-vip {
+  background: linear-gradient(135deg, #F59E0B, #EF4444);
+  color: white;
+}
+
+/* Card hover effect */
+.luxreal-card-hover {
+  transition: all 0.3s ease;
+}
+.luxreal-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--luxreal-shadow-elevated);
+  border-color: rgba(59,130,246,0.3);
+}
+
+/* Announcement banner */
+.announcement-gradient {
+  background: linear-gradient(90deg, #7C3AED 0%, #3B82F6 35%, #06B6D4 70%, #8B5CF6 100%);
+  background-size: 200% 100%;
+  animation: bannerShift 8s ease infinite;
+}
+@keyframes bannerShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Drag & drop zone */
+.luxreal-dropzone {
+  border: 2px dashed var(--luxreal-border);
+  border-radius: var(--luxreal-radius-lg);
+  transition: all 0.3s ease;
+  background: rgba(59,130,246,0.02);
+}
+.luxreal-dropzone:hover, .luxreal-dropzone.dragover {
+  border-color: var(--luxreal-primary);
+  background: rgba(59,130,246,0.06);
+}
+
+/* Divider */
+.luxreal-divider {
+  height: 1px;
+  background: var(--luxreal-border);
+  margin: 16px 0;
+}
+.v-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--luxreal-border);
+  flex-shrink: 0;
+}
+
+/* Section title */
+.luxreal-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--luxreal-foreground);
+  margin-bottom: 12px;
+}
+
+/* Segmented control */
+.segmented-group {
+  display: inline-flex;
+  background: var(--luxreal-input);
+  border-radius: var(--luxreal-radius-full);
+  padding: 3px;
+  gap: 2px;
+}
+.segmented-btn {
+  background: transparent;
+  border: none;
+  color: var(--luxreal-muted-foreground);
+  font-size: 13px;
+  padding: 5px 14px;
+  border-radius: var(--luxreal-radius-full);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.segmented-btn:hover:not(.active) {
+  color: var(--luxreal-foreground);
+}
+.segmented-btn.active {
+  background: var(--luxreal-primary);
+  color: white;
+}
+
+/* Model sub-tabs */
+.model-subtab {
+  background: transparent;
+  border: none;
+  color: var(--luxreal-muted-foreground);
+  font-size: 13px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-bottom: 2px solid transparent;
+  font-weight: 500;
+}
+.model-subtab:hover:not(.active) {
+  color: var(--luxreal-foreground);
+}
+.model-subtab.active {
+  color: var(--luxreal-primary);
+  border-bottom-color: var(--luxreal-primary);
+}
+
+/* Model tab panel */
+.model-tab-panel {
+  animation: fadeIn 0.2s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Project cover gradients */
+.cover-1 {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 40%, #0f3460 100%);
+  position: relative;
+}
+.cover-1::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(239,68,68,0.25) 0%, transparent 60%);
+}
+.cover-2 {
+  background: linear-gradient(135deg, #1a1a0e 0%, #2d2a15 40%, #4a3f1a 100%);
+  position: relative;
+}
+.cover-2::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(245,158,11,0.2) 0%, transparent 60%);
+}
+.cover-3 {
+  background: linear-gradient(135deg, #1a0e1e 0%, #2d1530 40%, #4a1a3a 100%);
+  position: relative;
+}
+.cover-3::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(236,72,153,0.2) 0%, transparent 60%);
+}
+.cover-4 {
+  background: linear-gradient(135deg, #0e1a1e 0%, #152d30 40%, #1a4a4a 100%);
+  position: relative;
+}
+.cover-4::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(6,182,212,0.2) 0%, transparent 60%);
+}
+
+/* Decorative tilted block for upload zone */
+.upload-deco-block {
+  width: 120px;
+  height: 120px;
+  background: linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(139,92,246,0.08) 100%);
+  border: 1px solid rgba(59,130,246,0.2);
+  border-radius: 16px;
+  transform: rotate(-8deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* Play button overlay */
+.play-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.2);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.project-card:hover .play-overlay {
+  opacity: 1;
+}
+.play-btn-circle {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255,255,255,0.3);
+}
+
+/* Avatar circle */
+.avatar-circle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+  border: 2px solid rgba(255,255,255,0.1);
+  transition: all 0.2s ease;
+}
+.avatar-circle:hover {
+  border-color: rgba(59,130,246,0.5);
+}
+
+/* Logo text vertical */
+.logo-text {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  background: var(--luxreal-gradient-neon);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+}
+
+/* Quick config bar */
+.config-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--luxreal-card);
+  border: 1px solid var(--luxreal-border);
+  border-radius: var(--luxreal-radius-full);
+  padding: 6px 8px;
+  overflow-x: auto;
+}
+
+/* Banner cards */
+.rec-banner {
+  border-radius: var(--luxreal-radius-lg);
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--luxreal-border);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.rec-banner:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--luxreal-shadow-elevated);
+}
+.rec-banner-teal {
+  background: var(--luxreal-gradient-banner1);
+}
+.rec-banner-gold {
+  background: var(--luxreal-gradient-banner2);
+}
+.rec-banner-blue {
+  background: var(--luxreal-gradient-banner3);
+}
+
+/* Footer */
+.site-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 24px 0;
+  margin-top: 32px;
+  border-top: 1px solid var(--luxreal-border);
+  font-size: 12px;
+  color: var(--luxreal-muted-foreground);
+  flex-wrap: wrap;
+}
+.site-footer a {
+  color: var(--luxreal-muted-foreground);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.site-footer a:hover {
+  color: var(--luxreal-foreground);
+}
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

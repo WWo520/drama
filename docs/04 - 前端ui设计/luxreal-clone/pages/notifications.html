@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark" style="height:100vh; overflow:hidden;">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>消息中心 - Empty Broken</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <link rel="stylesheet" href="../colors_and_type.css">
+</head>
+<body class="m-0 p-0 h-full" style="background: var(--luxreal-background); color: var(--luxreal-foreground);">
+
+    <div class="flex h-full w-full">
+
+        <!-- ========== Sidebar ========== -->
+        <aside id="sidebar-nav" class="flex flex-col items-center py-4 gap-2 flex-shrink-0 z-10" style="width:72px; background: var(--luxreal-sidebar); border-right: 1px solid var(--luxreal-border);">
+
+            <!-- Logo -->
+            <div class="flex items-center justify-center flex-shrink-0" style="height:56px; margin-bottom: 4px;">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M6 4H22V8H10V24H6V4Z" fill="white"/>
+                    <path d="M14 12H22V16H18V24H14V12Z" fill="white" opacity="0.7"/>
+                </svg>
+            </div>
+
+            <!-- Spacer -->
+            <div class="flex-1" style="min-height: 16px;"></div>
+
+            <!-- Main nav -->
+            <nav class="flex flex-col items-center gap-2 flex-shrink-0">
+                <a href="create-video.html" class="luxreal-nav-item" title="创作">
+                    <i data-lucide="sparkles" class="w-[22px] h-[22px]"></i>
+                    <span>创作</span>
+                </a>
+                <a href="discover.html" class="luxreal-nav-item" title="发现">
+                    <i data-lucide="compass" class="w-[22px] h-[22px]"></i>
+                    <span>发现</span>
+                </a>
+                <a href="works.html" class="luxreal-nav-item" title="作品">
+                    <i data-lucide="folder" class="w-[22px] h-[22px]"></i>
+                    <span>作品</span>
+                </a>
+            </nav>
+
+            <!-- Divider -->
+            <div class="w-8 h-px" style="background: var(--luxreal-border); margin: 8px 0;"></div>
+
+            <!-- Spacer -->
+            <div class="flex-1" style="min-height: 16px;"></div>
+
+            <!-- Avatar -->
+            <div class="sidebar-avatar" style="margin-bottom: 6px;">
+                Y
+            </div>
+
+            <!-- Credit balance -->
+            <a href="recharge.html" class="sidebar-balance" title="点击充值">
+                <div class="sidebar-balance-text">
+                    <span class="sidebar-balance-label">积分</span>
+                    <span class="sidebar-balance-value">2,580</span>
+                </div>
+                <i data-lucide="plus-circle" class="sidebar-balance-icon"></i>
+            </a>
+
+        </aside>
+
+        <!-- ========== Main Content ========== -->
+        <main class="flex-1 flex flex-col h-full overflow-hidden">
+
+            <!-- Page Header (sticky) -->
+            <header class="flex items-center justify-between flex-shrink-0 px-8" style="height: 60px; border-bottom: 1px solid var(--luxreal-border); background: var(--luxreal-background);">
+                <h1 class="text-[18px] font-semibold m-0" style="color: var(--luxreal-foreground);">消息中心</h1>
+                <button id="markAllReadBtn" class="luxreal-btn-ghost">
+                    <i data-lucide="check-check" class="w-4 h-4"></i>
+                    <span>全部已读</span>
+                </button>
+            </header>
+
+            <!-- Tabs -->
+            <div class="flex-shrink-0 px-8 pt-5 pb-4">
+                <div class="segmented-group" id="notificationTabs">
+                    <button class="segmented-btn active" data-tab="all">全部</button>
+                    <button class="segmented-btn" data-tab="system">系统</button>
+                    <button class="segmented-btn" data-tab="interaction">互动</button>
+                </div>
+            </div>
+
+            <!-- Message List -->
+            <div class="flex-1 overflow-y-auto px-8 pb-8">
+                <div id="messageList" class="flex flex-col">
+
+                    <!-- Message 1 - System (unread) -->
+                    <div class="notification-item" data-type="system" data-unread="true">
+                        <div class="notification-icon icon-system">
+                            <i data-lucide="bell" class="w-5 h-5"></i>
+                        </div>
+                        <div class="notification-content">
+                            <div class="notification-title-row">
+                                <span class="notification-title">系统维护通知</span>
+                                <span class="unread-dot"></span>
+                            </div>
+                            <p class="notification-preview">将于本周六凌晨 2:00-4:00 进行系统升级维护，期间部分功能可能无法使用。</p>
+                            <span class="notification-time">10 分钟前</span>
+                        </div>
+                    </div>
+
+                    <!-- Message 2 - Success (unread) -->
+                    <div class="notification-item" data-type="system" data-unread="true">
+                        <div class="notification-icon icon-success">
+                            <i data-lucide="check-circle" class="w-5 h-5"></i>
+                        </div>
+                        <div class="notification-content">
+                            <div class="notification-title-row">
+                                <span class="notification-title">视频生成完成</span>
+                                <span class="unread-dot"></span>
+                            </div>
+                            <p class="notification-preview">「都市夜归人」第 3 集已生成完毕，快去查看效果吧。</p>
+                            <span class="notification-time">1 小时前</span>
+                        </div>
+                    </div>
+
+                    <!-- Message 3 - Video (unread) -->
+                    <div class="notification-item" data-type="interaction" data-unread="true">
+                        <div class="notification-icon icon-video">
+                            <i data-lucide="film" class="w-5 h-5"></i>
+                        </div>
+                        <div class="notification-content">
+                            <div class="notification-title-row">
+                                <span class="notification-title">新的点赞</span>
+                                <span class="unread-dot"></span>
+                            </div>
+                            <p class="notification-preview">你的作品「迷雾追踪」获得了 28 个新赞，继续加油！</p>
+                            <span class="notification-time">3 小时前</span>
+                        </div>
+                    </div>
+
+                    <!-- Message 4 - System (read) -->
+                    <div class="notification-item" data-type="system" data-unread="false">
+                        <div class="notification-icon icon-system">
+                            <i data-lucide="bell" class="w-5 h-5"></i>
+                        </div>
+                        <div class="notification-content">
+                            <div class="notification-title-row">
+                                <span class="notification-title">积分充值成功</span>
+                            </div>
+                            <p class="notification-preview">你已成功充值 5,000 积分，当前余额 2,580 积分。</p>
+                            <span class="notification-time">昨天</span>
+                        </div>
+                    </div>
+
+                    <!-- Message 5 - Video (read) -->
+                    <div class="notification-item" data-type="interaction" data-unread="false">
+                        <div class="notification-icon icon-video">
+                            <i data-lucide="film" class="w-5 h-5"></i>
+                        </div>
+                        <div class="notification-content">
+                            <div class="notification-title-row">
+                                <span class="notification-title">新评论</span>
+                            </div>
+                            <p class="notification-preview">光影诗人 评论了你的作品：「画面质感很棒，期待更新！」</p>
+                            <span class="notification-time">昨天</span>
+                        </div>
+                    </div>
+
+                    <!-- Message 6 - Success (read) -->
+                    <div class="notification-item" data-type="system" data-unread="false">
+                        <div class="notification-icon icon-success">
+                            <i data-lucide="check-circle" class="w-5 h-5"></i>
+                        </div>
+                        <div class="notification-content">
+                            <div class="notification-title-row">
+                                <span class="notification-title">审核通过</span>
+                            </div>
+                            <p class="notification-preview">你提交的作品「逆光而行」已通过审核，正式发布。</p>
+                            <span class="notification-time">2 天前</span>
+                        </div>
+                    </div>
+
+                    <!-- Message 7 - System (read) -->
+                    <div class="notification-item" data-type="system" data-unread="false">
+                        <div class="notification-icon icon-system">
+                            <i data-lucide="bell" class="w-5 h-5"></i>
+                        </div>
+                        <div class="notification-content">
+                            <div class="notification-title-row">
+                                <span class="notification-title">新功能上线</span>
+                            </div>
+                            <p class="notification-preview">AI 角色一致性功能已上线，快去创作页体验新功能吧。</p>
+                            <span class="notification-time">3 天前</span>
+                        </div>
+                    </div>
+
+                    <!-- Message 8 - Video (read) -->
+                    <div class="notification-item" data-type="interaction" data-unread="false">
+                        <div class="notification-icon icon-video">
+                            <i data-lucide="film" class="w-5 h-5"></i>
+                        </div>
+                        <div class="notification-content">
+                            <div class="notification-title-row">
+                                <span class="notification-title">新增粉丝</span>
+                            </div>
+                            <p class="notification-preview">有 5 位新用户关注了你，感谢支持。</p>
+                            <span class="notification-time">5 天前</span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </main>
+
+    </div>
+
+    <style>
+        /* Sidebar avatar */
+        .sidebar-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+        .sidebar-avatar:hover {
+            transform: scale(1.05);
+            box-shadow: 0 2px 12px rgba(76, 127, 248, 0.4);
+        }
+
+        /* Sidebar Credits & Recharge */
+        .sidebar-credits {
+            font-size: 13px;
+            font-weight: 500;
+            color: #F0F0F5;
+            line-height: 1.2;
+            margin: 4px 0 2px;
+            flex-shrink: 0;
+        }
+        .sidebar-recharge {
+            font-size: 12px;
+            font-weight: 500;
+            color: #fff;
+            background: linear-gradient(135deg, #A78BFA, #8B5CF6);
+            padding: 4px 12px;
+            border-radius: 9999px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+        .sidebar-recharge:hover {
+            background: linear-gradient(135deg, #C4B5FD, #A78BFA);
+            transform: translateY(-1px);
+        }
+
+        /* Notification Item */
+        .notification-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            padding: 16px 18px;
+            border-radius: var(--luxreal-radius-lg);
+            background: var(--luxreal-card);
+            border: 1px solid var(--luxreal-border);
+            margin-bottom: 8px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        .notification-item:hover {
+            border-color: rgba(76, 127, 248, 0.3);
+            background: #0F1420;
+        }
+
+        .notification-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .icon-system {
+            background: rgba(76, 127, 248, 0.15);
+            color: #4C7FF8;
+        }
+        .icon-success {
+            background: rgba(16, 185, 129, 0.15);
+            color: #10B981;
+        }
+        .icon-video {
+            background: rgba(139, 92, 246, 0.15);
+            color: #8B5CF6;
+        }
+
+        .notification-content {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .notification-title-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .notification-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--luxreal-foreground);
+            line-height: 1.4;
+        }
+
+        .unread-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--luxreal-primary);
+            flex-shrink: 0;
+        }
+
+        .notification-preview {
+            font-size: 13px;
+            color: var(--luxreal-muted-foreground);
+            margin: 0;
+            line-height: 1.5;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .notification-time {
+            font-size: 12px;
+            color: var(--luxreal-muted-foreground);
+            opacity: 0.7;
+            margin-top: 2px;
+        }
+
+        /* Mark all read button transition */
+        #markAllReadBtn {
+            transition: all 0.2s ease;
+        }
+    </style>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // Tab switching
+        const tabButtons = document.querySelectorAll('#notificationTabs .segmented-btn');
+        const messageItems = document.querySelectorAll('.notification-item');
+
+        tabButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                // Update active tab
+                tabButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                const tab = btn.dataset.tab;
+
+                // Filter messages
+                messageItems.forEach(item => {
+                    if (tab === 'all') {
+                        item.style.display = 'flex';
+                    } else if (tab === 'system' && item.dataset.type === 'system') {
+                        item.style.display = 'flex';
+                    } else if (tab === 'interaction' && item.dataset.type === 'interaction') {
+                        item.style.display = 'flex';
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+            });
+        });
+
+        // Mark all as read
+        const markAllReadBtn = document.getElementById('markAllReadBtn');
+        const navBadge = document.querySelector('.nav-badge');
+
+        markAllReadBtn.addEventListener('click', () => {
+            // Remove all unread dots
+            document.querySelectorAll('.unread-dot').forEach(dot => {
+                dot.remove();
+            });
+
+            // Update data-unread attributes
+            messageItems.forEach(item => {
+                item.dataset.unread = 'false';
+            });
+
+            // Hide nav badge
+            if (navBadge) {
+                navBadge.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>

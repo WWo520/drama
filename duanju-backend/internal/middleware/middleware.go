@@ -30,8 +30,8 @@ func AccessLog(lg *zap.Logger) gin.HandlerFunc {
 		latency := time.Since(start).Milliseconds()
 		lg.Info("http",
 			zap.String("request_id", c.GetString("request_id")),
-			zap.String("user_id", c.GetString("user_id")),
-			zap.String("space_id", c.GetString("space_id")),
+			zap.Int64("user_id", c.GetInt64("user_id")),
+			zap.Int64("space_id", c.GetInt64("space_id")),
 			zap.Int64("latency_ms", latency),
 			zap.String("method", c.Request.Method),
 			zap.String("path", c.Request.URL.Path),
@@ -66,6 +66,7 @@ func Recovery(lg *zap.Logger) gin.HandlerFunc {
 }
 
 // CORS 跨域：显式 origin 白名单，允许携带 Cookie（Refresh Token 依赖），禁止通配 + credentials 组合。
+// 所有环境（含 dev）均仅放行白名单 origin（M 修复：收紧非生产环境任意 origin 放行）。
 func CORS(env string) gin.HandlerFunc {
 	allowOrigins := map[string]bool{
 		"http://localhost:5173": true, // Vite dev
@@ -77,7 +78,7 @@ func CORS(env string) gin.HandlerFunc {
 	}
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
-		if allowOrigins[origin] || env != "production" && origin != "" {
+		if allowOrigins[origin] {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Vary", "Origin")
 			c.Header("Access-Control-Allow-Credentials", "true")

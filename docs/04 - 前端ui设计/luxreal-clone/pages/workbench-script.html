@@ -1,0 +1,2069 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>剧本拆分 - LuxReal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+            overflow: hidden;
+        }
+        .workflow-active {
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            box-shadow: 0 0 20px rgba(76, 127, 248, 0.4), 0 0 40px rgba(139, 92, 246, 0.2);
+        }
+        .nav-active {
+            background: linear-gradient(135deg, #1a1a3e, #252550);
+        }
+        .scrollbar-thin::-webkit-scrollbar {
+            width: 4px;
+        }
+        .scrollbar-thin::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .scrollbar-thin::-webkit-scrollbar-thumb {
+            background: #2A2A35;
+            border-radius: 2px;
+        }
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+            background: #3A3A4A;
+        }
+        .tooltip {
+            position: relative;
+        }
+        .tooltip::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: calc(100% + 12px);
+            top: 50%;
+            transform: translateY(-50%);
+            background: #1A1A2E;
+            color: #fff;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s;
+            z-index: 100;
+            border: 1px solid #2A2A3E;
+        }
+        .tooltip::before {
+            content: '';
+            position: absolute;
+            left: calc(100% + 6px);
+            top: 50%;
+            transform: translateY(-50%);
+            border: 5px solid transparent;
+            border-right-color: #1A1A2E;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s;
+            z-index: 100;
+        }
+        .tooltip:hover::after,
+        .tooltip:hover::before {
+            opacity: 1;
+        }
+        /* Modal base */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.hidden {
+            display: none;
+        }
+        .modal-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+        }
+        .modal-content {
+            position: relative;
+            z-index: 1;
+            border-radius: 16px;
+            padding: 24px;
+            background: #1E1E24;
+            border: 1px solid #2A2A35;
+        }
+        /* Dropdown */
+        .duration-dropdown {
+            position: fixed;
+            z-index: 50;
+            border-radius: 8px;
+            padding: 4px 0;
+            background: #1E1E24;
+            border: 1px solid #2A2A35;
+            min-width: 120px;
+        }
+        .duration-dropdown.hidden {
+            display: none;
+        }
+        .duration-dropdown button {
+            width: 100%;
+            text-align: left;
+            font-size: 14px;
+            padding: 6px 12px;
+            transition: background 0.15s;
+        }
+        .duration-dropdown button:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .duration-badge {
+            cursor: pointer;
+            transition: border-color 0.15s;
+        }
+        .duration-badge:hover {
+            border-color: #4C7FF8 !important;
+        }
+        /* Toggle switch */
+        .toggle {
+            width: 40px;
+            height: 24px;
+            border-radius: 9999px;
+            position: relative;
+            cursor: pointer;
+            background: #2A2A35;
+            transition: background 0.2s;
+        }
+        .toggle.active {
+            background: #4C7FF8;
+        }
+        .toggle-knob {
+            width: 16px;
+            height: 16px;
+            border-radius: 9999px;
+            background: white;
+            position: absolute;
+            top: 4px;
+            left: 4px;
+            transition: transform 0.2s;
+        }
+        .toggle.active .toggle-knob {
+            transform: translateX(16px);
+        }
+        /* Segmented control */
+        .segmented {
+            display: flex;
+            border-radius: 8px;
+            padding: 2px;
+            background: #1A1A24;
+            border: 1px solid #2A2A35;
+        }
+        .segmented button {
+            flex: 1;
+            padding: 6px 0;
+            font-size: 14px;
+            border-radius: 6px;
+            color: #8B8B9A;
+            transition: all 0.15s;
+        }
+        .segmented button.active {
+            background: #4C7FF8;
+            color: white;
+        }
+        /* Form inputs */
+        .form-input, .form-textarea, .form-select {
+            width: 100%;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            background: #1A1A24;
+            border: 1px solid #2A2A35;
+            color: #C0C0CC;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .form-input:focus, .form-textarea:focus, .form-select:focus {
+            border-color: #4C7FF8;
+        }
+        .form-input::placeholder, .form-textarea::placeholder {
+            color: #4A4A5A;
+        }
+        .form-select {
+            appearance: none;
+            cursor: pointer;
+        }
+        .select-wrapper {
+            position: relative;
+        }
+        .select-wrapper i {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+            color: #6B7088;
+        }
+        /* Sidebar design tokens */
+        :root {
+            --luxreal-sidebar: #0A0A14;
+            --luxreal-sidebar-foreground: #B0B0C8;
+            --luxreal-border: #1A1F2E;
+            --luxreal-primary: #4C7FF8;
+            --luxreal-foreground: #F0F0F5;
+        }
+        /* Sidebar navigation item */
+        .luxreal-nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 56px;
+            height: 56px;
+            border-radius: 10px;
+            color: var(--luxreal-sidebar-foreground);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            gap: 3px;
+            text-decoration: none;
+            font-size: 11px;
+            position: relative;
+        }
+        .luxreal-nav-item:hover {
+            color: var(--luxreal-foreground);
+            background: rgba(255,255,255,0.05);
+        }
+        .luxreal-nav-item.active {
+            color: var(--luxreal-primary);
+            background: rgba(59,130,246,0.12);
+        }
+        .luxreal-nav-item.nav-recharge {
+            color: #A78BFA;
+            background: rgba(139,92,246,0.08);
+        }
+        .luxreal-nav-item.nav-recharge:hover {
+            color: #C4B5FD;
+            background: rgba(139,92,246,0.14);
+        }
+        /* Nav badge */
+        .nav-badge {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            background: #EF4444;
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+            min-width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 5px;
+            line-height: 1;
+        }
+        /* Avatar circle */
+        .avatar-circle {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            flex-shrink: 0;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        /* Top bar unified styles */
+        .topbar-container {
+            height: 64px;
+            background: rgba(13, 17, 25, 0.8);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid #1A1F2E;
+        }
+        /* Workflow Pill Bar optimized */
+        .workflow-pill-bar {
+            background: rgba(13, 17, 25, 0.8) !important;
+            border: 1px solid #1A1F2E !important;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+        .workflow-active {
+            box-shadow: 0 0 16px rgba(76, 127, 248, 0.5), 0 0 32px rgba(139, 92, 246, 0.25) !important;
+        }
+        /* Unified topbar right buttons */
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            height: 32px;
+        }
+        .topbar-btn {
+            height: 32px;
+            padding: 0 12px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 1px solid #1A1F2E;
+            background: #0D1119;
+            color: #8B8B9A;
+            white-space: nowrap;
+        }
+        .topbar-btn:hover {
+            border-color: #2A2F3E;
+            color: #F0F0F5;
+        }
+        .topbar-btn-primary {
+            border-color: rgba(76, 127, 248, 0.4);
+            color: #4C7FF8;
+        }
+        .topbar-btn-primary:hover {
+            border-color: rgba(76, 127, 248, 0.6);
+            color: #6B9BFF;
+        }
+        .topbar-icon-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6B7088;
+            cursor: pointer;
+            transition: all 0.15s;
+            background: transparent;
+            border: none;
+            flex-shrink: 0;
+            position: relative;
+        }
+        .topbar-icon-btn:hover {
+            color: #F0F0F5;
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .topbar-icon-btn .notification-dot {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #EF4444;
+        }
+        /* Recharge button with gradient text */
+        .topbar-recharge-btn {
+            height: 32px;
+            padding: 0 12px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+        }
+        .topbar-recharge-btn:hover {
+            background: rgba(139, 92, 246, 0.18);
+            border-color: rgba(139, 92, 246, 0.5);
+        }
+        .topbar-recharge-btn span {
+            background: linear-gradient(135deg, #A78BFA, #8B5CF6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        /* Topbar avatar */
+        .topbar-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            flex-shrink: 0;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.15s;
+            border: 2px solid transparent;
+        }
+        .topbar-avatar:hover {
+            border-color: rgba(76, 127, 248, 0.5);
+        }
+        /* Profile Panel */
+        .profile-panel {
+            position: fixed;
+            top: 0;
+            left: 84px;
+            width: 240px;
+            background: #1A1A2E;
+            border: 1px solid #2A2A3E;
+            border-radius: 20px;
+            padding: 16px;
+            z-index: 100;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03) inset;
+        }
+        .profile-panel::before {
+            content: '';
+            position: absolute;
+            left: -6px;
+            top: 50%;
+            transform: translateY(-50%) rotate(45deg);
+            width: 10px;
+            height: 10px;
+            background: #1A1A2E;
+            border-left: 1px solid #2A2A3E;
+            border-bottom: 1px solid #2A2A3E;
+        }
+        .profile-panel.hidden {
+            display: none;
+        }
+        .profile-panel-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 4px;
+        }
+        .profile-avatar-lg {
+            position: relative;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 18px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+        .profile-avatar-lg::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 12px;
+            height: 12px;
+            background: #22C55E;
+            border: 2px solid #1A1A2E;
+            border-radius: 50%;
+        }
+        .profile-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .profile-name {
+            font-size: 15px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 2px;
+        }
+        .profile-id {
+            font-size: 12px;
+            color: #6B7088;
+        }
+        .profile-upgrade-btn {
+            font-size: 11px;
+            font-weight: 500;
+            color: #fff;
+            background: linear-gradient(135deg, #A78BFA, #8B5CF6);
+            padding: 4px 10px;
+            border-radius: 9999px;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: all 0.15s;
+            white-space: nowrap;
+            text-decoration: none;
+        }
+        .profile-upgrade-btn:hover {
+            opacity: 0.9;
+            box-shadow: 0 2px 8px rgba(139, 92, 246, 0.4);
+        }
+        .profile-credit-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: rgba(139, 92, 246, 0.08);
+            border: 1px solid rgba(139, 92, 246, 0.15);
+            border-radius: 10px;
+            margin-top: 12px;
+        }
+        .profile-credit-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #C0C0CC;
+        }
+        .profile-credit-info .credit-num {
+            color: #A78BFA;
+            font-weight: 600;
+        }
+        .profile-credit-divider {
+            width: 1px;
+            height: 12px;
+            background: rgba(255,255,255,0.1);
+        }
+        .profile-plan-info {
+            font-size: 12px;
+            color: #6B7088;
+        }
+        .profile-panel-divider {
+            height: 1px;
+            background: rgba(255,255,255,0.06);
+            margin: 12px 0;
+        }
+        .profile-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .profile-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            color: #C0C0CC;
+            font-size: 13px;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .profile-menu-item:hover {
+            background: rgba(255,255,255,0.05);
+            color: #fff;
+        }
+        .profile-menu-item:hover .profile-menu-arrow {
+            color: #4C7FF8;
+            transform: translateX(2px);
+        }
+        .profile-menu-arrow {
+            margin-left: auto;
+            color: #4A4A5A;
+            transition: all 0.2s;
+        }
+        .profile-logout {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px;
+            border-radius: 10px;
+            color: #EF4444;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .profile-logout:hover {
+            background: rgba(239,68,68,0.1);
+        }
+        /* Episode Sidebar - LuxReal Unified Style */
+        .ep-sidebar {
+            width: 240px;
+            background: #0A0D14;
+            border-right: 1px solid #1A1F2E;
+        }
+        .ep-sidebar-header {
+            height: 48px;
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            border-bottom: 1px solid #1A1F2E;
+            flex-shrink: 0;
+        }
+        .ep-sidebar-back {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #8B8B9A;
+            cursor: pointer;
+            transition: all 0.15s;
+            flex-shrink: 0;
+            margin-right: 4px;
+            text-decoration: none;
+        }
+        .ep-sidebar-back:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #F0F0F5;
+        }
+        .ep-sidebar-project {
+            font-size: 13px;
+            font-weight: 500;
+            color: #F0F0F5;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .ep-sidebar-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+        /* Episode Card */
+        .ep-card {
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .ep-card.expanded {
+            background: #0D1119;
+            border: 1px solid rgba(76, 127, 248, 0.3);
+            border-left: 2px solid #4C7FF8;
+        }
+        .ep-card.collapsed {
+            background: transparent;
+            border: 1px solid #1A1F2E;
+        }
+        .ep-card.collapsed:hover {
+            border-color: #2A2F3E;
+        }
+        /* Episode Header */
+        .ep-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .ep-header-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .ep-chevron {
+            flex-shrink: 0;
+            color: #6B7088;
+            width: 14px;
+            height: 14px;
+        }
+        .ep-number {
+            font-size: 11px;
+            color: #6B7088;
+            text-transform: uppercase;
+        }
+        .ep-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10B981;
+            flex-shrink: 0;
+        }
+        /* Episode Title */
+        .ep-title {
+            margin-top: 4px;
+        }
+        .ep-card.expanded .ep-title {
+            font-size: 14px;
+            color: #F0F0F5;
+            font-weight: 500;
+        }
+        .ep-card.collapsed .ep-title {
+            font-size: 13px;
+            color: #8B8B9A;
+            font-weight: normal;
+        }
+        /* Narrative Units */
+        .ep-units {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #1A1F2E;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .ep-unit {
+            font-size: 12px;
+            line-height: 1.5;
+            padding: 6px 10px;
+            border-radius: 6px;
+            color: #8B8B9A;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            background: transparent;
+        }
+        .ep-unit:hover {
+            color: #F0F0F5;
+            background: rgba(255, 255, 255, 0.04);
+        }
+        .ep-unit.active {
+            color: #F0F0F5;
+            background: rgba(76, 127, 248, 0.1);
+            border-left: 2px solid #4C7FF8;
+            padding-left: 8px;
+        }
+        /* Add Episode Button */
+        .ep-add-btn {
+            height: 36px;
+            margin: 0 12px 12px;
+            border: 1px dashed #1A1F2E;
+            border-radius: 8px;
+            background: transparent;
+            font-size: 12px;
+            color: #6B7088;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            flex-shrink: 0;
+            width: calc(100% - 24px);
+        }
+        .ep-add-btn:hover {
+            border-color: #4C7FF8;
+            color: #4C7FF8;
+        }
+        /* === Sidebar Credits & Recharge === */
+        .sidebar-credits {
+            font-size: 12px;
+            font-weight: 500;
+            color: #F0F0F5;
+            line-height: 1.2;
+            margin: 4px 0 6px;
+            flex-shrink: 0;
+        }
+        .sidebar-recharge {
+            font-size: 12px;
+            font-weight: 500;
+            color: #fff;
+            background: linear-gradient(135deg, #A78BFA, #8B5CF6);
+            padding: 4px 12px;
+            border-radius: 9999px;
+            cursor: pointer;
+            text-decoration: none;
+            margin-bottom: 8px;
+            flex-shrink: 0;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .sidebar-recharge:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
+        }
+        /* Sidebar spacer */
+        .sidebar-spacer {
+            flex: 1;
+            min-height: 8px;
+        }
+        /* Sidebar avatar */
+        .sidebar-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .sidebar-avatar:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 0 2px rgba(76, 127, 248, 0.3);
+        }
+        /* Sidebar bottom section - fixed at bottom */
+        .sidebar-bottom-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            margin-top: auto;
+        }
+        .sidebar-icon-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            position: relative;
+            flex-shrink: 0;
+            color: #B0B0C8;
+        }
+        .sidebar-icon-btn:hover {
+            background: rgba(255,255,255,0.05);
+            color: #F0F0F5;
+        }
+        .sidebar-icon-btn .sidebar-badge {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            background: #EF4444;
+            color: white;
+            font-size: 9px;
+            font-weight: 600;
+            min-width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 4px;
+            line-height: 1;
+        }
+        /* === Workflow Navigation (pill style, LuxReal aligned) === */
+        .workflow-steps {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .workflow-nav {
+            display: flex;
+            align-items: center;
+            background: rgba(26, 26, 46, 0.8);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 999px;
+            padding: 4px;
+            backdrop-filter: blur(12px);
+        }
+        .workflow-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 18px;
+            border-radius: 999px;
+            font-size: 13px;
+            color: #8B8B9A;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+            white-space: nowrap;
+        }
+        .workflow-nav-item:hover {
+            color: #fff;
+            background: rgba(255,255,255,0.04);
+        }
+        .workflow-nav-item.active {
+            background: linear-gradient(135deg, #4C7FF8, #6366F1);
+            color: #fff;
+            font-weight: 500;
+            box-shadow: 0 2px 12px rgba(76, 127, 248, 0.35);
+        }
+        .workflow-nav-item.active:hover {
+            background: linear-gradient(135deg, #5C8FFF, #7376F9);
+            box-shadow: 0 4px 16px rgba(76, 127, 248, 0.5);
+        }
+        .workflow-nav-num {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.08);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: #6B7088;
+            transition: all 0.2s ease;
+        }
+        .workflow-nav-item.active .workflow-nav-num {
+            background: rgba(255,255,255,0.25);
+            color: #fff;
+        }
+        .workflow-nav-text {
+            line-height: 1;
+        }
+        /* === Recharge Popup Modal === */
+        .recharge-modal {
+            position: fixed;
+            z-index: 200;
+            width: 420px;
+            background: #0D1119;
+            border: 1px solid #1A1F2E;
+            border-radius: 16px;
+            box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.03);
+            overflow: hidden;
+        }
+        .recharge-modal.hidden {
+            display: none;
+        }
+        .recharge-modal-header {
+            padding: 20px 20px 16px;
+            border-bottom: 1px solid #1A1F2E;
+        }
+        .recharge-modal-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .recharge-modal-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .recharge-modal-close {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6B7088;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .recharge-modal-close:hover {
+            background: rgba(255,255,255,0.06);
+            color: #F0F0F5;
+        }
+        .recharge-modal-balance {
+            font-size: 13px;
+            color: #8B8B9A;
+        }
+        .recharge-modal-balance strong {
+            color: #F59E0B;
+            font-weight: 500;
+        }
+        .recharge-modal-body {
+            padding: 16px 20px;
+            max-height: 420px;
+            overflow-y: auto;
+        }
+        .recharge-section-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: #F0F0F5;
+            margin-bottom: 10px;
+        }
+        .recharge-package-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        .recharge-package-card {
+            position: relative;
+            padding: 12px 8px;
+            border: 1px solid #1A1F2E;
+            border-radius: 10px;
+            background: #111520;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: center;
+        }
+        .recharge-package-card:hover {
+            border-color: #2A3A5A;
+        }
+        .recharge-package-card.selected {
+            border-color: #4C7FF8;
+            background: rgba(76, 127, 248, 0.08);
+        }
+        .recharge-package-card.hot {
+            border-color: rgba(249, 115, 22, 0.4);
+            box-shadow: 0 0 12px rgba(249, 115, 22, 0.15);
+            overflow: hidden;
+        }
+        .recharge-package-card.hot::before {
+            content: '';
+            position: absolute;
+            top: -18px;
+            right: -18px;
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #F59E0B, #EF4444);
+            transform: rotate(45deg);
+            z-index: 0;
+        }
+        .recharge-package-card.hot::after {
+            content: '热门';
+            position: absolute;
+            top: 5px;
+            right: 3px;
+            font-size: 8px;
+            font-weight: 600;
+            color: white;
+            z-index: 1;
+            transform: rotate(45deg);
+            line-height: 1;
+            pointer-events: none;
+        }
+        .recharge-package-amount {
+            font-size: 18px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 2px;
+        }
+        .recharge-package-bonus {
+            font-size: 10px;
+            color: #10B981;
+            margin-bottom: 6px;
+            height: 14px;
+        }
+        .recharge-package-bonus:empty {
+            display: none;
+        }
+        .recharge-package-price {
+            font-size: 14px;
+            color: #F59E0B;
+            font-weight: 500;
+        }
+        .recharge-subscription-section {
+            margin-bottom: 20px;
+        }
+        .recharge-subscription-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        .recharge-sub-card {
+            padding: 14px 10px;
+            border: 1px solid #1A1F2E;
+            border-radius: 10px;
+            background: #111520;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: left;
+            position: relative;
+        }
+        .recharge-sub-card:hover {
+            border-color: #2A3A5A;
+        }
+        .recharge-sub-card.selected {
+            border-color: #4C7FF8;
+            background: rgba(76, 127, 248, 0.08);
+        }
+        .recharge-sub-card.featured {
+            border-color: rgba(139, 92, 246, 0.4);
+            background: linear-gradient(135deg, rgba(139,92,246,0.08), rgba(76,127,248,0.06));
+            box-shadow: 0 0 12px rgba(139, 92, 246, 0.12);
+        }
+        .recharge-sub-card.featured::before {
+            content: '推荐';
+            position: absolute;
+            top: -1px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 2px 8px;
+            font-size: 9px;
+            font-weight: 600;
+            color: white;
+            background: linear-gradient(135deg, #8B5CF6, #4C7FF8);
+            border-radius: 0 0 8px 8px;
+            line-height: 1.2;
+        }
+        .recharge-sub-header {
+            text-align: center;
+            margin-bottom: 10px;
+            margin-top: 4px;
+        }
+        .recharge-sub-name {
+            font-size: 12px;
+            color: #8B8B9A;
+            margin-bottom: 4px;
+        }
+        .recharge-sub-card.featured .recharge-sub-name {
+            color: #A78BFA;
+        }
+        .recharge-sub-price {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            display: inline;
+        }
+        .recharge-sub-period {
+            font-size: 10px;
+            color: #6B7088;
+            display: inline;
+        }
+        .recharge-sub-features {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .recharge-sub-feature {
+            display: flex;
+            align-items: flex-start;
+            gap: 5px;
+            font-size: 10px;
+            color: #8B8B9A;
+            line-height: 1.4;
+        }
+        .recharge-sub-feature-check {
+            color: #10B981;
+            font-size: 11px;
+            line-height: 1.4;
+            flex-shrink: 0;
+            margin-top: 0;
+        }
+        .recharge-payment-section {
+            margin-bottom: 16px;
+        }
+        .recharge-payment-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+        .recharge-payment-card {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px;
+            border: 1px solid #1A1F2E;
+            border-radius: 10px;
+            background: #111520;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .recharge-payment-card:hover {
+            border-color: #2A3A5A;
+        }
+        .recharge-payment-card.selected {
+            border-color: #4C7FF8;
+            background: rgba(76, 127, 248, 0.08);
+        }
+        .recharge-payment-card .payment-icon {
+            width: 20px;
+            height: 20px;
+        }
+        .recharge-payment-card .payment-name {
+            font-size: 13px;
+            color: #C0C0CC;
+        }
+        .recharge-modal-footer {
+            padding: 14px 20px 20px;
+            border-top: 1px solid #1A1F2E;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .recharge-total-label {
+            font-size: 12px;
+            color: #6B7088;
+            margin-bottom: 4px;
+        }
+        .recharge-total-amount {
+            font-size: 24px;
+            font-weight: 600;
+            color: #F59E0B;
+        }
+        .recharge-total-amount span {
+            font-size: 14px;
+            font-weight: 400;
+        }
+        .recharge-pay-btn {
+            padding: 10px 28px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 500;
+            color: white;
+            background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s;
+            box-shadow: 0 4px 16px rgba(76, 127, 248, 0.3);
+            min-width: 110px;
+        }
+        .recharge-pay-btn:hover {
+            box-shadow: 0 6px 24px rgba(76, 127, 248, 0.45);
+            transform: translateY(-1px);
+        }
+        .recharge-pay-btn.processing {
+            background: #4A5568;
+            cursor: wait;
+            opacity: 0.8;
+            transform: none;
+            box-shadow: none;
+        }
+        .recharge-pay-btn.success {
+            background: linear-gradient(135deg, #10B981, #059669);
+            cursor: default;
+            box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);
+        }
+        .recharge-pay-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        /* === Top Bar adjusted === */
+        .topbar-container {
+            position: relative;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex">
+
+    <!-- Column 1: Far Left Main Nav (72px) -->
+    <aside id="sidebar-nav" class="flex flex-col items-center py-3 gap-1 flex-shrink-0 z-10" style="width:72px; background: var(--luxreal-sidebar); border-right: 1px solid var(--luxreal-border);">
+        <!-- Top: Logo mark -->
+        <div class="flex items-center justify-center flex-shrink-0" style="height:56px; margin-bottom: 4px;">
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M6 4H22V8H10V24H6V4Z" fill="white"/>
+                <path d="M14 12H22V16H18V24H14V12Z" fill="white" opacity="0.7"/>
+            </svg>
+        </div>
+
+        <!-- Spacer to push main nav down -->
+        <div class="flex-1" style="min-height: 20px;"></div>
+
+        <!-- Center nav (创作 active blue, 发现, 作品) - vertically centered -->
+        <nav class="flex flex-col items-center gap-2 flex-shrink-0">
+            <a id="nav-create" href="create-video.html" class="luxreal-nav-item active" title="创作">
+                <i data-lucide="sparkles" class="w-[22px] h-[22px]"></i>
+                <span>创作</span>
+            </a>
+            <a id="nav-discover" href="discover.html" class="luxreal-nav-item" title="发现">
+                <i data-lucide="compass" class="w-[22px] h-[22px]"></i>
+                <span>发现</span>
+            </a>
+            <a id="nav-projects" href="works.html" class="luxreal-nav-item" title="作品">
+                <i data-lucide="folder" class="w-[22px] h-[22px]"></i>
+                <span>作品</span>
+            </a>
+        </nav>
+
+        <!-- Spacer to push lower nav down -->
+        <div class="flex-1" style="min-height: 20px;"></div>
+
+        <!-- Avatar (click to show profile panel) -->
+        <div id="sidebarAvatar" class="sidebar-avatar" style="margin-bottom: 4px;">
+            Y
+        </div>
+
+        <!-- Credits number -->
+        <span class="sidebar-credits">2,580</span>
+        <!-- Recharge link -->
+        <a href="recharge.html" class="sidebar-recharge" title="充值">充值</a>
+
+        <!-- Profile Panel (popup from avatar) -->
+        <div id="profilePanel" class="profile-panel hidden">
+            <div class="profile-panel-header">
+                <div class="profile-avatar-lg">Y</div>
+                <div class="profile-info">
+                    <div class="profile-name">夜行者</div>
+                    <div class="profile-id">ID: 10086520</div>
+                </div>
+            </div>
+            <div class="profile-panel-divider"></div>
+            <div class="profile-menu">
+                <a href="works.html" class="profile-menu-item">
+                    <i data-lucide="folder" class="w-4 h-4"></i>
+                    <span>我的作品</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                </a>
+                <a href="recharge.html" class="profile-menu-item">
+                    <i data-lucide="gem" class="w-4 h-4"></i>
+                    <span>充值中心</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                </a>
+                <a href="#" class="profile-menu-item">
+                    <i data-lucide="settings" class="w-4 h-4"></i>
+                    <span>账号设置</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                </a>
+                <a href="#" class="profile-menu-item">
+                    <i data-lucide="help-circle" class="w-4 h-4"></i>
+                    <span>帮助中心</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 profile-menu-arrow"></i>
+                </a>
+            </div>
+            <div class="profile-panel-divider"></div>
+            <div class="profile-logout">
+                <i data-lucide="log-out" class="w-4 h-4"></i>
+                <span>退出登录</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Column 2: Episode Sidebar (240px) -->
+    <aside class="ep-sidebar flex flex-col flex-shrink-0 scrollbar-thin">
+        <!-- Top Header -->
+        <div class="ep-sidebar-header">
+            <a href="works.html" class="ep-sidebar-back">
+                <i data-lucide="chevron-left" class="w-[18px] h-[18px]"></i>
+            </a>
+            <span class="ep-sidebar-project">剑魂觉醒：弃子归来</span>
+        </div>
+
+        <!-- Episode List (scrollable) -->
+        <div class="ep-sidebar-list scrollbar-thin">
+            <!-- Episode 1 - Expanded (current) -->
+            <div class="ep-card expanded">
+                <!-- Episode Header -->
+                <div class="ep-header">
+                    <div class="ep-header-left">
+                        <i data-lucide="chevron-down" class="ep-chevron"></i>
+                        <span class="ep-number">第1集</span>
+                    </div>
+                    <div class="ep-status-dot"></div>
+                </div>
+                <!-- Episode Title -->
+                <div class="ep-title">废柴跳崖，剑魂觉醒</div>
+                <!-- Narrative Units -->
+                <div class="ep-units">
+                    <div class="ep-unit active">叙事单元1 | 宗门大比受诬陷</div>
+                    <div class="ep-unit">叙事单元2 | 坠崖瞬间剑魂苏醒</div>
+                    <div class="ep-unit">叙事单元3 | 三月后青衫归来</div>
+                    <div class="ep-unit">叙事单元4 | 一剑破大阵</div>
+                    <div class="ep-unit">叙事单元5 | 剑指长老全宗凛然</div>
+                    <div class="ep-unit">叙事单元6 | 真相揭晓堕下悬崖</div>
+                </div>
+            </div>
+
+            <!-- Episode 2 - Collapsed -->
+            <div class="ep-card collapsed">
+                <div class="ep-header">
+                    <div class="ep-header-left">
+                        <i data-lucide="chevron-right" class="ep-chevron"></i>
+                        <span class="ep-number">第2集</span>
+                    </div>
+                </div>
+                <div class="ep-title">青衫归来，震惊全宗</div>
+            </div>
+        </div>
+
+        <!-- Bottom: Add Episode Button -->
+        <button class="ep-add-btn">
+            <i data-lucide="plus" class="w-[14px] h-[14px]"></i>
+            新增剧集
+        </button>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 flex flex-col overflow-hidden" style="background: #030911;">
+        <!-- Top Bar Area -->
+        <div class="topbar-container flex items-center justify-between px-6 relative flex-shrink-0">
+            <!-- Left: Empty spacer (~200px) -->
+            <div class="w-[200px] flex-shrink-0"></div>
+
+            <!-- Center: Workflow Steps Navigation -->
+            <div class="workflow-steps">
+                <div class="workflow-nav">
+                    <a href="workbench-script.html" class="workflow-nav-item active">
+                        <span class="workflow-nav-num">1</span>
+                        <span class="workflow-nav-text">剧本拆分</span>
+                    </a>
+                    <a href="workbench-assets.html" class="workflow-nav-item">
+                        <span class="workflow-nav-num">2</span>
+                        <span class="workflow-nav-text">资产生成</span>
+                    </a>
+                    <a href="workbench-video.html" class="workflow-nav-item">
+                        <span class="workflow-nav-num">3</span>
+                        <span class="workflow-nav-text">视频制作</span>
+                    </a>
+                    <a href="workbench-preview.html" class="workflow-nav-item">
+                        <span class="workflow-nav-num">4</span>
+                        <span class="workflow-nav-text">成片预览</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Right: Canvas mode button only -->
+            <div class="topbar-right">
+                <!-- Canvas mode button -->
+                <button class="topbar-btn topbar-btn-primary">
+                    <i data-lucide="layout" class="w-3.5 h-3.5"></i>
+                    自由画布
+                    <span class="text-[10px] text-white px-1.5 py-px rounded" style="background: linear-gradient(135deg, #4C7FF8, #8B5CF6);">Beta</span>
+                </button>
+            </div>
+        </div>
+
+
+
+
+
+        <!-- Duration Preset Row -->
+        <div class="flex justify-end px-6 pb-2 flex-shrink-0">
+            <div class="flex items-center">
+                <span class="text-xs" style="color: #6B7088;">本集预设总时长</span>
+                <span class="text-xs px-2 py-0.5 rounded ml-2" style="color: #4C7FF8; background: rgba(76, 127, 248, 0.1);">自动</span>
+            </div>
+        </div>
+
+        <!-- Content Scroll Area -->
+        <div class="flex-1 overflow-y-auto px-6 pb-24 scrollbar-thin">
+            <div class="flex flex-col gap-3 mx-auto w-full" style="max-width: 65%;">
+
+                <!-- Project Settings Bar -->
+                <div class="flex items-center justify-between h-9 px-4 rounded-xl" style="background: #16161C; border: 1px solid #2A2A35;">
+                    <span class="text-white font-medium text-sm">剑魂觉醒：弃子归来</span>
+                    <div class="flex items-center gap-2">
+                        <button class="flex items-center gap-1 text-xs transition-colors hover:text-white" style="color: #6B7088;">
+                            <i data-lucide="settings" class="w-3.5 h-3.5"></i>
+                            Agent技能
+                            <span class="underline">修改</span>
+                        </button>
+                        <button class="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1 text-white/80 transition-colors hover:text-white" style="background: #1E1E24; border: 1px solid #2A2A35;">
+                            Seedance 2.5
+                            <i data-lucide="chevron-down" class="w-3 h-3"></i>
+                        </button>
+                        <button class="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1 text-white/80 transition-colors hover:text-white" style="background: #1E1E24; border: 1px solid #2A2A35;">
+                            1080P
+                            <i data-lucide="chevron-down" class="w-3 h-3"></i>
+                        </button>
+                        <button class="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1 text-white/80 transition-colors hover:text-white" style="background: #1E1E24; border: 1px solid #2A2A35;">
+                            9:16
+                            <i data-lucide="chevron-down" class="w-3 h-3"></i>
+                        </button>
+                        <button class="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1 text-white/80 transition-colors hover:text-white" style="background: #1E1E24; border: 1px solid #2A2A35;">
+                            武侠仙侠
+                            <i data-lucide="chevron-down" class="w-3 h-3"></i>
+                        </button>
+                        <button class="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1 text-white/80 transition-colors hover:text-white" style="background: #1E1E24; border: 1px solid #2A2A35;">
+                            自动时长
+                            <i data-lucide="chevron-down" class="w-3 h-3"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- AI Split Button -->
+                <div class="flex justify-end">
+                    <button id="autoSplitBtn" class="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors hover:bg-[#4C7FF8]/20" style="color: #4C7FF8; background: rgba(76, 127, 248, 0.1);">
+                        <i data-lucide="wand-2" class="w-3.5 h-3.5"></i>
+                        自动拆分
+                    </button>
+                </div>
+
+                <!-- Narrative Unit Card 1 - Active/Open -->
+                <div class="rounded-2xl overflow-hidden transition-all" style="background: #1E1E24; border: 1px solid #2A2A35;">
+                    <div class="flex items-center justify-between px-5 py-3.5">
+                        <div class="flex items-center">
+                            <i data-lucide="grip-vertical" class="w-4 h-4 mr-2 cursor-grab" style="color: #4A4A5A;"></i>
+                            <span class="text-sm" style="color: #8B8B9A;">叙事单元1</span>
+                            <span class="mx-2" style="color: #4A4A5A;">|</span>
+                            <span class="text-white font-medium text-base">宗门大比受诬陷</span>
+                            <span class="ml-2 text-[10px] px-1.5 py-0.5 rounded" style="background: rgba(16, 185, 129, 0.15); color: #10B981;">解析完成</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button class="w-7 h-7 rounded flex items-center justify-center text-[#6B7088] hover:text-white hover:bg-white/5 transition-colors">
+                                <i data-lucide="chevron-up" class="w-4 h-4"></i>
+                            </button>
+                            <button class="w-7 h-7 rounded flex items-center justify-center text-[#6B7088] hover:text-white hover:bg-white/5 transition-colors">
+                                <i data-lucide="chevron-down" class="w-4 h-4"></i>
+                            </button>
+                            <div class="w-px h-4" style="background: #2A2A35;"></div>
+                            <span class="text-xs" style="color: #6B7088;">时长预设</span>
+                            <button class="duration-badge text-xs px-2 py-0.5 rounded" style="color: #6B7088; border: 1px solid #3A3A4A;">自动</button>
+                            <div class="w-px h-4" style="background: #2A2A35;"></div>
+                            <button class="text-xs flex items-center gap-1 cursor-pointer transition-colors hover:!text-red-400" style="color: #6B7088;">
+                                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                                删除
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Status Banner -->
+                    <div class="px-5 mb-2">
+                        <div class="flex items-center gap-2 text-xs" style="color: #4C7FF8;">
+                            <i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i>
+                            正在根据剧本获取关联资产，预计30s...
+                        </div>
+                    </div>
+                    <!-- Related Assets -->
+                    <div class="px-5 mb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs" style="color: #6B7088;">关联资产：</span>
+                            <div class="flex items-center -space-x-1.5">
+                                <div class="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-medium border border-[#1E1E24]" style="background: linear-gradient(135deg, #4C7FF8, #8B5CF6);">叶</div>
+                                <div class="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-medium border border-[#1E1E24]" style="background: linear-gradient(135deg, #F59E0B, #EF4444);">长</div>
+                            </div>
+                            <div class="w-5 h-5 rounded flex items-center justify-center text-white" style="background: linear-gradient(135deg, #10B981, #059669);">
+                                <i data-lucide="image" class="w-3 h-3"></i>
+                            </div>
+                            <span class="text-[10px] px-1.5 py-0.5 rounded-full" style="background: #2A2A35; color: #8B8B9A;">+1</span>
+                        </div>
+                    </div>
+                    <div class="px-5 pb-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs" style="color: #6B7088;">剧本原文</span>
+                            <button class="w-6 h-6 rounded flex items-center justify-center transition-colors hover:bg-white/5" style="color: #6B7088;">
+                                <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                        <div class="rounded-lg p-3 text-sm leading-relaxed" style="background: #16161C; border: 1px solid #2A2A35; color: #C0C0CC;">
+                            宗门大比，叶惊鸿被诬陷偷取功法。长老当众废其丹田，逼他跳下万丈断崖以证清白。众弟子冷眼旁观，昔日同门无人出言相护。未婚妻柳如烟神色复杂，最终别过脸去。叶惊鸿含恨立于崖边，指天立誓：若不死，必以剑证道，以血还血！
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Narrative Unit Card 2 -->
+                <div class="rounded-2xl overflow-hidden transition-all" style="background: #1E1E24; border: 1px solid #2A2A35;">
+                    <div class="flex items-center justify-between px-5 py-3.5">
+                        <div class="flex items-center">
+                            <i data-lucide="grip-vertical" class="w-4 h-4 mr-2 cursor-grab" style="color: #4A4A5A;"></i>
+                            <span class="text-sm" style="color: #8B8B9A;">叙事单元2</span>
+                            <span class="mx-2" style="color: #4A4A5A;">|</span>
+                            <span class="text-white font-medium text-base">坠崖瞬间剑魂苏醒</span>
+                            <span class="ml-2 text-[10px] px-1.5 py-0.5 rounded" style="background: rgba(16, 185, 129, 0.15); color: #10B981;">解析完成</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button class="w-7 h-7 rounded flex items-center justify-center text-[#6B7088] hover:text-white hover:bg-white/5 transition-colors">
+                                <i data-lucide="chevron-up" class="w-4 h-4"></i>
+                            </button>
+                            <button class="w-7 h-7 rounded flex items-center justify-center text-[#6B7088] hover:text-white hover:bg-white/5 transition-colors">
+                                <i data-lucide="chevron-down" class="w-4 h-4"></i>
+                            </button>
+                            <div class="w-px h-4" style="background: #2A2A35;"></div>
+                            <span class="text-xs" style="color: #6B7088;">时长预设</span>
+                            <button class="duration-badge text-xs px-2 py-0.5 rounded" style="color: #6B7088; border: 1px solid #3A3A4A;">自动</button>
+                            <div class="w-px h-4" style="background: #2A2A35;"></div>
+                            <button class="text-xs flex items-center gap-1 cursor-pointer transition-colors hover:!text-red-400" style="color: #6B7088;">
+                                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                                删除
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Related Assets -->
+                    <div class="px-5 mb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs" style="color: #6B7088;">关联资产：</span>
+                            <div class="flex items-center -space-x-1.5">
+                                <div class="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-medium border border-[#1E1E24]" style="background: linear-gradient(135deg, #4C7FF8, #8B5CF6);">叶</div>
+                            </div>
+                            <div class="w-5 h-5 rounded flex items-center justify-center text-white" style="background: linear-gradient(135deg, #8B5CF6, #6366F1);">
+                                <i data-lucide="image" class="w-3 h-3"></i>
+                            </div>
+                            <span class="text-[10px] px-1.5 py-0.5 rounded-full" style="background: #2A2A35; color: #8B8B9A;">+2</span>
+                        </div>
+                    </div>
+                    <div class="px-5 pb-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs" style="color: #6B7088;">剧本原文</span>
+                            <button class="w-6 h-6 rounded flex items-center justify-center transition-colors hover:bg-white/5" style="color: #6B7088;">
+                                <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                        <div class="rounded-lg p-3 text-sm leading-relaxed space-y-2" style="background: #16161C; border: 1px solid #2A2A35; color: #C0C0CC;">
+                            <p>叶惊鸿纵身跃下断崖，风声呼啸，罡风如刀。就在意识即将消散之际，一枚沉寂于体内十八年的古朴剑符骤然爆发出璀璨金光。</p>
+                            <p class="flex items-start gap-2">
+                                <span class="font-medium flex-shrink-0" style="color: #4C7FF8;">剑魂：</span>
+                                <span>"痴儿，老夫等了你十八年……"</span>
+                            </p>
+                            <p class="flex items-start gap-2">
+                                <span class="font-medium flex-shrink-0" style="color: #8B5CF6;">叶惊鸿：</span>
+                                <span>"你是谁？我丹田已废，已是废人一个……"</span>
+                            </p>
+                            <p class="flex items-start gap-2">
+                                <span class="font-medium flex-shrink-0" style="color: #10B981;">剑魂：</span>
+                                <span>"丹田可重铸，剑骨可再塑。从今往后，老夫传你上古剑道，你可愿继承？"</span>
+                            </p>
+                            <p>金光笼罩下，叶惊鸿断裂的经脉竟以肉眼可见的速度重新接续，丹田处凝聚出一柄虚幻的 miniature 剑影。</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Narrative Unit Card 3 -->
+                <div class="rounded-2xl overflow-hidden transition-all" style="background: #1E1E24; border: 1px solid #2A2A35;">
+                    <div class="flex items-center justify-between px-5 py-3.5">
+                        <div class="flex items-center">
+                            <i data-lucide="grip-vertical" class="w-4 h-4 mr-2 cursor-grab" style="color: #4A4A5A;"></i>
+                            <span class="text-sm" style="color: #8B8B9A;">叙事单元3</span>
+                            <span class="mx-2" style="color: #4A4A5A;">|</span>
+                            <span class="text-white font-medium text-base">三月后青衫归来</span>
+                            <span class="ml-2 text-[10px] px-1.5 py-0.5 rounded inline-flex items-center gap-1" style="background: rgba(76, 127, 248, 0.15); color: #4C7FF8;">
+                                <span class="w-1.5 h-1.5 rounded-full animate-pulse" style="background: #4C7FF8;"></span>
+                                资产获取中
+                            </span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button class="w-7 h-7 rounded flex items-center justify-center text-[#6B7088] hover:text-white hover:bg-white/5 transition-colors">
+                                <i data-lucide="chevron-up" class="w-4 h-4"></i>
+                            </button>
+                            <button class="w-7 h-7 rounded flex items-center justify-center text-[#6B7088] hover:text-white hover:bg-white/5 transition-colors">
+                                <i data-lucide="chevron-down" class="w-4 h-4"></i>
+                            </button>
+                            <div class="w-px h-4" style="background: #2A2A35;"></div>
+                            <span class="text-xs" style="color: #6B7088;">时长预设</span>
+                            <button class="duration-badge text-xs px-2 py-0.5 rounded" style="color: #6B7088; border: 1px solid #3A3A4A;">自动</button>
+                            <div class="w-px h-4" style="background: #2A2A35;"></div>
+                            <button class="text-xs flex items-center gap-1 cursor-pointer transition-colors hover:!text-red-400" style="color: #6B7088;">
+                                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                                删除
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Related Assets -->
+                    <div class="px-5 mb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs" style="color: #6B7088;">关联资产：</span>
+                            <div class="flex items-center -space-x-1.5">
+                                <div class="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-medium border border-[#1E1E24]" style="background: linear-gradient(135deg, #4C7FF8, #8B5CF6);">叶</div>
+                                <div class="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-medium border border-[#1E1E24]" style="background: linear-gradient(135deg, #10B981, #059669);">魂</div>
+                            </div>
+                            <div class="w-5 h-5 rounded flex items-center justify-center text-white" style="background: linear-gradient(135deg, #22C55E, #16A34A);">
+                                <i data-lucide="image" class="w-3 h-3"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="px-5 pb-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs" style="color: #6B7088;">剧本原文</span>
+                            <button class="w-6 h-6 rounded flex items-center justify-center transition-colors hover:bg-white/5" style="color: #6B7088;">
+                                <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                        <div class="rounded-lg p-3 text-sm leading-relaxed" style="background: #16161C; border: 1px solid #2A2A35; color: #C0C0CC;">
+                            三月后，青云宗山门。一名青衫少年负剑而行，步履从容。守门弟子见他面生，上前喝止，却在看清少年面容时如遭雷击——那是已死之人叶惊鸿！消息如长了翅膀般传遍全宗，柳如烟惊愕，几位长老面色阴沉。叶惊鸿抬眼望向宗门深处，目光平静却暗藏锋芒。
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Narrative Unit Card 4 -->
+                <div class="rounded-2xl overflow-hidden transition-all" style="background: #1E1E24; border: 1px solid #2A2A35;">
+                    <div class="flex items-center justify-between px-5 py-3.5">
+                        <div class="flex items-center">
+                            <i data-lucide="grip-vertical" class="w-4 h-4 mr-2 cursor-grab" style="color: #4A4A5A;"></i>
+                            <span class="text-sm" style="color: #8B8B9A;">叙事单元4</span>
+                            <span class="mx-2" style="color: #4A4A5A;">|</span>
+                            <span class="text-white font-medium text-base">一剑破大阵</span>
+                            <span class="ml-2 text-[10px] px-1.5 py-0.5 rounded" style="background: rgba(16, 185, 129, 0.15); color: #10B981;">解析完成</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button class="w-7 h-7 rounded flex items-center justify-center text-[#6B7088] hover:text-white hover:bg-white/5 transition-colors">
+                                <i data-lucide="chevron-up" class="w-4 h-4"></i>
+                            </button>
+                            <button class="w-7 h-7 rounded flex items-center justify-center text-[#6B7088] hover:text-white hover:bg-white/5 transition-colors">
+                                <i data-lucide="chevron-down" class="w-4 h-4"></i>
+                            </button>
+                            <div class="w-px h-4" style="background: #2A2A35;"></div>
+                            <span class="text-xs" style="color: #6B7088;">时长预设</span>
+                            <button class="duration-badge text-xs px-2 py-0.5 rounded" style="color: #6B7088; border: 1px solid #3A3A4A;">自动</button>
+                            <div class="w-px h-4" style="background: #2A2A35;"></div>
+                            <button class="text-xs flex items-center gap-1 cursor-pointer transition-colors hover:!text-red-400" style="color: #6B7088;">
+                                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                                删除
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Related Assets -->
+                    <div class="px-5 mb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs" style="color: #6B7088;">关联资产：</span>
+                            <div class="flex items-center -space-x-1.5">
+                                <div class="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-medium border border-[#1E1E24]" style="background: linear-gradient(135deg, #4C7FF8, #8B5CF6);">叶</div>
+                                <div class="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-medium border border-[#1E1E24]" style="background: linear-gradient(135deg, #F59E0B, #EF4444);">长</div>
+                            </div>
+                            <div class="w-5 h-5 rounded flex items-center justify-center text-white" style="background: linear-gradient(135deg, #DC2626, #B91C1C);">
+                                <i data-lucide="image" class="w-3 h-3"></i>
+                            </div>
+                            <span class="text-[10px] px-1.5 py-0.5 rounded-full" style="background: #2A2A35; color: #8B8B9A;">+1</span>
+                        </div>
+                    </div>
+                    <div class="px-5 pb-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs" style="color: #6B7088;">剧本原文</span>
+                            <button class="w-6 h-6 rounded flex items-center justify-center transition-colors hover:bg-white/5" style="color: #6B7088;">
+                                <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                        <div class="rounded-lg p-3 text-sm leading-relaxed space-y-2" style="background: #16161C; border: 1px solid #2A2A35; color: #C0C0CC;">
+                            <p>大长老周苍震怒，当场祭出宗门护山阵法"玄天锁灵阵"，要将叶惊鸿就地格杀。阵法之中灵气化作万千锁链，威压如山。</p>
+                            <p class="flex items-start gap-2">
+                                <span class="font-medium flex-shrink-0" style="color: #F59E0B;">周苍：</span>
+                                <span>"孽障！跳崖未死还敢回来，今日便让你魂飞魄散！"</span>
+                            </p>
+                            <p>叶惊鸿神色淡然，缓缓抬手并指为剑。身后隐隐浮现一尊百丈剑魂虚影，整个青云宗的灵气竟被引动。</p>
+                            <p class="flex items-start gap-2">
+                                <span class="font-medium flex-shrink-0" style="color: #8B5CF6;">叶惊鸿：</span>
+                                <span>"玄天锁灵阵？在绝对的剑道面前，不过土鸡瓦狗。"</span>
+                            </p>
+                            <p>一指落下，剑光如匹练横贯长空。轰——！护山大阵应声而碎，万千锁链寸寸崩断。全场死寂，所有弟子目瞪口呆。</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Add Narrative Unit Button -->
+                <button id="addUnitBtn" class="w-full h-11 rounded-xl border border-dashed flex items-center justify-center gap-1.5 text-sm transition-colors hover:border-[#4C7FF8] hover:text-[#4C7FF8]" style="border-color: #2A2A35; color: #6B7088;">
+                    <i data-lucide="plus" class="w-4 h-4"></i>
+                    新增叙事单元
+                </button>
+
+                <!-- Next Step CTA Button -->
+                <a href="workbench-assets.html" class="w-full h-11 rounded-xl flex items-center justify-center gap-2 text-white font-medium transition-all hover:opacity-90 mt-4" style="background: linear-gradient(135deg, #4C7FF8, #8B5CF6);">
+                    下一步：资产生成
+                    <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                </a>
+
+            </div>
+        </div>
+
+        <!-- Bottom Right Floating Buttons -->
+        <div class="fixed bottom-6 right-6 flex flex-col gap-2 z-20">
+            <button class="w-10 h-10 rounded-full flex items-center justify-center transition-all hover:text-white hover:border-[#4C7FF8]/50" style="background: #1A1A2E; border: 1px solid #2A2A3E; color: #8B8B9A;">
+                <i data-lucide="users" class="w-5 h-5"></i>
+            </button>
+            <button class="w-10 h-10 rounded-full flex items-center justify-center transition-all hover:text-white hover:border-[#4C7FF8]/50" style="background: #1A1A2E; border: 1px solid #2A2A3E; color: #8B8B9A;">
+                <i data-lucide="message-circle" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <!-- Duration Preset Dropdown -->
+        <div id="durationDropdown" class="duration-dropdown hidden">
+            <button data-value="自动" class="text-[#4C7FF8]">自动</button>
+            <button data-value="5秒" style="color: #C0C0CC;">5秒</button>
+            <button data-value="10秒" style="color: #C0C0CC;">10秒</button>
+            <button data-value="15秒" style="color: #C0C0CC;">15秒</button>
+            <button data-value="20秒" style="color: #C0C0CC;">20秒</button>
+            <button data-value="自定义" style="color: #C0C0CC;">自定义</button>
+        </div>
+
+        <!-- Delete Confirmation Modal -->
+        <div id="deleteModal" class="modal-overlay hidden">
+            <div class="modal-backdrop" data-close-modal="deleteModal"></div>
+            <div class="modal-content" style="width: 360px;">
+                <h3 class="text-white text-lg font-medium mb-2">删除叙事单元</h3>
+                <p class="text-sm mb-6" style="color: #8B8B9A;">确定要删除这个叙事单元吗？删除后无法恢复。</p>
+                <div class="flex gap-3 justify-end">
+                    <button data-close-modal="deleteModal" class="px-4 py-2 text-sm rounded-lg transition-colors hover:bg-white/5" style="color: #8B8B9A;">取消</button>
+                    <button class="px-4 py-2 text-sm rounded-lg text-white transition-colors hover:opacity-90" style="background: #EF4444;">删除</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Auto Split Modal -->
+        <div id="autoSplitModal" class="modal-overlay hidden">
+            <div class="modal-backdrop" data-close-modal="autoSplitModal"></div>
+            <div class="modal-content" style="width: 420px;">
+                <h3 class="text-white text-lg font-medium mb-1">AI 自动拆分设置</h3>
+                <p class="text-sm mb-5" style="color: #8B8B9A;">配置剧本自动拆分的规则和参数</p>
+
+                <div class="mb-4">
+                    <label class="text-sm text-white mb-2 block">拆分粒度</label>
+                    <div class="select-wrapper">
+                        <select class="form-select">
+                            <option>细粒度</option>
+                            <option selected>标准</option>
+                            <option>粗粒度</option>
+                        </select>
+                        <i data-lucide="chevron-down" class="w-4 h-4"></i>
+                    </div>
+                </div>
+
+                <div class="space-y-3 mb-5">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-white">按场景拆分</span>
+                        <div class="toggle active">
+                            <div class="toggle-knob"></div>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-white">按角色对话拆分</span>
+                        <div class="toggle active">
+                            <div class="toggle-knob"></div>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-white">智能生成分镜提示词</span>
+                        <div class="toggle">
+                            <div class="toggle-knob"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label class="text-sm text-white mb-2 block">单集默认时长</label>
+                    <div class="segmented">
+                        <button data-seg="1">1分钟</button>
+                        <button data-seg="2" class="active">2分钟</button>
+                        <button data-seg="3">3分钟</button>
+                    </div>
+                </div>
+
+                <div class="flex gap-3 justify-end">
+                    <button data-close-modal="autoSplitModal" class="px-4 py-2 text-sm rounded-lg transition-colors hover:bg-white/5" style="color: #8B8B9A;">取消</button>
+                    <button class="px-4 py-2 text-sm rounded-lg text-white transition-all hover:opacity-90" style="background: linear-gradient(135deg, #4C7FF8, #8B5CF6);">开始拆分</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Unit Modal -->
+        <div id="addUnitModal" class="modal-overlay hidden">
+            <div class="modal-backdrop" data-close-modal="addUnitModal"></div>
+            <div class="modal-content" style="width: 420px;">
+                <h3 class="text-white text-lg font-medium mb-5">新增叙事单元</h3>
+
+                <div class="mb-4">
+                    <label class="text-sm text-white mb-2 block">单元名称</label>
+                    <input type="text" class="form-input" placeholder="请输入单元名称">
+                </div>
+
+                <div class="mb-4">
+                    <label class="text-sm text-white mb-2 block">剧本内容</label>
+                    <textarea rows="4" class="form-textarea resize-none" placeholder="请输入剧本内容..."></textarea>
+                </div>
+
+                <div class="mb-6">
+                    <label class="text-sm text-white mb-2 block">插入位置</label>
+                    <div class="select-wrapper">
+                        <select class="form-select">
+                            <option selected>当前选中单元之后</option>
+                            <option>所有单元之前</option>
+                            <option>所有单元之后</option>
+                        </select>
+                        <i data-lucide="chevron-down" class="w-4 h-4"></i>
+                    </div>
+                </div>
+
+                <div class="flex gap-3 justify-end">
+                    <button data-close-modal="addUnitModal" class="px-4 py-2 text-sm rounded-lg transition-colors hover:bg-white/5" style="color: #8B8B9A;">取消</button>
+                    <button class="px-4 py-2 text-sm rounded-lg text-white transition-all hover:opacity-90" style="background: linear-gradient(135deg, #4C7FF8, #8B5CF6);">添加</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        lucide.createIcons();
+
+        // ===== Duration Preset Dropdown =====
+        const durationDropdown = document.getElementById('durationDropdown');
+        let activeDurationBadge = null;
+
+        function positionDropdown(badge) {
+            const rect = badge.getBoundingClientRect();
+            const dropdownRect = durationDropdown.getBoundingClientRect();
+            let left = rect.left;
+            let top = rect.bottom + 4;
+            // Adjust if overflowing right edge
+            if (left + dropdownRect.width > window.innerWidth - 10) {
+                left = window.innerWidth - dropdownRect.width - 10;
+            }
+            durationDropdown.style.left = left + 'px';
+            durationDropdown.style.top = top + 'px';
+        }
+
+        function showDurationDropdown(badge) {
+            activeDurationBadge = badge;
+            durationDropdown.classList.remove('hidden');
+            positionDropdown(badge);
+            // Update selected state in dropdown
+            const currentValue = badge.textContent.trim();
+            durationDropdown.querySelectorAll('button').forEach(btn => {
+                if (btn.dataset.value === currentValue) {
+                    btn.style.color = '#4C7FF8';
+                } else {
+                    btn.style.color = '#C0C0CC';
+                }
+            });
+        }
+
+        function hideDurationDropdown() {
+            durationDropdown.classList.add('hidden');
+            activeDurationBadge = null;
+        }
+
+        // Click on any duration badge shows dropdown
+        document.querySelectorAll('.duration-badge').forEach(badge => {
+            badge.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (activeDurationBadge === this) {
+                    hideDurationDropdown();
+                } else {
+                    showDurationDropdown(this);
+                }
+            });
+        });
+
+        // Click dropdown option updates badge
+        durationDropdown.querySelectorAll('button').forEach(option => {
+            option.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const value = this.dataset.value;
+                if (activeDurationBadge) {
+                    activeDurationBadge.textContent = value;
+                    // Update color if selected is "自动"
+                    if (value === '自动') {
+                        activeDurationBadge.style.color = '#6B7088';
+                    } else {
+                        activeDurationBadge.style.color = '#4C7FF8';
+                    }
+                }
+                hideDurationDropdown();
+            });
+        });
+
+        // Click outside closes dropdown
+        document.addEventListener('click', function(e) {
+            if (!durationDropdown.contains(e.target) && !e.target.classList.contains('duration-badge')) {
+                hideDurationDropdown();
+            }
+        });
+
+        // Reposition on scroll/resize
+        window.addEventListener('scroll', function() {
+            if (activeDurationBadge && !durationDropdown.classList.contains('hidden')) {
+                positionDropdown(activeDurationBadge);
+            }
+        }, true);
+
+        window.addEventListener('resize', function() {
+            if (activeDurationBadge && !durationDropdown.classList.contains('hidden')) {
+                positionDropdown(activeDurationBadge);
+            }
+        });
+
+        // ===== Modal Helpers =====
+        function openModal(id) {
+            document.getElementById(id).classList.remove('hidden');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.add('hidden');
+        }
+
+        // Close modal via data-close-modal attribute
+        document.querySelectorAll('[data-close-modal]').forEach(el => {
+            el.addEventListener('click', function() {
+                closeModal(this.dataset.closeModal);
+            });
+        });
+
+        // ===== Delete Confirmation Modal =====
+        // Find all delete buttons (buttons with trash icon in card headers)
+        document.querySelectorAll('button').forEach(btn => {
+            const icon = btn.querySelector('[data-lucide="trash-2"], .lucide-trash-2');
+            if (icon && btn.textContent.trim().includes('删除')) {
+                btn.addEventListener('click', function() {
+                    openModal('deleteModal');
+                });
+            }
+        });
+
+        // ===== Auto Split Modal =====
+        document.getElementById('autoSplitBtn').addEventListener('click', function() {
+            openModal('autoSplitModal');
+        });
+
+        // ===== Add Unit Modal =====
+        document.getElementById('addUnitBtn').addEventListener('click', function() {
+            openModal('addUnitModal');
+        });
+
+        // ===== Toggle Switches =====
+        document.querySelectorAll('.toggle').forEach(toggle => {
+            toggle.addEventListener('click', function() {
+                this.classList.toggle('active');
+            });
+        });
+
+        // ===== Segmented Control =====
+        document.querySelectorAll('.segmented').forEach(group => {
+            group.querySelectorAll('button').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    group.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                });
+            });
+        });
+
+        // Re-init lucide icons for dynamically added modal content
+        lucide.createIcons();
+
+        // ===== Profile Panel (sidebar avatar) =====
+        const profilePanel = document.getElementById('profilePanel');
+        const sidebarAvatar = document.getElementById('sidebarAvatar');
+
+        function positionProfilePanel() {
+            if (!profilePanel || !sidebarAvatar) return;
+            const avatarRect = sidebarAvatar.getBoundingClientRect();
+            const panelRect = profilePanel.getBoundingClientRect();
+            
+            // 优先：面板顶部与头像顶部对齐（向下展开）
+            let top = avatarRect.top - 8;
+            
+            // 如果下方空间不够（面板底部超出视口），改为从头像底部向上展开
+            if (top + panelRect.height > window.innerHeight - 12) {
+                top = avatarRect.bottom - panelRect.height + 8;
+            }
+            
+            // 上方也不够的话，贴顶
+            if (top < 12) top = 12;
+            
+            profilePanel.style.top = top + 'px';
+        }
+
+        function toggleProfilePanel() {
+            if (!profilePanel) return;
+            if (profilePanel.classList.contains('hidden')) {
+                profilePanel.classList.remove('hidden');
+                positionProfilePanel();
+                lucide.createIcons();
+            } else {
+                profilePanel.classList.add('hidden');
+            }
+        }
+
+        if (sidebarAvatar) {
+            sidebarAvatar.addEventListener('click', function(e) {
+                e.stopPropagation();
+                toggleProfilePanel();
+            });
+        }
+
+        // Close profile panel when clicking outside
+        document.addEventListener('click', function(e) {
+            if (profilePanel && !profilePanel.classList.contains('hidden')) {
+                if (!profilePanel.contains(e.target) && 
+                    e.target !== sidebarAvatar && !sidebarAvatar.contains(e.target)) {
+                    profilePanel.classList.add('hidden');
+                }
+            }
+        });
+
+        // Reposition on resize
+        window.addEventListener('resize', function() {
+            if (profilePanel && !profilePanel.classList.contains('hidden')) {
+                positionProfilePanel();
+            }
+        });
+
+        // ===== Agent Skill Expand/Collapse =====
+        const skillItems = document.querySelectorAll('.agent-skill-item');
+        skillItems.forEach(item => {
+            item.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const skillId = this.dataset.skill;
+                const expandedEl = document.getElementById('skill-' + skillId);
+                if (expandedEl) {
+                    expandedEl.classList.toggle('open');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

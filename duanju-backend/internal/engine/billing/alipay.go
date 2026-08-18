@@ -28,11 +28,24 @@ type OrderStore interface {
 	CreateOrder(ctx context.Context, userID int64, orderType, planCode string, amountYuan string, points int, idemKey string) (orderID int64, orderNo string, err error)
 	// GetOrderByNo 查订单。
 	GetOrderByNo(ctx context.Context, orderNo string) (*Order, error)
+	// GetOrderByNoForUser 查订单（归属校验：仅订单所有者可见）。
+	GetOrderByNoForUser(ctx context.Context, orderNo string, userID int64) (*Order, error)
+	// GetPackage 查积分套餐（档位校验用）。
+	GetPackage(ctx context.Context, pkgCode string) (*Package, error)
 	// PayCallback 回调事务：订单置 PAID + 加积分 + 流水（pay_transaction_id UNIQUE 幂等）。
 	// 返回 (是否首次处理, 错误)；已处理的交易返回 false。
 	PayCallback(ctx context.Context, orderNo, payTransactionID string, points int) (bool, error)
 	// LogCallback 记录回调日志（H01 生产加固）。
 	LogCallback(ctx context.Context, params map[string]string, step int, result, failReason string) error
+}
+
+// Package 积分套餐（point_packages 行）。
+type Package struct {
+	PkgCode     string
+	Points      int
+	BonusPoints int
+	PriceYuan   string
+	Status      string
 }
 
 // Order 订单。
@@ -66,10 +79,26 @@ type CreateOrderResp struct {
 	ExpireAt   string `json:"expire_at"`
 }
 
-// CreateOrder 下单（H.1 幂等查重 + 档位校验 + 写订单 + mock 二维码）。
+// CreateOrder 下单（H.1 幂等查重 + 服务端档位校验 + 写订单 + mock 二维码）。
+// 档位校验：以 point_packages 表为唯一真源，amount_yuan 与 points 必须与服务端价目表一致，
+// 拒绝前端任意构造的金额/积分组合（防刷积分）。
 func (s *AlipayService) CreateOrder(ctx context.Context, userID int64, orderType, planCode, amountYuan string, points int, idemKey string) (*CreateOrderResp, error) {
 	if idemKey == "" {
 		return nil, fmt.Errorf("缺少幂等键")
+	}
+	// 档位校验（P0 修复：0.01 元买任意积分漏洞）
+	pkg, err := s.store.GetPackage(ctx, planCode)
+	if err != nil {
+		return nil, fmt.Errorf("套餐不存在")
+	}
+	if pkg.Status != "ON" {
+		return nil, fmt.Errorf("套餐已下架")
+	}
+	if amountYuan != pkg.PriceYuan {
+		return nil, fmt.Errorf("金额与套餐价目不符")
+	}
+	if points != pkg.Points+pkg.BonusPoints {
+		return nil, fmt.Errorf("积分与套餐价目不符")
 	}
 	orderID, orderNo, err := s.store.CreateOrder(ctx, userID, orderType, planCode, amountYuan, points, idemKey)
 	if err != nil {

@@ -1,0 +1,77 @@
+/* AdminTasksPage 页面专属样式：1:1 提取自 admin-tasks.html <style>（公共 shell 部分已在 index.css） */
+
+/* Table row hover */
+.table-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* 状态/类型标签 */
+.tag {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* 状态圆点 */
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+/* 行内操作按钮 */
+.action-btn {
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* 任务进度条 */
+.progress-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #2a2a3e;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+.progress-running {
+  animation: progressPulse 2s ease-in-out infinite;
+}
+@keyframes progressPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* GPU 集群条 */
+.gpu-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: #1a1a2e;
+  overflow: hidden;
+}
+.gpu-fill {
+  height: 100%;
+  border-radius: 4px;
+}

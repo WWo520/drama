@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Eye, EyeOff, Lock, Rocket, ShieldCheck, Smile, User, UserRound, Zap } from "lucide-react";
+import { Eye, EyeOff, Lock, ShieldCheck, Smile, User } from "lucide-react";
 
 import { api, ApiError, errorMessage } from "@duanju/api-client";
 import { useAuthStore } from "../stores/authStore";
@@ -149,10 +149,19 @@ export default function LoginPage() {
       </div>
       <div className="anim-particles" ref={particlesRef} />
       <div className="anim-grid" />
+
+      {/* 虚影视频背景（铺满整个界面：blur 柔化 + 低透明 + 渐变遮罩） */}
+      <div className="login-video-bg" aria-hidden>
+        <video autoPlay muted loop playsInline preload="auto">
+          <source src="/media/login-anim.mp4" type="video/mp4" />
+        </video>
+      </div>
+
       <div className="video-overlay" />
 
       {/* ========== 左品牌区 ========== */}
       <div className="brand-section">
+        <div className="brand-content">
         <div className="logo">
           <div className="logo-icon">
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -170,42 +179,6 @@ export default function LoginPage() {
           从剧本拆分到视频生成，一站式 AI 短剧生产平台。
           让创意不再受限于技术，每个人都能成为导演。
         </p>
-
-        {/* 动画视频（用户提供：自动循环播放，无声） */}
-        <div className="login-video-box">
-          <video autoPlay muted loop playsInline preload="auto">
-            <source src="/media/login-anim.mp4" type="video/mp4" />
-          </video>
-        </div>
-
-        <div className="feature-list">
-          <div className="feature-item">
-            <div className="feature-icon">
-              <Zap size={20} aria-hidden />
-            </div>
-            <div className="feature-text">
-              <h4>极速生成</h4>
-              <p>AI 智能生成视频，几分钟完成创作</p>
-            </div>
-          </div>
-          <div className="feature-item">
-            <div className="feature-icon">
-              <UserRound size={20} aria-hidden />
-            </div>
-            <div className="feature-text">
-              <h4>虚拟数字人</h4>
-              <p>海量角色库，支持自定义形象</p>
-            </div>
-          </div>
-          <div className="feature-item">
-            <div className="feature-icon">
-              <Rocket size={20} aria-hidden />
-            </div>
-            <div className="feature-text">
-              <h4>一键发布</h4>
-              <p>多平台同步分发，快速获取流量</p>
-            </div>
-          </div>
         </div>
       </div>
 

@@ -139,7 +139,28 @@ func (s *AssetStore) SaveGeneratedImage(ctx context.Context, t *AssetTarget, ima
 	if err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	// 项目状态推进：全部资产就绪 PARTIAL_ASSETS → ALL_ASSETS_READY（03 A.2，幂等；失败不阻断任务，下次生成重试）
+	_ = s.CheckAssetsReady(ctx, t.ProjectID)
+	return nil
+}
+
+// CheckAssetsReady 项目资产就绪检查：每个角色至少一个 SUCCESS variant，
+// 且全部场景/道具均为 SUCCESS（无则自然满足）→ 推进 ALL_ASSETS_READY。
+func (s *AssetStore) CheckAssetsReady(ctx context.Context, projectID int64) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE projects SET status='ALL_ASSETS_READY', current_step='VIDEO_PRODUCTION', updated_at=NOW()
+		WHERE id=$1 AND status='PARTIAL_ASSETS'
+		  AND NOT EXISTS (
+		      SELECT 1 FROM characters c WHERE c.project_id=$1 AND c.deleted_at IS NULL
+		        AND NOT EXISTS (SELECT 1 FROM character_variants cv
+		                        WHERE cv.character_id=c.id AND cv.deleted_at IS NULL AND cv.generation_status='SUCCESS'))
+		  AND NOT EXISTS (SELECT 1 FROM scenes WHERE project_id=$1 AND deleted_at IS NULL AND generation_status <> 'SUCCESS')
+		  AND NOT EXISTS (SELECT 1 FROM props  WHERE project_id=$1 AND deleted_at IS NULL AND generation_status <> 'SUCCESS')`,
+		projectID)
+	return err
 }
 
 // LoadAssetTarget 按任务参数解析目标（target_kind/target_id）。
@@ -150,16 +171,18 @@ func (s *AssetStore) LoadAssetTarget(ctx context.Context, targetKind string, tar
 		// 前端传 character.id（首次生成时 variant 尚不存在）→ 查 characters 行；
 		// 若已是衍生图重生成（传 variant.id），则回退查 character_variants。
 		err := s.pool.QueryRow(ctx, `
-			SELECT 0, c.project_id, c.origin_episode_id, c.asset_id
+			SELECT 0, c.project_id, c.origin_episode_id, c.asset_id,
+			       COALESCE(c.description_notes, '')
 			FROM characters c WHERE c.id = $1 AND c.deleted_at IS NULL`, targetID).
-			Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID)
+			Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID, &t.Prompt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// 回退：按 variant.id 查
 			err2 := s.pool.QueryRow(ctx, `
-				SELECT cv.point_cost, c.project_id, c.origin_episode_id, cv.asset_id
+				SELECT cv.point_cost, c.project_id, c.origin_episode_id, cv.asset_id,
+				       COALESCE(c.description_notes, '')
 				FROM character_variants cv JOIN characters c ON c.id = cv.character_id
 				WHERE cv.id = $1`, targetID).
-				Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID)
+				Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID, &t.Prompt)
 			if errors.Is(err2, pgx.ErrNoRows) {
 				return nil, asset.ErrTokenExpired
 			}
@@ -168,16 +191,18 @@ func (s *AssetStore) LoadAssetTarget(ctx context.Context, targetKind string, tar
 		return t, err
 	case "SCENE":
 		err := s.pool.QueryRow(ctx, `
-			SELECT point_cost, project_id, origin_episode_id, asset_id FROM scenes WHERE id = $1`,
-			targetID).Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID)
+			SELECT point_cost, project_id, origin_episode_id, asset_id, COALESCE(base_prompt, '')
+			FROM scenes WHERE id = $1`,
+			targetID).Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID, &t.Prompt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, asset.ErrTokenExpired
 		}
 		return t, err
 	case "PROP":
 		err := s.pool.QueryRow(ctx, `
-			SELECT point_cost, project_id, origin_episode_id, asset_id FROM props WHERE id = $1`,
-			targetID).Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID)
+			SELECT point_cost, project_id, origin_episode_id, asset_id, COALESCE(description, '')
+			FROM props WHERE id = $1`,
+			targetID).Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID, &t.Prompt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, asset.ErrTokenExpired
 		}
@@ -225,7 +250,7 @@ func (s *AssetStore) ListVariants(ctx context.Context, characterID int64) ([]map
 func (s *AssetStore) SaveVersionSnapshot(ctx context.Context, narrativeUnitID, userID int64, script, storyboard string) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO narrative_unit_versions (narrative_unit_id, version_num, label, script_snapshot, storyboard_json_snapshot, created_by_user_id, created_from)
-		SELECT $1, COALESCE(MAX(version_num),0)+1, '自动快照', $3, $4, $2, 'SPLIT_AUTO'
+		SELECT $1, COALESCE(MAX(version_num),0)+1, '自动快照', $3, $4, $2, 'AGENT_AUTO_SPLIT'
 		FROM narrative_unit_versions WHERE narrative_unit_id=$1`,
 		narrativeUnitID, userID, script, storyboard)
 	return err

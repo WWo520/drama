@@ -1,0 +1,40 @@
+/* AdminWorksPage 页面专属样式：1:1 提取自 admin-works.html <style>（公共 shell 部分已在 index.css） */
+
+/* Table row hover */
+.table-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* 状态/分类标签 */
+.tag {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* 状态圆点 */
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+/* 行内操作按钮 */
+.action-btn {
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}

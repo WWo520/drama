@@ -62,9 +62,9 @@ func (h *ExportHandler) Execute(ctx context.Context, t *task.Task) ([]byte, erro
 	log.Printf("export: 开始合成 export_id=%d res=%s watermark=%v", params.ExportID, params.Resolution, params.Watermark)
 	time.Sleep(500 * time.Millisecond) // mock 处理延迟
 
-	// mock 成片 URL（模拟上传 OSS 结果）
-	outputURL := fmt.Sprintf("https://mock.cdn.example.com/exports/%d-%s.mp4",
-		params.ExportID, time.Now().Format("20060102150405"))
+	// mock 成片 URL（指向可播放的本地样例视频，模拟上传 OSS 结果）
+	outputURL := fmt.Sprintf("%s/sample.mp4?export=%d&t=%s",
+		mockCDNBase(), params.ExportID, time.Now().Format("20060102150405"))
 	fileSize := int64(10 * 1024 * 1024) // mock 10MB
 
 	// 写入 export_records

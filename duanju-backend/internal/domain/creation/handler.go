@@ -308,10 +308,12 @@ func (h *Handler) registerExtraRoutes(rg *gin.RouterGroup, extra *ExtraServices,
 		admX.GET("/comments", extra.AdminExtra.Comments)
 		admX.GET("/courses", extra.AdminExtra.Courses)
 		admX.GET("/dashboard/summary", extra.AdminExtra.DashboardSummary)
+		admX.GET("/trends", extra.AdminExtra.Trends) // Dashboard 趋势图按日序列
 		admX.GET("/directive-skills", extra.AdminExtra.DirectiveSkills)
 		admX.GET("/languages", extra.AdminExtra.Languages)
 		admX.GET("/model-keys", extra.AdminExtra.ModelKeys)
 		admX.GET("/platform/config", extra.AdminExtra.PlatformConfig)
+		admX.PUT("/platform/config", h.adminUpdatePlatformConfig) // 单 key upsert（config_key/config_value）
 		admX.GET("/point-packages", extra.AdminExtra.PointPackages)
 		admX.GET("/providers", extra.AdminExtra.ModelProvidersList)
 		admX.POST("/providers", extra.AdminExtra.ModelProviderCreate)
@@ -337,6 +339,15 @@ func (h *Handler) registerExtraRoutes(rg *gin.RouterGroup, extra *ExtraServices,
 		admX.PUT("/users/:user_uuid/status", func(c *gin.Context) { extra.AdminExtra.UserStatus(c, c.Param("user_uuid")) })
 		admX.POST("/works/:work_id/audit", func(c *gin.Context) { extra.AdminExtra.WorkAudit(c, c.Param("work_id")) })
 		admX.PUT("/works/:work_id/unlist", func(c *gin.Context) { extra.AdminExtra.WorkUnlist(c, c.Param("work_id")) })
+		admX.GET("/tasks", extra.AdminExtra.Tasks)                                                     // 11.57 算力任务列表
+		admX.GET("/tasks/stats", extra.AdminExtra.TaskStats)                                           // 任务统计（队列/耗时）
+		admX.POST("/tasks/:task_id/retry", func(c *gin.Context) { extra.AdminExtra.TaskRetryAdmin(c, c.Param("task_id")) })
+		admX.POST("/tasks/:task_id/cancel", func(c *gin.Context) { extra.AdminExtra.TaskCancelAdmin(c, c.Param("task_id")) })
+		admX.GET("/tasks/:task_id", func(c *gin.Context) { extra.AdminExtra.TaskDetailAdmin(c, c.Param("task_id")) })
+		admX.PUT("/tasks/:task_id/priority", func(c *gin.Context) { extra.AdminExtra.TaskPriorityAdmin(c, c.Param("task_id")) })
+		admX.PUT("/works/:work_id", func(c *gin.Context) { extra.AdminExtra.WorkUpdate(c, c.Param("work_id")) })
+		admX.PUT("/works/:work_id/recommend", func(c *gin.Context) { extra.AdminExtra.WorkRecommend(c, c.Param("work_id")) })
+		admX.POST("/users", extra.AdminExtra.AdminCreateUser)                                  // 管理端新增用户
 	}
 }
 

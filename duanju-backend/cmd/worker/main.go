@@ -66,7 +66,31 @@ func main() {
 	// 真实 LLM Provider（OpenAI 兼容：DeepSeek/Qwen/GLM 等，按厂商 name 匹配注册）
 	realLLM := model.NewOpenAICompatProvider("openai-compat", model.CapLLM)
 	mockLLM := model.NewMockProvider("mock-llm", model.CapLLM)
-	modelEngine := model.NewEngine([]model.Provider{realLLM, mockLLM}, keyStore)
+	// 真实异步生成 Provider（火山引擎即梦/可灵风格：创建任务 + 轮询，覆盖 T2I/T2V/I2V）。
+	// DB 配置厂商 name 为 volcengine/jimeng/kling 等时按名匹配；未配置时回退 mock（开发期）。
+	volc := model.NewAsyncTaskProvider("volcengine", []model.Capability{model.CapT2I, model.CapI2I, model.CapT2V, model.CapI2V}, model.AsyncProviderOption{
+		ImageCreatePath: "/api/v1/images/generations",
+		ImageQueryPath:  "/api/v1/images/generations/{id}",
+		VideoCreatePath: "/api/v1/videos/generations",
+		VideoQueryPath:  "/api/v1/videos/generations/{id}",
+	})
+	jimeng := model.NewAsyncTaskProvider("jimeng", []model.Capability{model.CapT2I, model.CapI2I, model.CapT2V, model.CapI2V}, model.AsyncProviderOption{
+		ImageCreatePath: "/api/v1/images/generations",
+		ImageQueryPath:  "/api/v1/images/generations/{id}",
+		VideoCreatePath: "/api/v1/videos/generations",
+		VideoQueryPath:  "/api/v1/videos/generations/{id}",
+	})
+	kling := model.NewAsyncTaskProvider("kling", []model.Capability{model.CapT2I, model.CapI2I, model.CapT2V, model.CapI2V}, model.AsyncProviderOption{
+		ImageCreatePath: "/v1/images/text2image",
+		ImageQueryPath:  "/v1/images/text2image/{id}",
+		VideoCreatePath: "/v1/videos/text2video",
+		VideoQueryPath:  "/v1/videos/text2video/{id}",
+	})
+	mockImage := model.NewMockProvider("mock-image", model.CapT2I, model.CapI2I)
+	mockVideo := model.NewMockProvider("mock-video", model.CapT2V, model.CapI2V)
+	modelEngine := model.NewEngine([]model.Provider{
+		realLLM, mockLLM, volc, jimeng, kling, mockImage, mockVideo,
+	}, keyStore)
 
 	// Agent 引擎（S1-B05）：SplitHandler 注册为 SCRIPT_SPLIT 执行器
 	splitStore := repository.NewSplitStore(pool)
@@ -74,11 +98,11 @@ func main() {
 
 	// Worker-Asset（S1-B06）：三种图生成任务
 	assetStore := repository.NewAssetStore(pool)
-	assetHandler := agent.NewAssetHandler(assetStore)
+	assetHandler := agent.NewAssetHandler(assetStore, modelEngine)
 
 	// Worker-Video（S1-B07）：Step3 视频生成
 	videoStore := repository.NewVideoStore(pool)
-	videoHandler := agent.NewVideoHandler(videoStore)
+	videoHandler := agent.NewVideoHandler(videoStore, modelEngine)
 
 	// Worker-Export（S1-B08）：Step4 导出 MP4
 	exportStore := repository.NewExportStore(pool)
@@ -124,7 +148,7 @@ func main() {
 		}
 		if _, aerr := pool.Exec(ctx, `
 			INSERT INTO audit_logs (operator_role, action, target_type, target_id, detail_json, risk_level)
-			VALUES ('SYSTEM', $1, 'TASK', $2, jsonb_build_object('deliverable', $3), 'INFO')`,
+			VALUES ('SYSTEM', $1, 'TASK', $2, jsonb_build_object('deliverable', $3::boolean), 'INFO')`,
 			action, taskID, deliverable); aerr != nil {
 			lg.Warn("审计写入失败", logger.F("err", aerr.Error())...)
 		}

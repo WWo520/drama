@@ -42,6 +42,11 @@ services:
     environment:
       MINIO_ROOT_USER: duanju
       MINIO_ROOT_PASSWORD: duanju_dev_pwd
+      # 浏览器预签名直传所需 CORS（暴露 ETag 供上传回执校验）
+      MINIO_API_CORS_ALLOW_ORIGIN: "http://localhost:5173"
+      MINIO_API_CORS_ALLOW_METHODS: "PUT,GET,HEAD"
+      MINIO_API_CORS_ALLOW_HEADERS: "Content-Type,X-Amz-*"
+      MINIO_API_CORS_EXPOSE_HEADERS: "ETag"
     ports:
       - "9000:9000"
       - "9001:9001"

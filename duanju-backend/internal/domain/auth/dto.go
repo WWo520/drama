@@ -55,3 +55,9 @@ type MeResp struct {
 	PointBalance  int       `json:"point_balance"`
 	FrozenBalance int       `json:"frozen_balance"`
 }
+
+// UpdateMeReq 资料更新请求（PUT /auth/me）：昵称/头像部分更新，空字段不更新。
+type UpdateMeReq struct {
+	Nickname  string `json:"nickname" binding:"omitempty,min=2,max=64"`
+	AvatarURL string `json:"avatar_url" binding:"omitempty,max=512"` // MinIO object key（头像上传路径，读取时由 /users/me/avatar 重定向签新 URL）
+}

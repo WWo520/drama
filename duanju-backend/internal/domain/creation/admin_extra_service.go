@@ -5,12 +5,15 @@ package creation
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/duanju/backend/internal/pkg/httpx"
+	"github.com/duanju/backend/internal/pkg/password"
 )
 
 // ModelConfigStore 大模型配置数据边界（repository.ModelKeyStore 实现）。
@@ -353,6 +356,60 @@ func (s *AdminExtraService) Statistics(c *gin.Context) {
 	})
 }
 
+// ---- Dashboard 趋势图（近 N 天按日序列，默认 7 天，供 admin-dashboard 双趋势图） ----
+func (s *AdminExtraService) Trends(c *gin.Context) {
+	days, _ := strconv.Atoi(c.DefaultQuery("days", "7"))
+	if days < 1 || days > 30 {
+		days = 7
+	}
+	rows, err := s.repo.pool.Query(c.Request.Context(), `
+		SELECT to_char(d.day,'MM-DD') AS day,
+		       COALESCE(u.reg,0), COALESCE(a.act,0),
+		       COALESCE(o.amt,0)::float8, COALESCE(o.payers,0)
+		FROM generate_series(CURRENT_DATE - make_interval(days => $1 - 1), CURRENT_DATE, INTERVAL '1 day') AS d(day)
+		LEFT JOIN (
+		  SELECT (created_at AT TIME ZONE 'Asia/Shanghai')::date AS day, count(*) AS reg
+		  FROM users GROUP BY 1
+		) u ON u.day = d.day::date
+		LEFT JOIN (
+		  SELECT (created_at AT TIME ZONE 'Asia/Shanghai')::date AS day, count(DISTINCT user_id) AS act
+		  FROM generation_tasks WHERE deleted_at IS NULL GROUP BY 1
+		) a ON a.day = d.day::date
+		LEFT JOIN (
+		  SELECT (paid_at AT TIME ZONE 'Asia/Shanghai')::date AS day,
+		         COALESCE(SUM(paid_amount_yuan),0) AS amt, count(DISTINCT user_id) AS payers
+		  FROM orders WHERE pay_status='PAID' AND paid_at IS NOT NULL GROUP BY 1
+		) o ON o.day = d.day::date
+		ORDER BY d.day`, days)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取趋势失败")
+		return
+	}
+	defer rows.Close()
+	labels := make([]string, 0)
+	regs := make([]int, 0)
+	acts := make([]int, 0)
+	amts := make([]float64, 0)
+	payers := make([]int, 0)
+	for rows.Next() {
+		var label string
+		var reg, act, payer int
+		var amt float64
+		if err := rows.Scan(&label, &reg, &act, &amt, &payer); err != nil {
+			continue
+		}
+		labels = append(labels, label)
+		regs = append(regs, reg)
+		acts = append(acts, act)
+		amts = append(amts, amt)
+		payers = append(payers, payer)
+	}
+	httpx.OK(c, gin.H{
+		"days": labels, "registrations": regs, "actives": acts,
+		"revenue_yuan": amts, "payers": payers,
+	})
+}
+
 // ---- 11.53 风格库管理 ----
 func (s *AdminExtraService) StyleLibrary(c *gin.Context) { s.adminList(c, "style_library", "sort_order ASC, id ASC") }
 
@@ -381,7 +438,7 @@ func (s *AdminExtraService) UserDetail(c *gin.Context, userUUID string) {
 		WHERE owner_type='USER' AND owner_id=$1`, id).Scan(&points, &frozen)
 	var planCode string
 	_ = s.repo.pool.QueryRow(c.Request.Context(), `
-		SELECT COALESCE(plan_code::text,'BASIC') FROM user_memberships WHERE user_id=$1 AND status='ACTIVE' ORDER BY id DESC LIMIT 1`, id).Scan(&planCode)
+		SELECT COALESCE(package_code::text,'BASIC') FROM user_memberships WHERE user_id=$1 AND status='ACTIVE' ORDER BY id DESC LIMIT 1`, id).Scan(&planCode)
 	httpx.OK(c, gin.H{
 		"user_uuid": userUUID, "nickname": nickname, "email": email, "phone": phone,
 		"status": status, "created_at": createdAt,
@@ -793,4 +850,313 @@ func (s *AdminExtraService) ModelKeyRevoke(c *gin.Context, idStr string) {
 		return
 	}
 	httpx.OK(c, nil)
+}
+
+// ---- 算力任务管理（11.57：generation_tasks 列表/统计/管理端重试与取消） ----
+
+// Tasks 任务列表（status/task_type 可选过滤）。
+func (s *AdminExtraService) Tasks(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	status := strings.ToUpper(c.DefaultQuery("status", ""))
+	taskType := strings.ToUpper(c.DefaultQuery("task_type", ""))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	var total int
+	where := `t.deleted_at IS NULL`
+	args := make([]any, 0, 3)
+	if status != "" {
+		// 支持逗号分隔多值（如 status=QUEUED 或 status=PENDING,QUEUED）
+		parts := strings.Split(status, ",")
+		in := make([]string, 0, len(parts))
+		for _, p := range parts {
+			args = append(args, p)
+			in = append(in, fmt.Sprintf("$%d", len(args)))
+		}
+		where += " AND t.status IN (" + strings.Join(in, ",") + ")"
+	}
+	if taskType != "" {
+		args = append(args, taskType)
+		where += fmt.Sprintf(" AND t.task_type=$%d", len(args))
+	}
+	if err := s.repo.pool.QueryRow(c.Request.Context(), `SELECT count(*) FROM generation_tasks t WHERE `+where, args...).Scan(&total); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取任务失败")
+		return
+	}
+	args = append(args, pageSize, (page-1)*pageSize)
+	rows, err := s.repo.pool.Query(c.Request.Context(), `
+		SELECT t.task_uuid::text, t.request_id, t.task_type::text, t.status::text, COALESCE(t.progress_pct,0),
+		       COALESCE(p.title,''), COALESCE(u.nickname,''), COALESCE(t.gpu_node_id,''),
+		       COALESCE(t.total_execution_ms,0),
+		       to_char(t.created_at AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD HH24:MI')
+		FROM generation_tasks t
+		LEFT JOIN projects p ON p.id=t.project_id
+		LEFT JOIN users u ON u.id=t.user_id
+		WHERE `+where+` ORDER BY t.id DESC LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)),
+		args...)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取任务失败")
+		return
+	}
+	defer rows.Close()
+	out := make([]map[string]any, 0)
+	for rows.Next() {
+		var taskUUID, requestID, taskTypeV, st, projectTitle, author, gpuNode, createdAt string
+		var progress, execMs int
+		if err := rows.Scan(&taskUUID, &requestID, &taskTypeV, &st, &progress, &projectTitle, &author, &gpuNode, &execMs, &createdAt); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"task_uuid": taskUUID, "request_id": requestID, "task_type": taskTypeV, "status": st,
+			"progress_pct": progress, "project_title": projectTitle, "author": author,
+			"gpu_node_id": gpuNode, "execution_ms": execMs, "created_at": createdAt,
+		})
+	}
+	httpx.OK(c, gin.H{"items": out, "pagination": gin.H{"page": page, "page_size": pageSize, "total": total}})
+}
+
+// TaskStats 任务统计（队列计数 + 平均耗时）。
+func (s *AdminExtraService) TaskStats(c *gin.Context) {
+	var queued, running, doneToday, failed, avgMs int
+	if err := s.repo.pool.QueryRow(c.Request.Context(), `
+		SELECT
+		  (SELECT count(*) FROM generation_tasks WHERE deleted_at IS NULL AND status IN ('PENDING','QUEUED')),
+		  (SELECT count(*) FROM generation_tasks WHERE deleted_at IS NULL AND status='RUNNING'),
+		  (SELECT count(*) FROM generation_tasks WHERE deleted_at IS NULL AND status='SUCCESS' AND completed_at > NOW()-interval '24 hours'),
+		  (SELECT count(*) FROM generation_tasks WHERE deleted_at IS NULL AND status IN ('FAILED_RETRYING','FAILED_DEAD')),
+		  (SELECT COALESCE(AVG(total_execution_ms),0)::int FROM generation_tasks WHERE deleted_at IS NULL AND status='SUCCESS' AND total_execution_ms > 0)`).
+		Scan(&queued, &running, &doneToday, &failed, &avgMs); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取任务统计失败")
+		return
+	}
+	httpx.OK(c, gin.H{
+		"queued": queued, "running": running, "done_today": doneToday, "failed": failed,
+		"avg_execution_ms": avgMs,
+	})
+}
+
+// TaskRetryAdmin 管理端强制重试失败任务（POST /admin/tasks/:task_id/retry）。
+func (s *AdminExtraService) TaskRetryAdmin(c *gin.Context, taskUUID string) {
+	tag, err := s.repo.pool.Exec(c.Request.Context(), `
+		UPDATE generation_tasks SET status='QUEUED', enqueued_at=NOW(), error_message=NULL, retry_count=0, updated_at=NOW()
+		WHERE task_uuid=$1 AND deleted_at IS NULL AND status IN ('FAILED_RETRYING','FAILED_DEAD')`, taskUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "重试失败")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Fail(c, http.StatusBadRequest, 20009, "任务不存在或不可重试")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// TaskCancelAdmin 管理端强制取消任务（POST /admin/tasks/:task_id/cancel）。
+func (s *AdminExtraService) TaskCancelAdmin(c *gin.Context, taskUUID string) {
+	tag, err := s.repo.pool.Exec(c.Request.Context(), `
+		UPDATE generation_tasks SET status='CANCELED_USER', updated_at=NOW()
+		WHERE task_uuid=$1 AND deleted_at IS NULL AND status IN ('PENDING','QUEUED','RUNNING')`, taskUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "取消失败")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Fail(c, http.StatusBadRequest, 20009, "任务不存在或不可取消")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// TaskDetailAdmin 任务详情（GET /admin/tasks/:task_id；含参数/结果/错误/进度）。
+func (s *AdminExtraService) TaskDetailAdmin(c *gin.Context, taskUUID string) {
+	var taskID, progress, priority, retryCount int
+	var requestID, taskType, st, gpuNode, externalID, aiModel string
+	var paramsJSON, resultJSON string
+	var errorMsg, userError *string
+	var enqueuedAt, startedAt, completedAt, createdAt string
+	if err := s.repo.pool.QueryRow(c.Request.Context(), `
+		SELECT id, request_id, task_type::text, status::text, COALESCE(progress_pct,0),
+		       priority, retry_count, COALESCE(gpu_node_id,''), COALESCE(external_task_id,''),
+		       COALESCE(ai_model_actual_used,''), COALESCE(request_params_json::text,'{}'),
+		       COALESCE(result_output_json::text,'{}'), error_message, user_display_error,
+		       COALESCE(to_char(enqueued_at AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD HH24:MI'),''),
+		       COALESCE(to_char(started_at AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD HH24:MI'),''),
+		       COALESCE(to_char(completed_at AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD HH24:MI'),''),
+		       to_char(created_at AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD HH24:MI')
+		FROM generation_tasks WHERE task_uuid=$1 AND deleted_at IS NULL`, taskUUID).
+		Scan(&taskID, &requestID, &taskType, &st, &progress, &priority, &retryCount, &gpuNode,
+			&externalID, &aiModel, &paramsJSON, &resultJSON, &errorMsg, &userError,
+			&enqueuedAt, &startedAt, &completedAt, &createdAt); err != nil {
+		httpx.Fail(c, http.StatusNotFound, 20001, "任务不存在")
+		return
+	}
+	var params, result any
+	_ = json.Unmarshal([]byte(paramsJSON), &params)
+	_ = json.Unmarshal([]byte(resultJSON), &result)
+	httpx.OK(c, gin.H{
+		"task_id": taskID, "task_uuid": taskUUID, "request_id": requestID, "task_type": taskType,
+		"status": st, "progress_pct": progress, "priority": priority, "retry_count": retryCount,
+		"gpu_node_id": gpuNode, "external_task_id": externalID, "ai_model_actual_used": aiModel,
+		"request_params": params, "result_output": result,
+		"error_message": errorMsg, "user_display_error": userError,
+		"enqueued_at": enqueuedAt, "started_at": startedAt, "completed_at": completedAt, "created_at": createdAt,
+	})
+}
+
+// TaskPriorityAdmin 调整任务优先级（PUT /admin/tasks/:task_id/priority；仅排队/生成中）。
+func (s *AdminExtraService) TaskPriorityAdmin(c *gin.Context, taskUUID string) {
+	var req struct {
+		Priority int `json:"priority" binding:"required,min=1,max=100"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	tag, err := s.repo.pool.Exec(c.Request.Context(), `
+		UPDATE generation_tasks SET priority=$2, updated_at=NOW()
+		WHERE task_uuid=$1 AND deleted_at IS NULL AND status IN ('PENDING','QUEUED')`, taskUUID, req.Priority)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "调整失败")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Fail(c, http.StatusBadRequest, 20009, "任务不存在或已开始执行，无法调整优先级")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// ---- 作品管理补充（编辑/推荐位） ----
+
+// WorkUpdate 编辑作品（PUT /admin/works/:work_id；title/description/tags）。
+func (s *AdminExtraService) WorkUpdate(c *gin.Context, workUUID string) {
+	var req struct {
+		Title       string   `json:"title" binding:"required,min=1,max=256"`
+		Description string   `json:"description" binding:"max=2000"`
+		Tags        []string `json:"tags"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	tagsJSON := "[]"
+	if len(req.Tags) > 0 {
+		b, _ := json.Marshal(req.Tags)
+		tagsJSON = string(b)
+	}
+	tag, err := s.repo.pool.Exec(c.Request.Context(), `
+		UPDATE works SET title=$2, description=$3, tags=$4::jsonb, updated_at=NOW()
+		WHERE work_uuid=$1::uuid AND is_deleted_recyclebin=FALSE`, workUUID, req.Title, req.Description, tagsJSON)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "更新失败")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Fail(c, http.StatusNotFound, 20001, "作品不存在")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// WorkRecommend 设置/取消推荐位（PUT /admin/works/:work_id/recommend）。
+func (s *AdminExtraService) WorkRecommend(c *gin.Context, workUUID string) {
+	var req struct {
+		Recommended bool `json:"recommended"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	tag, err := s.repo.pool.Exec(c.Request.Context(), `
+		UPDATE works SET is_recommended=$2, updated_at=NOW()
+		WHERE work_uuid=$1::uuid AND is_deleted_recyclebin=FALSE AND publish_status='PUBLISHED'`, workUUID, req.Recommended)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "设置失败")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Fail(c, http.StatusBadRequest, 20009, "作品不存在或非已发布状态")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// ---- 用户管理补充：管理端新增用户（POST /admin/users） ----
+
+// AdminCreateUser 管理端创建用户（邮箱+密码+昵称；可选初始积分与角色）。
+func (s *AdminExtraService) AdminCreateUser(c *gin.Context) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	var req struct {
+		Email    string   `json:"email" binding:"required,email,max=128"`
+		Password string   `json:"password" binding:"required,min=8,max=64"`
+		Nickname string   `json:"nickname" binding:"required,min=2,max=64"`
+		Points   int      `json:"points"`
+		RoleCodes []string `json:"role_codes"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	hash, err := password.Hash(req.Password)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "密码加密失败")
+		return
+	}
+	tx, err := s.repo.pool.Begin(c.Request.Context())
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建失败")
+		return
+	}
+	defer tx.Rollback(c.Request.Context())
+	var newUserID int64
+	if err := tx.QueryRow(c.Request.Context(), `
+		INSERT INTO users (email, phone, password_hash, nickname, status)
+		VALUES ($1, '', $2, $3, 'ACTIVE') RETURNING id`,
+		req.Email, hash, req.Nickname).Scan(&newUserID); err != nil {
+		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "23505") {
+			httpx.Fail(c, http.StatusBadRequest, 20009, "邮箱已被注册")
+			return
+		}
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建用户失败")
+		return
+	}
+	// 默认空间（与注册链路一致：个人空间）
+	if _, err := tx.Exec(c.Request.Context(), `
+		INSERT INTO spaces (owner_user_id, name, type, status)
+		VALUES ($1, $2, 'PERSONAL', 'ACTIVE')`,
+		newUserID, req.Nickname+" 的个人空间"); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建空间失败")
+		return
+	}
+	// 初始积分
+	if req.Points != 0 {
+		if _, err := tx.Exec(c.Request.Context(), `
+			INSERT INTO point_accounts (owner_type, owner_id, current_balance, frozen_balance)
+			VALUES ('USER', $1, $2, 0)
+			ON CONFLICT (owner_type, owner_id) DO UPDATE SET current_balance=point_accounts.current_balance+$2, updated_at=NOW()`,
+			newUserID, req.Points); err != nil {
+			httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "初始化积分失败")
+			return
+		}
+	}
+	// 角色绑定
+	for _, code := range req.RoleCodes {
+		if _, err := tx.Exec(c.Request.Context(), `
+			INSERT INTO user_roles (user_id, role_id, granted_by_user_id)
+			SELECT $1, id, $2 FROM roles WHERE code=$3`,
+			newUserID, uid, code); err != nil {
+			httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "角色绑定失败")
+			return
+		}
+	}
+	if err := tx.Commit(c.Request.Context()); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建失败")
+		return
+	}
+	httpx.OK(c, gin.H{"user_id": newUserID})
 }

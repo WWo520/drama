@@ -7,9 +7,11 @@ export * from "./api/split";
 export * from "./api/assets";
 export * from "./api/video";
 export * from "./api/export";
+export * from "./api/tasks";
 export * from "./api/points";
 export * from "./api/phase2";
 export * from "./api/phase3";
+export * from "./api/notifications";
 
 // ApiResponse<T> 对齐 05 B2 章统一响应体
 export interface ApiResponse<T = unknown> {
@@ -125,6 +127,11 @@ http.interceptors.response.use(
         original.headers = { ...original.headers, Authorization: `Bearer ${token}` };
         return http(original);
       }
+    }
+    // HTTP 错误但携带业务码（如 400 + code 40003）→ 转为 ApiError，供页面错误码映射使用
+    const data = error.response?.data;
+    if (data && typeof data === "object" && typeof data.code === "number" && data.code !== 0) {
+      return Promise.reject(new ApiError(data.code, data.message || errorMessage(data.code)));
     }
     return Promise.reject(error);
   },

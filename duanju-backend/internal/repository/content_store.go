@@ -40,7 +40,7 @@ func (s *ContentStore) Feed(ctx context.Context, page, pageSize int) ([]map[stri
 		       COALESCE(u.nickname,''), to_char(w.published_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		FROM works w LEFT JOIN users u ON u.id=w.owner_user_id
 		WHERE w.publish_status='PUBLISHED' AND w.is_deleted_recyclebin=FALSE
-		ORDER BY w.published_at DESC LIMIT $1 OFFSET $2`, pageSize, (page-1)*pageSize)
+		ORDER BY w.is_recommended DESC, w.published_at DESC LIMIT $1 OFFSET $2`, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -161,25 +161,34 @@ func (s *ContentStore) Revoke(ctx context.Context, workUUID string, note string,
 	return tx.Commit(ctx)
 }
 
-func (s *ContentStore) AuditList(ctx context.Context, page, pageSize int) ([]map[string]any, int, error) {
+func (s *ContentStore) AuditList(ctx context.Context, status string, page, pageSize int) ([]map[string]any, int, error) {
 	if page < 1 {
 		page = 1
 	}
+	if status == "" {
+		status = "PENDING"
+	}
 	var total int
-	s.pool.QueryRow(ctx, `SELECT count(*) FROM works WHERE publish_status='PENDING'`).Scan(&total)
+	s.pool.QueryRow(ctx, `SELECT count(*) FROM works WHERE publish_status=$1`, status).Scan(&total)
 	rows, err := s.pool.Query(ctx, `
-		SELECT work_uuid::text, title, COALESCE(description,''), COALESCE(media_url,'')
-		FROM works WHERE publish_status='PENDING' ORDER BY updated_at DESC LIMIT $1 OFFSET $2`,
-		pageSize, (page-1)*pageSize)
+		SELECT work_uuid::text, title, COALESCE(description,''), COALESCE(media_url,''), publish_status::text,
+		       to_char(updated_at AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD HH24:MI'),
+		       COALESCE(view_count,0), COALESCE(like_count,0)
+		FROM works WHERE publish_status=$1 ORDER BY updated_at DESC LIMIT $2 OFFSET $3`,
+		status, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer rows.Close()
 	out := make([]map[string]any, 0)
 	for rows.Next() {
-		var uuid, title, desc, media string
-		rows.Scan(&uuid, &title, &desc, &media)
-		out = append(out, map[string]any{"work_id": uuid, "title": title, "description": desc, "media_url": media})
+		var uuid, title, desc, media, st, updated string
+		var views, likes int
+		rows.Scan(&uuid, &title, &desc, &media, &st, &updated, &views, &likes)
+		out = append(out, map[string]any{
+			"work_id": uuid, "title": title, "description": desc, "media_url": media,
+			"publish_status": st, "updated_at": updated, "view_count": views, "like_count": likes,
+		})
 	}
 	return out, total, rows.Err()
 }

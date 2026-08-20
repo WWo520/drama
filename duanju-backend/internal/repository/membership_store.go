@@ -28,7 +28,7 @@ var _ creation.MembershipStore = (*MembershipStore)(nil)
 func (s *MembershipStore) GetMembership(ctx context.Context, userID int64) (map[string]any, error) {
 	var planCode, status, renew, endAt string
 	err := s.pool.QueryRow(ctx, `
-		SELECT plan_code::text, status::text, COALESCE(renew_strategy::text,''), COALESCE(current_period_end::text,'')
+		SELECT package_code, status::text, COALESCE(renew_strategy::text,''), COALESCE(current_period_end::text,'')
 		FROM user_memberships WHERE user_id=$1 AND status='ACTIVE' ORDER BY id DESC LIMIT 1`, userID).
 		Scan(&planCode, &status, &renew, &endAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -97,10 +97,23 @@ func (s *MembershipStore) Activate(ctx context.Context, orderNo string, requeste
 		UPDATE user_memberships SET status='EXPIRED' WHERE user_id=$1 AND status='ACTIVE'`, userID); err != nil {
 		return err
 	}
+	// package_code 反查 package_id（表结构要求 package_id NOT NULL FK）；
+	// 套餐码存 PACK_ 前缀（如 PACK_PRO），未命中时降级 PACK_FREE 避免激活失败
+	var pkgID int64
+	if err := tx.QueryRow(ctx, `
+		SELECT id FROM packages WHERE package_code='PACK_' || $1 AND status='ACTIVE' LIMIT 1`, planCode).
+		Scan(&pkgID); errors.Is(err, pgx.ErrNoRows) {
+		if err2 := tx.QueryRow(ctx, `
+			SELECT id FROM packages WHERE package_code='PACK_FREE' LIMIT 1`).Scan(&pkgID); err2 != nil {
+			return fmt.Errorf("未找到会员套餐 %s 且无免费兑底: %w", planCode, err2)
+		}
+	} else if err != nil {
+		return fmt.Errorf("未找到会员套餐 %s: %w", planCode, err)
+	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO user_memberships (user_id, plan_code, status, renew_strategy, start_at, current_period_end, total_cycles_paid, last_renew_order_id)
-		VALUES ($1, $2, 'ACTIVE', 'AUTO_RENEW', NOW(), NOW() + ($3 || ' days')::interval, 1, $4)`,
-		userID, planCode, days, oid); err != nil {
+		INSERT INTO user_memberships (user_id, package_id, package_code, status, renew_strategy, start_at, current_period_end, total_cycles_paid, last_renew_order_id)
+		VALUES ($1, $2, $3, 'ACTIVE', 'AUTO_RENEW', NOW(), NOW() + ($4 || ' days')::interval, 1, $5)`,
+		userID, pkgID, planCode, days, oid); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

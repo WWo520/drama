@@ -9,6 +9,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/duanju/backend/internal/engine/model"
 	"github.com/duanju/backend/internal/engine/task"
 )
 
@@ -28,15 +29,22 @@ type AssetTarget struct {
 	EpisodeID int64
 	AssetID   *int64
 	PointCost int
+	Prompt    string // 生成提示词（角色描述/场景 base_prompt/道具描述）
 }
 
 // AssetHandler 实现 task.Handler（三种资产生成任务）。
 type AssetHandler struct {
 	store AssetStore
+	engine ImageGenClient // 可为 nil：未注入时降级 mock（开发期）
 }
 
-func NewAssetHandler(store AssetStore) *AssetHandler {
-	return &AssetHandler{store: store}
+// ImageGenClient 图生模型能力（由 ModelEngine 实现注入）。
+type ImageGenClient interface {
+	GenerateImage(ctx context.Context, capability model.Capability, req *model.ImageRequest) (*model.ImageResponse, error)
+}
+
+func NewAssetHandler(store AssetStore, engine ImageGenClient) *AssetHandler {
+	return &AssetHandler{store: store, engine: engine}
 }
 
 // Name 支持的任务类型。
@@ -75,10 +83,28 @@ func (h *AssetHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 		return nil, err
 	}
 
-	// mock 图片生成（S1-B06 开发期：生成占位 URL；S1-B07 接入真实图生模型）
-	imageURL := fmt.Sprintf("https://mock.cdn.example.com/generated/%s/%d-%d.png",
-		params.TargetKind, params.TargetID, time.Now().UnixMilli())
-	log.Printf("asset: %s 生成 mock 图片 target=%d url=%s", params.TargetKind, params.TargetID, imageURL)
+	// 真实图生模型（B06 ModelEngine.GenerateImage）：配置了 T2I 厂商/Key 后走真实调用；
+	// 无配置或调用失败降级 mock 占位图（开发期链路保持可用）。
+	imageURL := ""
+	isMock := true
+	if h.engine != nil && target.Prompt != "" {
+		resp, gerr := h.engine.GenerateImage(ctx, model.CapT2I, &model.ImageRequest{
+			Prompt:      target.Prompt,
+			AspectRatio: "R9_16",
+			Resolution:  "1K",
+		})
+		if gerr == nil && resp.ImageURL != "" {
+			imageURL = resp.ImageURL
+			isMock = false
+		} else {
+			log.Printf("asset: 真实图生调用失败(%v)，降级 mock kind=%s target=%d", gerr, params.TargetKind, params.TargetID)
+		}
+	}
+	if imageURL == "" {
+		imageURL = fmt.Sprintf("%s/asset-placeholder.png?kind=%s&id=%d&t=%d",
+			mockCDNBase(), params.TargetKind, params.TargetID, time.Now().UnixMilli())
+	}
+	log.Printf("asset: %s 生成图片 target=%d url=%s is_mock=%v", params.TargetKind, params.TargetID, imageURL, isMock)
 
 	// 事务入库（generated_images + 业务表 + usage log）
 	if err := h.store.SaveGeneratedImage(ctx, target, imageURL, t.ID); err != nil {
@@ -88,7 +114,7 @@ func (h *AssetHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 		"image_url":   imageURL,
 		"target_kind": params.TargetKind,
 		"target_id":   params.TargetID,
-		"is_mock":     true,
+		"is_mock":     isMock,
 	})
 	return out, nil
 }

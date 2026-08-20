@@ -71,6 +71,7 @@ type VideoRequest struct {
 // VideoResponse 视频生成响应（异步任务提交后回调，返回外部任务 ID）。
 type VideoResponse struct {
 	ExternalTaskID string
+	VideoURL       string // 同步轮询模式下的结果地址（AsyncTaskProvider 轮询完成后填充）
 	ModelUsed      string
 	KeyID          int64
 }

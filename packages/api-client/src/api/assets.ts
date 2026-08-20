@@ -1,4 +1,4 @@
-// 资产域 API：角色列表 / 批量生成 / 预签名直传（TAG 3 · 3.2.2/3.2.19 + 3.4.4/3.4.5）。
+// 资产域 API：角色列表 / 批量生成 / 预签名直传（TAG 3 · 3.2.2/3.2.19 + 3.4.4/3.4.5）+ Step2 概览/场景/道具。
 import { api } from "../index";
 
 export interface CharacterItem {
@@ -10,6 +10,31 @@ export interface CharacterItem {
   main_image_url: string;
   generation_status: string; // PENDING / QUEUED / RUNNING / SUCCESS / FAILED
   origin_episode_id: number | null;
+}
+
+export interface SceneItem {
+  scene_id: number;
+  code: string;
+  base_name: string;
+  main_image_url: string;
+  generation_status: string;
+  point_cost: number;
+}
+
+export interface PropItem {
+  prop_id: number;
+  code: string;
+  name: string;
+  category: string;
+  main_image_url: string;
+  generation_status: string;
+  point_cost: number;
+}
+
+export interface AssetsOverview {
+  characters: { total: number; generated: number };
+  scenes: { total: number; generated: number };
+  props: { total: number; generated: number };
 }
 
 // 生成状态 → 徽章（对齐 02 A5 资产枚举）
@@ -45,6 +70,12 @@ export const assetsApi = {
   // 3.2.2 角色列表
   characters: (episodeId: string) =>
     api.get<{ items: CharacterItem[] }>(`/episodes/${episodeId}/characters`),
+  // Step2 资产概览（角色/场景/道具 总数与已生成数）
+  overview: (episodeId: string) => api.get<AssetsOverview>(`/episodes/${episodeId}/assets/overview`),
+  // 3.2.9 场景列表
+  scenes: (episodeId: string) => api.get<{ items: SceneItem[] }>(`/episodes/${episodeId}/scenes`),
+  // 3.2.14 道具列表
+  props: (episodeId: string) => api.get<{ items: PropItem[] }>(`/episodes/${episodeId}/props`),
   // 3.2.19 批量生成资产图
   batchGenerate: (req: BatchGenerateReq) =>
     api.post<{ task_uuids: string[]; created: number }>("/assets/batch-generate", req),

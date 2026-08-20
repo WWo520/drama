@@ -15,6 +15,7 @@ interface AuthState {
   accessToken: string | null;
   user: UserBrief | null;
   setAuth: (token: string, user: UserBrief) => void;
+  updateUser: (patch: Partial<UserBrief>) => void;
   clearAuth: () => void;
 }
 
@@ -24,6 +25,8 @@ export const useAuthStore = create<AuthState>()(
       accessToken: null,
       user: null,
       setAuth: (token, user) => set({ accessToken: token, user }),
+      updateUser: (patch) =>
+        set((s) => ({ user: s.user ? { ...s.user, ...patch } : s.user })),
       clearAuth: () => set({ accessToken: null, user: null }),
     }),
     { name: "duanju-auth" },

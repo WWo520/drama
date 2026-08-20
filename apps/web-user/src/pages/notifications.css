@@ -1,0 +1,404 @@
+/* 消息中心专属样式 —— 摘自 luxreal-clone/pages/notifications.html（批次 4）
+隔离说明：
+- shell 类（luxreal-nav-item/sidebar-avatar/profile-panel 等）与 home/works/feed/recharge.css 同源，生产合并无冲突
+- .luxreal-btn-ghost / .segmented-* 摘自 home.css（源出 colors_and_type.css）
+- 页面类（notification-item 全套）原样保留 */
+
+/* ===== Theme Tokens（同源 discover/works）===== */
+:root {
+  /* Brand prefix: luxreal */
+  --luxreal-background: #030911;
+  --luxreal-foreground: #F0F0F5;
+  --luxreal-card: #0D1119;
+  --luxreal-card-foreground: #E8E8F0;
+  --luxreal-popover: #111525;
+  --luxreal-popover-foreground: #F0F0F5;
+  --luxreal-primary: #4C7FF8;
+  --luxreal-primary-foreground: #FFFFFF;
+  --luxreal-muted: #0F1420;
+  --luxreal-muted-foreground: #6B7088;
+  --luxreal-border: #1A1F2E;
+  --luxreal-input: #0F1420;
+  --luxreal-ring: #4C7FF8;
+  --luxreal-accent: #131828;
+  --luxreal-accent-foreground: #F0F0F5;
+  --luxreal-destructive: #EF4444;
+  --luxreal-destructive-foreground: #FFFFFF;
+  --luxreal-success: #10B981;
+  --luxreal-warning: #F59E0B;
+
+  /* Radius scale */
+  --luxreal-radius-sm: 6px;
+  --luxreal-radius-md: 10px;
+  --luxreal-radius-lg: 16px;
+  --luxreal-radius-xl: 24px;
+  --luxreal-radius-full: 9999px;
+
+  /* Gradient accents */
+  --luxreal-gradient-neon: linear-gradient(135deg, #8B5CF6 0%, #4C7FF8 50%, #06B6D4 100%);
+  --luxreal-gradient-glow: linear-gradient(180deg, rgba(76,127,248,0.15) 0%, rgba(139,92,246,0.05) 100%);
+  --luxreal-gradient-card: linear-gradient(145deg, rgba(22,25,38,0.85) 0%, rgba(17,19,24,0.95) 100%);
+
+  /* Shadows */
+  --luxreal-shadow-glow: 0 0 30px rgba(76,127,248,0.15);
+  --luxreal-shadow-card: 0 4px 24px rgba(0,0,0,0.4);
+  --luxreal-shadow-elevated: 0 8px 40px rgba(0,0,0,0.5);
+
+  /* Sidebar */
+  --luxreal-sidebar: #0A0A14;
+  --luxreal-sidebar-foreground: #B0B0C8;
+  --luxreal-sidebar-accent: #4C7FF8;
+  --luxreal-sidebar-width: 72px;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--luxreal-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--luxreal-muted-foreground);
+}
+
+/* ===== Sidebar navigation item（同源 feed.css）===== */
+.luxreal-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--luxreal-radius-md);
+  color: var(--luxreal-sidebar-foreground);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  gap: 3px;
+  text-decoration: none;
+  font-size: 11px;
+  position: relative;
+}
+.luxreal-nav-item:hover {
+  color: var(--luxreal-foreground);
+  background: rgba(255,255,255,0.05);
+}
+.luxreal-nav-item.active {
+  color: var(--luxreal-primary);
+  background: rgba(59,130,246,0.12);
+}
+
+/* Sidebar Avatar */
+.sidebar-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+.sidebar-avatar:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 12px rgba(76, 127, 248, 0.4);
+}
+
+/* Sidebar Credits & Recharge */
+.sidebar-credits {
+    font-size: 13px;
+    font-weight: 500;
+    color: #F0F0F5;
+    line-height: 1.2;
+    margin: 4px 0 2px;
+    flex-shrink: 0;
+}
+.sidebar-recharge {
+    font-size: 12px;
+    font-weight: 500;
+    color: #fff;
+    background: linear-gradient(135deg, #A78BFA, #8B5CF6);
+    padding: 4px 12px;
+    border-radius: 9999px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+.sidebar-recharge:hover {
+    background: linear-gradient(135deg, #C4B5FD, #A78BFA);
+    transform: translateY(-1px);
+}
+
+/* Profile Panel */
+.profile-panel {
+    position: fixed;
+    top: 0;
+    left: 84px;
+    width: 240px;
+    background: #1A1A2E;
+    border: 1px solid #2A2A3E;
+    border-radius: 20px;
+    padding: 16px;
+    z-index: 100;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03) inset;
+}
+.profile-panel::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 50%;
+    transform: translateY(-50%) rotate(45deg);
+    width: 10px;
+    height: 10px;
+    background: #1A1A2E;
+    border-left: 1px solid #2A2A3E;
+    border-bottom: 1px solid #2A2A3E;
+}
+.profile-panel.hidden {
+    display: none;
+}
+.profile-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+.profile-avatar-lg {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 18px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+.profile-avatar-lg::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 12px;
+    height: 12px;
+    background: #22C55E;
+    border: 2px solid #1A1A2E;
+    border-radius: 50%;
+}
+.profile-info {
+    flex: 1;
+    min-width: 0;
+}
+.profile-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 2px;
+}
+.profile-id {
+    font-size: 12px;
+    color: #6B7088;
+}
+.profile-panel-divider {
+    height: 1px;
+    background: rgba(255,255,255,0.06);
+    margin: 12px 0;
+}
+.profile-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.profile-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    color: #C0C0CC;
+    font-size: 13px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.profile-menu-item:hover {
+    background: rgba(255,255,255,0.05);
+    color: #fff;
+}
+.profile-menu-item:hover .profile-menu-arrow {
+    color: #4C7FF8;
+    transform: translateX(2px);
+}
+.profile-menu-arrow {
+    margin-left: auto;
+    color: #4A4A5A;
+    transition: all 0.2s;
+}
+.profile-logout {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 10px;
+    color: #EF4444;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.profile-logout:hover {
+    background: rgba(239,68,68,0.1);
+}
+
+/* ===== Ghost button（摘自 home.css，源出 colors_and_type.css）===== */
+.luxreal-btn-ghost {
+  background: transparent;
+  color: var(--luxreal-muted-foreground);
+  border: none;
+  border-radius: var(--luxreal-radius-md);
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.luxreal-btn-ghost:hover {
+  color: var(--luxreal-foreground);
+  background: var(--luxreal-muted);
+}
+
+/* ===== Segmented tabs（摘自 colors_and_type.css L351-376）===== */
+.segmented-group {
+  display: inline-flex;
+  background: var(--luxreal-input);
+  border-radius: var(--luxreal-radius-full);
+  padding: 3px;
+  gap: 2px;
+}
+.segmented-btn {
+  background: transparent;
+  border: none;
+  color: var(--luxreal-muted-foreground);
+  font-size: 13px;
+  padding: 5px 14px;
+  border-radius: var(--luxreal-radius-full);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.segmented-btn:hover:not(.active) {
+  color: var(--luxreal-foreground);
+}
+.segmented-btn.active {
+  background: var(--luxreal-primary);
+  color: white;
+}
+
+/* ===== 页面专属（notifications.html L261-351）===== */
+/* Notification Item */
+.notification-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 16px 18px;
+    border-radius: var(--luxreal-radius-lg);
+    background: var(--luxreal-card);
+    border: 1px solid var(--luxreal-border);
+    margin-bottom: 8px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+.notification-item:hover {
+    border-color: rgba(76, 127, 248, 0.3);
+    background: #0F1420;
+}
+
+.notification-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.icon-system {
+    background: rgba(76, 127, 248, 0.15);
+    color: #4C7FF8;
+}
+.icon-success {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10B981;
+}
+.icon-video {
+    background: rgba(139, 92, 246, 0.15);
+    color: #8B5CF6;
+}
+
+.notification-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.notification-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.notification-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--luxreal-foreground);
+    line-height: 1.4;
+}
+
+.unread-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--luxreal-primary);
+    flex-shrink: 0;
+}
+
+.notification-preview {
+    font-size: 13px;
+    color: var(--luxreal-muted-foreground);
+    margin: 0;
+    line-height: 1.5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.notification-time {
+    font-size: 12px;
+    color: var(--luxreal-muted-foreground);
+    opacity: 0.7;
+    margin-top: 2px;
+}
+
+/* Mark all read button transition */
+#markAllReadBtn {
+    transition: all 0.2s ease;
+}

@@ -28,7 +28,15 @@ func NewModelKeyStore(pool *pgxpool.Pool, encKey []byte, fallbackMock bool) *Mod
 // AvailableKeys 返回指定能力（+可选指定模型）的可用 Key（按 priority 降序）。
 func (s *ModelKeyStore) AvailableKeys(ctx context.Context, capability model.Capability, modelKey string) ([]*model.KeyCredential, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT mk.id, mp.name, mk.name, mk.key_encrypted, mp.base_url,
+		SELECT mk.id, mp.name,
+		       COALESCE(
+		           (SELECT m.model_key FROM models m
+		            WHERE m.provider_id = mp.id AND m.capability::text = $1::text
+		              AND m.enabled AND m.deleted_at IS NULL
+		            LIMIT 1),
+		           mk.name
+		       ) AS model_key,
+		       mk.key_encrypted, mp.base_url,
 		       mk.concurrent_limit, mk.priority, mk.enabled
 		FROM model_keys mk
 		JOIN model_providers mp ON mp.id = mk.provider_id

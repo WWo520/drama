@@ -1,0 +1,202 @@
+/* Step4 成片预览页专属样式 —— 摘自 luxreal-clone/pages/workbench-preview.html（批次 3）
+   隔离说明：.toggle→.pv-toggle、.modal-overlay→.pv-modal-overlay 重命名，
+   避免与 shell.css（画布 toggle / modal-overlay）在生产合并时冲突；其余类名原样保留。 */
+
+/* === PREVIEW TOGGLE (renamed from .toggle) === */
+.pv-toggle {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    background: #2A2A35;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.2s;
+    flex-shrink: 0;
+}
+.pv-toggle.on {
+    background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+}
+.pv-toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+.pv-toggle.on::after {
+    transform: translateX(16px);
+}
+
+/* === PLAYER === */
+@keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.1); }
+    50% { box-shadow: 0 0 0 12px rgba(255,255,255,0); }
+}
+.play-btn {
+    animation: pulse-glow 2s infinite;
+}
+.video-bg {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 30%, #0f3460 60%, #1a1a2e 100%);
+}
+.seg-btn {
+    transition: all 0.15s;
+}
+.seg-btn.active {
+    background: #2A2A4A;
+    color: #4C7FF8;
+}
+.version-active {
+    border: 1px solid #2A3A5A !important;
+}
+
+/* === NARRATIVE UNIT TIMELINE === */
+.timeline-container {
+    width: 100%;
+    max-width: 680px;
+    margin: 0 auto 20px;
+    background: #16161C;
+    border: 1px solid #252530;
+    border-radius: 12px;
+    padding: 12px;
+    overflow-x: auto;
+    flex-shrink: 0; /* 验收修复：父级为可滚动 flex 列，防止被压缩裁切 */
+    scrollbar-width: thin;
+    scrollbar-color: #2A2A35 transparent;
+}
+.timeline-container::-webkit-scrollbar {
+    height: 4px;
+}
+.timeline-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+.timeline-container::-webkit-scrollbar-thumb {
+    background: #2A2A35;
+    border-radius: 2px;
+}
+.timeline-track {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    min-width: max-content;
+}
+.timeline-unit {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-shrink: 0;
+}
+.timeline-unit-card {
+    background: #1E1E24;
+    border: 1px solid #2A2A35;
+    border-radius: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    min-width: 110px;
+}
+.timeline-unit-card:hover {
+    border-color: #3A3A4A;
+}
+.timeline-unit-card.active {
+    border-color: #4C7FF8;
+    background: rgba(76, 127, 248, 0.08);
+    box-shadow: 0 0 12px rgba(76, 127, 248, 0.15);
+}
+.timeline-unit-number {
+    font-size: 10px;
+    color: #6B7088;
+    font-weight: 500;
+    margin-bottom: 2px;
+}
+.timeline-unit-card.active .timeline-unit-number {
+    color: #4C7FF8;
+}
+.timeline-unit-title {
+    font-size: 11px;
+    color: #C0C0CC;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 90px;
+    margin-bottom: 2px;
+}
+.timeline-unit-card.active .timeline-unit-title {
+    color: #fff;
+}
+.timeline-unit-duration {
+    font-size: 10px;
+    color: #6B7088;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+.timeline-connector {
+    width: 12px;
+    height: 1px;
+    background: #2A2A35;
+    flex-shrink: 0;
+}
+
+/* === MODAL OVERLAY (renamed from .modal-overlay) === */
+.pv-modal-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+}
+
+/* === EXPORT HISTORY ROW（导出历史：后端实体，设计稿无对应区块，按页面色系补充） === */
+.export-history-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #16161C;
+    border: 1px solid #252530;
+    border-radius: 10px;
+    padding: 10px 14px;
+}
+.export-history-row + .export-history-row {
+    margin-top: 8px;
+}
+.export-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    flex-shrink: 0;
+}
+.export-badge.pending {
+    background: rgba(245, 158, 11, 0.12);
+    color: #F59E0B;
+}
+.export-badge.success {
+    background: rgba(16, 185, 129, 0.12);
+    color: #10B981;
+}
+.export-badge.failed {
+    background: rgba(239, 68, 68, 0.12);
+    color: #EF4444;
+}
+.btn-export-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: #10B981;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    padding: 4px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.15s;
+}
+.btn-export-download:hover {
+    background: rgba(16, 185, 129, 0.18);
+}

@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>平台配置 - Empty Broken 管理后台</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          'bg-deep': '#0B0B1A',
+          'bg-card': '#151525',
+          'bg-card-light': '#1A1A2E',
+          'border-dark': '#2A2A3E',
+          'amber-gold': '#fbbf24',
+          'amber-dim': '#d97706',
+          'text-primary': '#ffffff',
+          'text-secondary': '#9ca3af',
+          'text-muted': '#6b7280',
+        },
+        fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+      }
+    }
+  }
+</script>
+<style>
+  * { box-sizing: border-box; }
+  body { background: #0B0B1A; color: #fff; font-family: 'Inter', system-ui, sans-serif; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #151525; }
+  ::-webkit-scrollbar-thumb { background: #2A2A3E; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3a4e; }
+  .menu-item.active {
+    background: linear-gradient(90deg, rgba(251,191,36,0.15) 0%, rgba(251,191,36,0.05) 100%);
+    color: #fbbf24; border-left: 3px solid #fbbf24;
+  }
+  .menu-item.active svg { color: #fbbf24; }
+  .menu-item:hover { background: rgba(255,255,255,0.05); }
+  .notif-dot { position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; border: 2px solid #0D0D0D; }
+  .config-section:hover { border-color: rgba(251,191,36,0.3); }
+  .input-field {
+    background: #0B0B1A; border: 1px solid #2A2A3E; border-radius: 8px;
+    padding: 8px 12px; font-size: 13px; color: #fff; width: 100%;
+    transition: border-color 0.2s;
+  }
+  .input-field:focus { outline: none; border-color: rgba(251,191,36,0.5); }
+  .input-field::placeholder { color: #6b7280; }
+  .switch { position: relative; width: 40px; height: 22px; display: inline-block; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #2A2A3E; transition: .3s; border-radius: 22px;
+  }
+  .slider:before {
+    position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px;
+    background-color: #9ca3af; transition: .3s; border-radius: 50%;
+  }
+  input:checked + .slider { background-color: rgba(251,191,36,0.3); }
+  input:checked + .slider:before { transform: translateX(18px); background-color: #fbbf24; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="flex min-h-screen">
+
+  <!-- SIDEBAR -->
+  <aside class="w-[240px] bg-[#0D0D0D] border-r border-[#2A2A3E] flex flex-col flex-shrink-0 fixed h-full z-20">
+    <div class="h-[60px] flex items-center px-5 border-b border-[#2A2A3E]">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center mr-3">
+        <svg class="w-5 h-5 text-[#0B0B1A]" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      </div>
+      <span class="text-white font-bold text-lg">Empty Broken <span class="text-amber-gold">Admin</span></span>
+    </div>
+    <nav class="flex-1 py-4 overflow-y-auto">
+      <div class="px-3 mb-2 text-[11px] text-text-muted uppercase tracking-wider font-medium">主菜单</div>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="layout-dashboard" class="w-[18px] h-[18px] mr-3"></i><span>工作台</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="users" class="w-[18px] h-[18px] mr-3"></i><span>用户管理</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="shield-check" class="w-[18px] h-[18px] mr-3"></i><span>内容审核</span>
+        <span class="ml-auto text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">12</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="film" class="w-[18px] h-[18px] mr-3"></i><span>作品管理</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="wallet" class="w-[18px] h-[18px] mr-3"></i><span>计费财务</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="cpu" class="w-[18px] h-[18px] mr-3"></i><span>算力任务</span>
+        <span class="ml-auto text-[10px] bg-amber-gold/20 text-amber-gold px-2 py-0.5 rounded-full">34</span>
+      </a>
+      <a href="#" class="menu-item active flex items-center px-5 py-3 text-sm cursor-pointer">
+        <i data-lucide="settings" class="w-[18px] h-[18px] mr-3"></i><span>平台配置</span>
+      </a>
+    </nav>
+    <div class="p-4 border-t border-[#2A2A3E]">
+      <div class="flex items-center">
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center text-[#0B0B1A] font-bold text-sm">A</div>
+        <div class="ml-3 flex-1 min-w-0">
+          <div class="text-sm font-medium text-white truncate">Admin</div>
+          <div class="text-xs text-text-muted truncate">超级管理员</div>
+        </div>
+        <i data-lucide="chevron-up" class="w-4 h-4 text-text-muted"></i>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="flex-1 ml-[240px] flex flex-col min-w-0">
+
+    <!-- TOP BAR -->
+    <header class="h-[60px] bg-[#0D0D0D]/80 backdrop-blur-sm border-b border-[#2A2A3E] flex items-center justify-between px-6 sticky top-0 z-10">
+      <div class="flex items-center">
+        <i data-lucide="home" class="w-4 h-4 text-text-muted mr-2"></i>
+        <span class="text-text-muted text-sm">管理后台</span>
+        <i data-lucide="chevron-right" class="w-4 h-4 text-text-muted mx-2"></i>
+        <span class="text-white text-sm font-medium">平台配置</span>
+      </div>
+      <div class="flex items-center gap-4">
+        <button class="relative w-9 h-9 rounded-lg bg-bg-card border border-[#2A2A3E] flex items-center justify-center hover:border-[#3A3A4E] transition-colors">
+          <i data-lucide="bell" class="w-4 h-4 text-text-secondary"></i><span class="notif-dot"></span>
+        </button>
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center text-[#0B0B1A] font-bold text-sm cursor-pointer">A</div>
+      </div>
+    </header>
+
+    <!-- CONTENT -->
+    <main class="flex-1 p-6">
+
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">平台配置</h1>
+          <p class="text-text-muted text-sm mt-1">管理平台基础设置、会员套餐、AI 模型参数等全局配置</p>
+        </div>
+        <div class="flex gap-3">
+          <button class="px-4 py-2 bg-bg-card border border-[#2A2A3E] rounded-lg text-sm text-text-secondary hover:border-[#3A3A4E] transition-colors">重置默认</button>
+          <button class="px-4 py-2 bg-amber-gold text-[#0B0B1A] rounded-lg text-sm font-semibold hover:bg-amber-400 transition-colors flex items-center gap-2">
+            <i data-lucide="save" class="w-4 h-4"></i>保存配置
+          </button>
+        </div>
+      </div>
+
+      <div class="flex gap-6">
+
+        <!-- Left: Vertical tabs -->
+        <div class="w-48 flex-shrink-0">
+          <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-2 sticky top-20">
+            <button class="w-full flex items-center px-3 py-2.5 rounded-lg bg-amber-gold/10 text-amber-gold text-sm font-medium">
+              <i data-lucide="globe" class="w-4 h-4 mr-3"></i>基础设置
+            </button>
+            <button class="w-full flex items-center px-3 py-2.5 rounded-lg text-text-secondary hover:bg-white/5 text-sm">
+              <i data-lucide="crown" class="w-4 h-4 mr-3"></i>会员套餐
+            </button>
+            <button class="w-full flex items-center px-3 py-2.5 rounded-lg text-text-secondary hover:bg-white/5 text-sm">
+              <i data-lucide="cpu" class="w-4 h-4 mr-3"></i>AI 模型配置
+            </button>
+            <button class="w-full flex items-center px-3 py-2.5 rounded-lg text-text-secondary hover:bg-white/5 text-sm">
+              <i data-lucide="wallet" class="w-4 h-4 mr-3"></i>支付配置
+            </button>
+            <button class="w-full flex items-center px-3 py-2.5 rounded-lg text-text-secondary hover:bg-white/5 text-sm">
+              <i data-lucide="mail" class="w-4 h-4 mr-3"></i>通知设置
+            </button>
+            <button class="w-full flex items-center px-3 py-2.5 rounded-lg text-text-secondary hover:bg-white/5 text-sm">
+              <i data-lucide="shield" class="w-4 h-4 mr-3"></i>安全设置
+            </button>
+            <button class="w-full flex items-center px-3 py-2.5 rounded-lg text-text-secondary hover:bg-white/5 text-sm">
+              <i data-lucide="file-text" class="w-4 h-4 mr-3"></i>协议管理
+            </button>
+            <button class="w-full flex items-center px-3 py-2.5 rounded-lg text-text-secondary hover:bg-white/5 text-sm">
+              <i data-lucide="palette" class="w-4 h-4 mr-3"></i>外观定制
+            </button>
+          </div>
+        </div>
+
+        <!-- Right: Config panels -->
+        <div class="flex-1 space-y-5">
+
+          <!-- 基础信息 -->
+          <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5 config-section transition-colors">
+            <div class="flex items-center gap-3 mb-5">
+              <div class="w-10 h-10 rounded-lg bg-amber-gold/10 flex items-center justify-center">
+                <i data-lucide="globe" class="w-5 h-5 text-amber-gold"></i>
+              </div>
+              <div>
+                <h3 class="text-white font-semibold">基础信息</h3>
+                <p class="text-text-muted text-xs">平台名称、Logo、域名等基础配置</p>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-5">
+              <div><label class="block text-sm text-text-secondary mb-1.5">平台名称</label><input type="text" class="input-field" value="Empty Broken"></div>
+              <div><label class="block text-sm text-text-secondary mb-1.5">平台副标题</label><input type="text" class="input-field" value="AI 驱动的短剧创作平台"></div>
+              <div><label class="block text-sm text-text-secondary mb-1.5">主域名</label><input type="text" class="input-field" value="emptybroken.com"></div>
+              <div><label class="block text-sm text-text-secondary mb-1.5">备案号</label><input type="text" class="input-field" value="京ICP备2026000000号"></div>
+              <div class="col-span-2">
+                <label class="block text-sm text-text-secondary mb-1.5">平台 Logo</label>
+                <div class="flex items-center gap-4">
+                  <div class="w-16 h-16 rounded-xl bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center">
+                    <svg class="w-8 h-8 text-[#0B0B1A]" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                  </div>
+                  <div>
+                    <button class="px-4 py-2 bg-bg-deep border border-[#2A2A3E] rounded-lg text-sm text-white hover:border-[#3A3A4E] transition-colors">上传 Logo</button>
+                    <p class="text-xs text-text-muted mt-1">推荐尺寸 512x512 PNG，透明背景</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 功能开关 -->
+          <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5 config-section transition-colors">
+            <div class="flex items-center gap-3 mb-5">
+              <div class="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
+                <i data-lucide="toggle-left" class="w-5 h-5 text-green-400"></i>
+              </div>
+              <div>
+                <h3 class="text-white font-semibold">功能开关</h3>
+                <p class="text-text-muted text-xs">开启或关闭平台各项功能模块</p>
+              </div>
+            </div>
+            <div class="space-y-4">
+              <div class="flex items-center justify-between py-2 border-b border-[#2A2A3E]/50">
+                <div><div class="text-sm text-white">用户注册</div><div class="text-xs text-text-muted">允许新用户注册账号</div></div>
+                <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+              </div>
+              <div class="flex items-center justify-between py-2 border-b border-[#2A2A3E]/50">
+                <div><div class="text-sm text-white">内容审核</div><div class="text-xs text-text-muted">作品发布前需经过审核</div></div>
+                <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+              </div>
+              <div class="flex items-center justify-between py-2 border-b border-[#2A2A3E]/50">
+                <div><div class="text-sm text-white">评论功能</div><div class="text-xs text-text-muted">允许用户对作品发表评论</div></div>
+                <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+              </div>
+              <div class="flex items-center justify-between py-2 border-b border-[#2A2A3E]/50">
+                <div><div class="text-sm text-white">社区发现页</div><div class="text-xs text-text-muted">展示公开作品的发现广场</div></div>
+                <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+              </div>
+              <div class="flex items-center justify-between py-2 border-b border-[#2A2A3E]/50">
+                <div><div class="text-sm text-white">邀请注册</div><div class="text-xs text-text-muted">仅允许通过邀请码注册</div></div>
+                <label class="switch"><input type="checkbox"><span class="slider"></span></label>
+              </div>
+              <div class="flex items-center justify-between py-2">
+                <div><div class="text-sm text-white">维护模式</div><div class="text-xs text-text-muted">开启后前台仅显示维护公告</div></div>
+                <label class="switch"><input type="checkbox"><span class="slider"></span></label>
+              </div>
+            </div>
+          </div>
+
+          <!-- AI 生成限制 -->
+          <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5 config-section transition-colors">
+            <div class="flex items-center gap-3 mb-5">
+              <div class="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                <i data-lucide="cpu" class="w-5 h-5 text-purple-400"></i>
+              </div>
+              <div>
+                <h3 class="text-white font-semibold">AI 生成限制</h3>
+                <p class="text-text-muted text-xs">免费用户每日生成额度与速率限制</p>
+              </div>
+            </div>
+            <div class="grid grid-cols-3 gap-5">
+              <div><label class="block text-sm text-text-secondary mb-1.5">每日免费次数</label><input type="number" class="input-field" value="5"></div>
+              <div><label class="block text-sm text-text-secondary mb-1.5">单视频最大时长(秒)</label><input type="number" class="input-field" value="300"></div>
+              <div><label class="block text-sm text-text-secondary mb-1.5">并发任务数</label><input type="number" class="input-field" value="2"></div>
+              <div><label class="block text-sm text-text-secondary mb-1.5">单次消耗积分(视频)</label><input type="number" class="input-field" value="50"></div>
+              <div><label class="block text-sm text-text-secondary mb-1.5">单次消耗积分(配音)</label><input type="number" class="input-field" value="10"></div>
+              <div><label class="block text-sm text-text-secondary mb-1.5">单次消耗积分(封面)</label><input type="number" class="input-field" value="5"></div>
+            </div>
+          </div>
+
+          <!-- 存储配置 -->
+          <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5 config-section transition-colors">
+            <div class="flex items-center gap-3 mb-5">
+              <div class="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                <i data-lucide="database" class="w-5 h-5 text-blue-400"></i>
+              </div>
+              <div>
+                <h3 class="text-white font-semibold">存储配置</h3>
+                <p class="text-text-muted text-xs">OSS 对象存储与 CDN 设置</p>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-5">
+              <div>
+                <label class="block text-sm text-text-secondary mb-1.5">存储服务商</label>
+                <select class="input-field">
+                  <option>阿里云 OSS</option><option>腾讯云 COS</option><option>七牛云 Kodo</option><option>AWS S3</option>
+                </select>
+              </div>
+              <div><label class="block text-sm text-text-secondary mb-1.5">存储区域</label><input type="text" class="input-field" value="oss-cn-beijing"></div>
+              <div><label class="block text-sm text-text-secondary mb-1.5">Bucket 名称</label><input type="text" class="input-field" value="emptybroken-prod"></div>
+              <div><label class="block text-sm text-text-secondary mb-1.5">CDN 域名</label><input type="text" class="input-field" value="cdn.emptybroken.com"></div>
+              <div class="col-span-2"><label class="block text-sm text-text-secondary mb-1.5">单用户存储空间(GB)</label><input type="number" class="input-field" value="10"></div>
+            </div>
+          </div>
+
+          <!-- 操作按钮 -->
+          <div class="flex justify-end gap-3 pt-2">
+            <button class="px-6 py-2.5 bg-bg-card border border-[#2A2A3E] rounded-lg text-sm text-text-secondary hover:border-[#3A3A4E] transition-colors">取消</button>
+            <button class="px-6 py-2.5 bg-amber-gold text-[#0B0B1A] rounded-lg text-sm font-semibold hover:bg-amber-400 transition-colors flex items-center gap-2">
+              <i data-lucide="save" class="w-4 h-4"></i>保存所有配置
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script>lucide.createIcons();</script>
+</body>
+</html>

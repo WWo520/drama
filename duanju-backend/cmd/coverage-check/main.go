@@ -1,5 +1,6 @@
-// 接口覆盖率核对：05 接口文档（OpenAPI YAML）路径 vs 后端注册路由。
-// 输出：文档路径数 / 后端路由数 / 未实现清单。
+// 接口覆盖率核对：05 接口文档（OpenAPI YAML）路径 vs 后端注册路由（双向）。
+// 输出：文档路径数 / 后端路由数 / 未实现清单（文档有→后端无）/ 未登记清单（后端有→文档无）。
+// 退出码：单向 MISS 非零退出（未登记 UNREG 仅提示，不阻断，便于增量回填）。
 package main
 
 import (
@@ -63,7 +64,7 @@ func main() {
 		}
 	}
 
-	// 3. 对比
+	// 3. 对比（双向）
 	missing := []string{}
 	for p := range docPaths {
 		if !backend[p] {
@@ -71,9 +72,22 @@ func main() {
 		}
 	}
 	sort.Strings(missing)
-	fmt.Printf("接口文档端点: %d | 后端路由: %d | 未实现: %d\n", len(docPaths), len(backend), len(missing))
+	unregistered := []string{}
+	for p := range backend {
+		if !docPaths[p] {
+			unregistered = append(unregistered, p)
+		}
+	}
+	sort.Strings(unregistered)
+	fmt.Printf("接口文档端点: %d | 后端路由: %d | 未实现: %d | 未登记: %d\n", len(docPaths), len(backend), len(missing), len(unregistered))
 	for _, m := range missing {
 		fmt.Println("  MISS:", m)
+	}
+	for _, u := range unregistered {
+		fmt.Println("  UNREG:", u)
+	}
+	if len(missing) > 0 {
+		os.Exit(1)
 	}
 }
 

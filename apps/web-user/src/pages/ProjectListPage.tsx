@@ -1,284 +1,491 @@
-// S1-F02 项目列表页：卡片列表 + 创建对话框 + 删除确认 + 状态徽章（3.0.1~3.0.7）。
+// 作品列表页（批次4：设计稿 works.html 迁移，DOM 1:1）
+// CSS 原样提取 → src/pages/works.css（theme tokens + shell 类 + 页面类）
+// 接口对接：GET /projects（分页）、PUT /projects/:id（重命名）、DELETE /projects/:id（软删）、
+//           POST /projects/:id/last-opened（touch）、GET /points（侧栏积分）
+// 左侧 72px 侧边栏照搬设计稿（与 HomePage 同模式，批次后续抽共享布局）
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import {
+  ChevronLeft, ChevronRight, Compass, Copy, Download, Edit3, Folder, FolderOpen,
+  Loader2, MoreHorizontal, Play, Plus, RefreshCw,
+  Sparkles, Trash2, X,
+} from "lucide-react";
 
 import {
-  projectsApi,
-  ProjectStatusMeta,
-  type ProjectSummary,
-  type ProjectStatusValue,
+  api, ApiError, errorMessage,
+  projectsApi, ProjectStatus,
+  type Paginated, type ProjectSummary,
 } from "@duanju/api-client";
+import { useAuthStore } from "../stores/authStore";
+import ProfilePanel from "../components/ProfilePanel";
+import { useAvatarUrl } from "../hooks/useAvatarUrl";
+import "./works.css";
 
-// 状态徽章色调
-const toneClass: Record<string, string> = {
-  gold: "bg-amber-400/15 text-amber-300 border-amber-400/30",
-  violet: "bg-violet-400/15 text-violet-300 border-violet-400/30",
-  blue: "bg-sky-400/15 text-sky-300 border-sky-400/30",
-  green: "bg-emerald-400/15 text-emerald-300 border-emerald-400/30",
-  gray: "bg-slate-400/15 text-slate-300 border-slate-400/30",
+const PAGE_SIZE = 20;
+
+// 已完成态（视频成片 Tab 过滤 + 绿色徽章）
+const DONE_STATUSES = new Set<string>([
+  ProjectStatus.ALL_VIDEOS_READY, ProjectStatus.EXPORTING, ProjectStatus.COMPLETED,
+]);
+// 生成中态（蓝色徽章 + 进度条）；进度为前端估值（后端暂无进度字段）
+const GEN_PROGRESS: Record<string, number> = {
+  [ProjectStatus.SCRIPT_SPLITTING]: 15,
+  [ProjectStatus.VIDEO_GENERATING]: 60,
+  [ProjectStatus.PARTIAL_VIDEOS]: 80,
 };
 
-function StatusBadge({ status }: { status: ProjectStatusValue }) {
-  const meta = ProjectStatusMeta[status] ?? { label: status, tone: "gray" as const };
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${toneClass[meta.tone]}`}
-    >
-      {meta.label}
-    </span>
-  );
+type BadgeKind = "completed" | "generating" | "failed" | "draft";
+
+function badgeOf(status: string): { kind: BadgeKind; label: string } {
+  if (DONE_STATUSES.has(status)) return { kind: "completed", label: "已完成" };
+  if (status in GEN_PROGRESS) return { kind: "generating", label: "生成中" };
+  if (status === ProjectStatus.SCRIPT_SPLIT_FAILED) return { kind: "failed", label: "失败" };
+  return { kind: "draft", label: "草稿" };
 }
 
-// 时长格式化：秒 → mm:ss
+// 日期 → YYYY-MM-DD（对齐设计稿卡片日期格式）
+function fmtDate(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// 时长 → mm:ss（对齐设计稿 duration-badge）
 function fmtDuration(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
 export default function ProjectListPage() {
-  const nav = useNavigate();
+  const navigate = useNavigate();
+  const { user } = useAuthStore();
+  const avatarUrl = useAvatarUrl(user?.avatar_url);
+
+  const [tab, setTab] = useState<"project" | "canvas" | "video">("project");
   const [items, setItems] = useState<ProjectSummary[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
-  const [title, setTitle] = useState("");
-  const [script, setScript] = useState("");
-  const [toast, setToast] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<ProjectSummary | null>(null);
+  const [points, setPoints] = useState<number | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+
+  // 卡片 … 下拉菜单 / 重命名 / 删除
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [renameTarget, setRenameTarget] = useState<ProjectSummary | null>(null);
+  const [renameVal, setRenameVal] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ProjectSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2500);
-  }, []);
-
-  const load = useCallback(async () => {
+  const load = useCallback(async (p: number) => {
     try {
       setLoading(true);
-      const data = await projectsApi.list();
+      const data: Paginated<ProjectSummary> = await projectsApi.list(p, PAGE_SIZE);
       setItems(data.items);
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "加载失败");
+      setTotalPages(Math.max(1, data.pagination.total_pages));
+    } catch (err) {
+      toast.error(err instanceof ApiError ? errorMessage(err.code, err.message) : "加载失败");
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void load(page);
+  }, [load, page]);
 
-  // 创建项目 → 创建即进 Step1（S1-F02 验收）
-  const handleCreate = async () => {
-    if (!title.trim()) {
-      showToast("请输入项目名称");
-      return;
-    }
+  // 侧栏积分余额（与 HomePage 同源）
+  useEffect(() => {
+    (async () => {
+      try {
+        const acc = await api.get<{ current_balance: number }>("/points");
+        setPoints(acc.current_balance);
+      } catch {
+        /* 积分失败不阻塞页面 */
+      }
+    })();
+  }, []);
+
+  // 点击菜单外区域关闭下拉菜单
+  useEffect(() => {
+    if (!menuFor) return;
+    const onDocDown = (e: MouseEvent) => {
+      const el = e.target as HTMLElement;
+      if (!el.closest(".card-dropdown-menu") && !el.closest(".card-menu-btn")) {
+        setMenuFor(null);
+      }
+    };
+    document.addEventListener("mousedown", onDocDown);
+    return () => document.removeEventListener("mousedown", onDocDown);
+  }, [menuFor]);
+
+  const openProject = (p: ProjectSummary) => {
+    void projectsApi.touch(p.project_id).catch(() => undefined);
+    navigate(`/projects/${p.project_id}/step/1`);
+  };
+
+  // 重命名：PUT /projects/:id
+  const submitRename = async () => {
+    if (!renameTarget || !renameVal.trim()) return;
     try {
-      setCreating(true);
-      const data = await projectsApi.create({
-        title: title.trim(),
-        source_script_text: script.trim() || undefined,
-      });
-      showToast("项目创建成功");
-      setShowCreate(false);
-      setTitle("");
-      setScript("");
-      nav(`/projects/${data.project_id}`);
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "创建失败");
+      setRenaming(true);
+      await projectsApi.update(renameTarget.project_id, { title: renameVal.trim() });
+      toast.success("已重命名");
+      setRenameTarget(null);
+      void load(page);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? errorMessage(err.code, err.message) : "重命名失败");
     } finally {
-      setCreating(false);
+      setRenaming(false);
     }
   };
 
-  const handleDelete = async () => {
-    if (!confirmDelete) return;
+  // 删除：DELETE /projects/:id（软删）
+  const submitDelete = async () => {
+    if (!deleteTarget) return;
     try {
       setDeleting(true);
-      await projectsApi.remove(confirmDelete.project_id);
-      showToast("项目已删除");
-      setConfirmDelete(null);
-      void load();
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "删除失败");
+      await projectsApi.remove(deleteTarget.project_id);
+      toast.success("项目已删除");
+      setDeleteTarget(null);
+      void load(page);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? errorMessage(err.code, err.message) : "删除失败");
     } finally {
       setDeleting(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-[#0B0B1A] text-slate-100">
-      {/* 顶栏 */}
-      <header className="sticky top-0 z-10 border-b border-white/5 bg-[#0B0B1A]/80 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 text-sm font-bold text-black">
-              剧
-            </div>
-            <h1 className="text-lg font-semibold tracking-wide text-slate-100">我的作品</h1>
-          </div>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="rounded-lg bg-gradient-to-r from-amber-400 to-amber-500 px-5 py-2 text-sm font-semibold text-black shadow-lg shadow-amber-500/20 transition hover:from-amber-300 hover:to-amber-400"
-          >
-            + 新建项目
-          </button>
-        </div>
-      </header>
+  // 视频成片 Tab：客户端按已完成状态过滤当前页数据
+  const visibleItems = tab === "video" ? items.filter((p) => DONE_STATUSES.has(p.status)) : items;
 
-      <main className="mx-auto max-w-6xl px-6 py-8">
-        {loading ? (
-          <div className="flex h-64 items-center justify-center text-sm text-slate-400">
-            加载中…
+  // 分页页码序列（对齐设计稿：1 2 3 ... 末页）
+  const pageSeq: (number | "…")[] = (() => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    if (page <= 4) return [1, 2, 3, 4, 5, "…", totalPages];
+    if (page >= totalPages - 3) return [1, "…", totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+    return [1, "…", page - 1, page, page + 1, "…", totalPages];
+  })();
+
+  const renderCard = (p: ProjectSummary, idx: number) => {
+    const badge = badgeOf(p.status);
+    const progress = GEN_PROGRESS[p.status];
+    return (
+      <div key={p.project_id} className="project-card" onClick={() => openProject(p)}>
+        <div className="project-thumb">
+          <div className={`project-thumb-gradient thumb-${(idx % 16) + 1}`} />
+          <div className="card-highlight" />
+          <span className={`status-badge status-${badge.kind}`}>{badge.label}</span>
+          {badge.kind === "completed" && p.total_duration_sec > 0 && (
+            <span className="duration-badge">{fmtDuration(p.total_duration_sec)}</span>
+          )}
+          <button
+            className="card-menu-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuFor(menuFor === p.project_id ? null : p.project_id);
+            }}
+            aria-label="更多操作"
+          >
+            <MoreHorizontal size={16} />
+          </button>
+          <div className="play-overlay">
+            {badge.kind === "generating" ? (
+              <div className="play-btn" style={{ opacity: 0.5 }}>
+                <Loader2 size={20} className="animate-spin text-white" />
+              </div>
+            ) : badge.kind === "failed" ? (
+              <div className="play-btn" style={{ borderColor: "rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.15)" }}>
+                <RefreshCw size={20} className="text-white" />
+              </div>
+            ) : (
+              <div className="play-btn">
+                <Play size={20} className="ml-0.5 text-white" />
+              </div>
+            )}
           </div>
-        ) : items.length === 0 ? (
-          <div className="flex h-72 flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-white/10">
-            <p className="text-sm text-slate-400">还没有作品，创建你的第一部短剧吧</p>
-            <button
-              onClick={() => setShowCreate(true)}
-              className="rounded-lg border border-amber-400/40 px-4 py-2 text-sm text-amber-300 transition hover:bg-amber-400/10"
+          {/* 卡片 … 下拉菜单（works.css 锚定卡片内右上角） */}
+          {menuFor === p.project_id && (
+            <div className="card-dropdown-menu" onClick={(e) => e.stopPropagation()}>
+              <button className="card-menu-item" onClick={() => openProject(p)}>
+                <FolderOpen size={14} />
+                <span>打开项目</span>
+              </button>
+              <button
+                className="card-menu-item"
+                onClick={() => {
+                  setRenameTarget(p);
+                  setRenameVal(p.title);
+                  setMenuFor(null);
+                }}
+              >
+                <Edit3 size={14} />
+                <span>重命名</span>
+              </button>
+              <button className="card-menu-item" onClick={() => { setMenuFor(null); toast.info("复制功能即将上线"); }}>
+                <Copy size={14} />
+                <span>复制</span>
+              </button>
+              <button className="card-menu-item" onClick={() => { setMenuFor(null); toast.info("导出功能即将上线"); }}>
+                <Download size={14} />
+                <span>导出</span>
+              </button>
+              <button
+                className="card-menu-item danger"
+                onClick={() => {
+                  setDeleteTarget(p);
+                  setMenuFor(null);
+                }}
+              >
+                <Trash2 size={14} />
+                <span>删除</span>
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="project-info">
+          <div className="project-title">{p.title}</div>
+          <div className="project-meta">
+            <span className="project-type-tag">{tab === "video" ? "视频成片" : "项目"}</span>
+            <span>{fmtDate(p.updated_at)}</span>
+          </div>
+          {badge.kind === "generating" && (
+            <div className="progress-bar">
+              <div className="progress-fill" style={{ width: `${progress}%` }} />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div data-viewport-mode="app-shell" className="flex flex-col h-screen w-screen overflow-hidden">
+      {/* 聚光背景 */}
+      <div className="spotlight-overlay" />
+
+      {/* 主行：侧边栏 + 内容 */}
+      <div className="flex flex-1 min-h-0 min-w-0">
+        {/* ===== 左侧 72px 侧边栏（照搬设计稿，作品 active） ===== */}
+        <aside
+          id="sidebar-nav"
+          className="flex flex-col items-center py-3 gap-1 flex-shrink-0 z-10"
+          style={{ width: 72, background: "var(--luxreal-sidebar)", borderRight: "1px solid var(--luxreal-border)" }}
+        >
+          {/* Logo */}
+          <div className="flex items-center justify-center flex-shrink-0" style={{ height: 56, marginBottom: 4 }}>
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M6 4H22V8H10V24H6V4Z" fill="white" />
+              <path d="M14 12H22V16H18V24H14V12Z" fill="white" opacity="0.7" />
+            </svg>
+          </div>
+
+          <div className="flex-1" style={{ minHeight: 20 }} />
+
+          {/* 中心导航（作品 active） */}
+          <nav className="flex flex-col items-center gap-2 flex-shrink-0">
+            <Link to="/" className="luxreal-nav-item" title="创作">
+              <Sparkles size={22} />
+              <span>创作</span>
+            </Link>
+            <Link to="/feed" className="luxreal-nav-item" title="发现">
+              <Compass size={22} />
+              <span>发现</span>
+            </Link>
+            <Link to="/projects" className="luxreal-nav-item active" title="作品">
+              <Folder size={22} />
+              <span>作品</span>
+            </Link>
+          </nav>
+
+          <div className="flex-1" style={{ minHeight: 20 }} />
+
+          {/* 头像（点击开关头像资料面板，LuxReal 对齐版 pp-panel） */}
+          <div className="pp-anchor" style={{ marginBottom: 4 }}>
+            <div
+              className="sidebar-avatar"
+              onClick={(e) => {
+                e.stopPropagation();
+                setProfileOpen((v) => !v);
+              }}
             >
-              开始创作
+              {(user?.nickname || "Y").slice(0, 1).toUpperCase()}
+              {avatarUrl && (
+                <img
+                  className="sidebar-avatar-img"
+                  src={avatarUrl}
+                  alt=""
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+              )}
+            </div>
+            <ProfilePanel open={profileOpen} onClose={() => setProfileOpen(false)} />
+          </div>
+
+          {/* 积分（真实余额） */}
+          <span className="sidebar-credits">{points === null ? "…" : points.toLocaleString()}</span>
+          {/* 充值 */}
+          <Link to="/points" className="sidebar-recharge" title="充值">
+            充值
+          </Link>
+
+          {/* 头像资料面板已内置于 ProfilePanel（上方 pp-anchor 内） */}
+        </aside>
+
+        {/* ===== 主内容区 ===== */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
+          {/* 顶栏（h-56px）：标题 + 新建项目 */}
+          <header className="flex items-center justify-between px-6 flex-shrink-0 z-10" style={{ height: 56, background: "transparent" }}>
+            <h1 className="text-lg font-semibold text-white">我的作品</h1>
+            <div className="flex items-center">
+              <button className="btn-new-project" onClick={() => navigate("/")}>
+                <Plus size={16} />
+                <span>新建项目</span>
+              </button>
+            </div>
+          </header>
+
+          {/* 滚动内容区 */}
+          <main data-scroll-region="primary" className="overflow-y-auto flex-1 px-6">
+            {/* 类型 Tabs：项目 / 画布 / 视频成片 */}
+            <div>
+              <nav className="flex items-center border-b border-[var(--luxreal-border)]">
+                <button className={`type-tab ${tab === "project" ? "active" : ""}`} onClick={() => setTab("project")}>项目</button>
+                <button className={`type-tab ${tab === "canvas" ? "active" : ""}`} onClick={() => setTab("canvas")}>画布</button>
+                <button className={`type-tab ${tab === "video" ? "active" : ""}`} onClick={() => setTab("video")}>视频成片</button>
+              </nav>
+            </div>
+
+            {tab === "canvas" ? (
+              /* 画布：后端暂无画布数据，空态占位 */
+              <div className="flex flex-col items-center justify-center gap-2 py-24">
+                <p className="text-sm text-[var(--luxreal-muted-foreground)]">画布功能即将上线</p>
+              </div>
+            ) : loading ? (
+              <div className="flex items-center justify-center py-24 text-sm text-[var(--luxreal-muted-foreground)]">
+                加载中…
+              </div>
+            ) : visibleItems.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-24">
+                <p className="text-sm text-[var(--luxreal-muted-foreground)]">
+                  {tab === "video" ? "还没有已完成的视频成片" : "还没有作品，创建你的第一部短剧吧"}
+                </p>
+                {tab === "project" && (
+                  <button className="btn-new-project" onClick={() => navigate("/")}>
+                    <Plus size={16} />
+                    <span>开始创作</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* 项目网格（4 列） */}
+                <div className="grid grid-cols-4 gap-5 mt-6">
+                  {visibleItems.map((p, idx) => renderCard(p, idx))}
+                </div>
+
+                {/* 分页（仅项目 Tab，服务端分页） */}
+                {tab === "project" && totalPages > 1 && (
+                  <div className="flex items-center justify-center gap-1 mt-8 pb-8">
+                    <button className="page-btn" title="上一页" disabled={page <= 1} onClick={() => setPage((v) => Math.max(1, v - 1))}>
+                      <ChevronLeft size={16} />
+                    </button>
+                    {pageSeq.map((n, i) =>
+                      n === "…" ? (
+                        <span key={`e${i}`} className="page-ellipsis">...</span>
+                      ) : (
+                        <button key={n} className={`page-btn ${n === page ? "active" : ""}`} onClick={() => setPage(n)}>
+                          {n}
+                        </button>
+                      ),
+                    )}
+                    <button className="page-btn" title="下一页" disabled={page >= totalPages} onClick={() => setPage((v) => Math.min(totalPages, v + 1))}>
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </main>
+        </div>
+      </div>
+
+      {/* ===== 重命名弹窗（PUT /projects/:id） ===== */}
+      <div
+        className={`luxreal-modal-backdrop ${renameTarget ? "visible" : ""}`}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) setRenameTarget(null);
+        }}
+      >
+        <div className="luxreal-modal" style={{ width: 420 }}>
+          <div className="luxreal-modal-header">
+            <div className="luxreal-modal-title">重命名项目</div>
+            <button className="luxreal-modal-close" onClick={() => setRenameTarget(null)} aria-label="关闭">
+              <X size={16} />
             </button>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {items.map((p) => {
-              const meta = ProjectStatusMeta[p.status] ?? { label: p.status, tone: "gray" as const };
-              return (
-                <div
-                  key={p.project_id}
-                  className="group cursor-pointer overflow-hidden rounded-2xl border border-white/5 bg-white/[0.03] transition hover:border-amber-400/30 hover:bg-white/[0.05]"
-                  onClick={() => {
-                    void projectsApi.touch(p.project_id).catch(() => undefined);
-                    nav(`/projects/${p.project_id}`);
-                  }}
-                >
-                  {/* 封面占位：状态氛围色 */}
-                  <div
-                    className={`relative flex h-32 items-center justify-center bg-gradient-to-br ${
-                      meta.tone === "gold"
-                        ? "from-amber-500/20 to-amber-700/10"
-                        : meta.tone === "violet"
-                          ? "from-violet-500/20 to-violet-700/10"
-                          : "from-sky-500/20 to-sky-700/10"
-                    }`}
-                  >
-                    <span className="text-3xl text-white/20">🎬</span>
-                    <span className="absolute right-3 top-3">
-                      <StatusBadge status={p.status} />
-                    </span>
-                  </div>
-                  <div className="p-4">
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className="truncate text-sm font-semibold text-slate-100">{p.title}</h3>
-                      <button
-                        className="text-xs text-slate-500 opacity-0 transition group-hover:opacity-100 hover:text-red-400"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setConfirmDelete(p);
-                        }}
-                      >
-                        删除
-                      </button>
-                    </div>
-                    <div className="mt-2 flex items-center gap-3 text-xs text-slate-500">
-                      <span>{p.total_episode_count} 集</span>
-                      <span>·</span>
-                      <span>{fmtDuration(p.total_duration_sec)}</span>
-                    </div>
-                    <div className="mt-1 text-xs text-slate-600">
-                      更新于 {new Date(p.updated_at).toLocaleString()}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="luxreal-modal-body">
+            <div className="luxreal-form-group" style={{ marginBottom: 0 }}>
+              <label className="luxreal-form-label">项目名称</label>
+              <input
+                className="luxreal-form-input"
+                value={renameVal}
+                onChange={(e) => setRenameVal(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void submitRename();
+                }}
+                placeholder="请输入项目名称"
+                autoFocus
+              />
+            </div>
           </div>
-        )}
-      </main>
-
-      {/* 创建对话框 */}
-      {showCreate && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowCreate(false)}>
-          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#12122A] p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-base font-semibold text-slate-100">新建项目</h2>
-            <p className="mt-1 text-xs text-slate-500">创建后立即进入剧本拆解（Step1）</p>
-            <div className="mt-4 space-y-3">
-              <div>
-                <label className="mb-1 block text-xs text-slate-400">项目名称 *</label>
-                <input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="例如：我的第一部竖屏短剧"
-                  className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-amber-400/50"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-slate-400">剧本原文（可跳过，稍后在 Step1 输入）</label>
-                <textarea
-                  value={script}
-                  onChange={(e) => setScript(e.target.value)}
-                  rows={4}
-                  placeholder="粘贴你的剧本…"
-                  className="w-full resize-none rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-amber-400/50"
-                />
-              </div>
-            </div>
-            <div className="mt-5 flex justify-end gap-3">
-              <button
-                onClick={() => setShowCreate(false)}
-                className="rounded-lg px-4 py-2 text-sm text-slate-400 transition hover:text-slate-200"
-              >
-                取消
-              </button>
-              <button
-                onClick={() => void handleCreate()}
-                disabled={creating}
-                className="rounded-lg bg-gradient-to-r from-amber-400 to-amber-500 px-5 py-2 text-sm font-semibold text-black transition hover:from-amber-300 hover:to-amber-400 disabled:opacity-50"
-              >
-                {creating ? "创建中…" : "创建并进入 Step1"}
-              </button>
-            </div>
+          <div className="luxreal-modal-footer">
+            <button className="btn-ghost" onClick={() => setRenameTarget(null)}>取消</button>
+            <button
+              className="btn-gradient-primary"
+              disabled={renaming || !renameVal.trim()}
+              onClick={() => void submitRename()}
+            >
+              <span>{renaming ? "保存中…" : "保存"}</span>
+            </button>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* 删除确认 */}
-      {confirmDelete && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setConfirmDelete(null)}>
-          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#12122A] p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-base font-semibold text-slate-100">删除项目</h2>
-            <p className="mt-2 text-sm text-slate-400">
-              确定删除「{confirmDelete.title}」吗？删除后可在回收站恢复。
+      {/* ===== 删除确认弹窗（DELETE /projects/:id 软删） ===== */}
+      <div
+        className={`luxreal-modal-backdrop ${deleteTarget ? "visible" : ""}`}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) setDeleteTarget(null);
+        }}
+      >
+        <div className="luxreal-modal" style={{ width: 420 }}>
+          <div className="luxreal-modal-header">
+            <div className="luxreal-modal-title">删除项目</div>
+            <button className="luxreal-modal-close" onClick={() => setDeleteTarget(null)} aria-label="关闭">
+              <X size={16} />
+            </button>
+          </div>
+          <div className="luxreal-modal-body">
+            <p className="text-[13px] text-[var(--luxreal-foreground)]">
+              确定要删除项目「{deleteTarget?.title}」吗？删除后可在回收站恢复。
             </p>
-            <div className="mt-5 flex justify-end gap-3">
-              <button
-                onClick={() => setConfirmDelete(null)}
-                className="rounded-lg px-4 py-2 text-sm text-slate-400 transition hover:text-slate-200"
-              >
-                取消
-              </button>
-              <button
-                onClick={() => void handleDelete()}
-                disabled={deleting}
-                className="rounded-lg bg-red-500/90 px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-50"
-              >
-                {deleting ? "删除中…" : "确认删除"}
-              </button>
-            </div>
+          </div>
+          <div className="luxreal-modal-footer">
+            <button className="btn-ghost" onClick={() => setDeleteTarget(null)}>取消</button>
+            <button
+              className="btn-gradient-primary"
+              style={{ background: "linear-gradient(135deg, #EF4444, #B91C1C)" }}
+              disabled={deleting}
+              onClick={() => void submitDelete()}
+            >
+              <span>{deleting ? "删除中…" : "确认删除"}</span>
+            </button>
           </div>
         </div>
-      )}
-
-      {/* Toast */}
-      {toast && (
-        <div className="fixed bottom-6 left-1/2 z-30 -translate-x-1/2 rounded-lg border border-amber-400/30 bg-[#1a1a35] px-5 py-2.5 text-sm text-amber-200 shadow-xl">
-          {toast}
-        </div>
-      )}
+      </div>
     </div>
   );
 }

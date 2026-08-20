@@ -27,7 +27,7 @@ func (s *BizService) MembershipDetail(c *gin.Context) {
 	}
 	var planCode, status, renew, endAt string
 	if err := s.repo.pool.QueryRow(c.Request.Context(), `
-		SELECT plan_code::text, status::text, COALESCE(renew_strategy::text,''),
+		SELECT package_code::text, status::text, COALESCE(renew_strategy::text,''),
 		       COALESCE(current_period_end::text,'')
 		FROM user_memberships WHERE user_id=$1 AND status='ACTIVE' ORDER BY id DESC LIMIT 1`, uid).
 		Scan(&planCode, &status, &renew, &endAt); err != nil {

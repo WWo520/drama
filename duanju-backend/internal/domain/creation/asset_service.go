@@ -49,7 +49,7 @@ func NewAssetService(repo *Repo, ac *asset.Client, ops AssetOps, b *billing.Engi
 
 // UploadPresignReq 预签名请求（05 ReqUploadPresign）。
 type UploadPresignReq struct {
-	BizType     string `json:"biz_type" binding:"required,oneof=script_file reference_image asset_upload work_cover export_rebuild"`
+	BizType     string `json:"biz_type" binding:"required,oneof=script_file reference_image asset_upload work_cover export_rebuild avatar"`
 	BizRef      string `json:"biz_ref" binding:"omitempty"`
 	FileName    string `json:"file_name" binding:"required,max=256"`
 	ContentType string `json:"content_type" binding:"required"`

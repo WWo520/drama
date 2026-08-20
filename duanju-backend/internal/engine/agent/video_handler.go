@@ -9,6 +9,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/duanju/backend/internal/engine/model"
 	"github.com/duanju/backend/internal/engine/task"
 )
 
@@ -43,11 +44,17 @@ var videoTaskTypes = map[string]bool{
 
 // VideoHandler 视频生成 Worker。
 type VideoHandler struct {
-	store VideoStore
+	store  VideoStore
+	engine VideoGenClient // 可为 nil：未注入时降级 mock（开发期）
 }
 
-func NewVideoHandler(store VideoStore) *VideoHandler {
-	return &VideoHandler{store: store}
+// VideoGenClient 视频生成能力（由 ModelEngine 实现注入）。
+type VideoGenClient interface {
+	GenerateVideo(ctx context.Context, capability model.Capability, req *model.VideoRequest) (*model.VideoResponse, error)
+}
+
+func NewVideoHandler(store VideoStore, engine VideoGenClient) *VideoHandler {
+	return &VideoHandler{store: store, engine: engine}
 }
 
 func (h *VideoHandler) Name() string { return "VIDEO_SEGMENT_GEN" }
@@ -82,10 +89,28 @@ func (h *VideoHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 	h.store.UpdateProgress(ctx, t.ID, 70, "镜头合成中…")
 	time.Sleep(100 * time.Millisecond)
 
-	// mock 视频生成
-	videoURL := fmt.Sprintf("https://mock.cdn.example.com/video/shot-%d-%d.mp4",
-		shot.ShotID, time.Now().UnixMilli())
-	log.Printf("video: shot %d mock 视频 url=%s", shot.ShotID, videoURL)
+	// 真实视频生成（B06 ModelEngine.GenerateVideo）：配置了 T2V 厂商/Key 后走真实调用；
+	// 无配置或调用失败降级 mock 样例视频（开发期链路保持可用）。
+	videoURL := ""
+	isMock := true
+	if h.engine != nil && shot.PromptRefined != "" {
+		resp, gerr := h.engine.GenerateVideo(ctx, model.CapT2V, &model.VideoRequest{
+			Prompt:      shot.PromptRefined,
+			DurationSec: shot.DurationSec,
+			Resolution:  "P720",
+		})
+		if gerr == nil && resp.VideoURL != "" {
+			videoURL = resp.VideoURL
+			isMock = false
+		} else {
+			log.Printf("video: 真实视频生成失败(%v)，降级 mock shot=%d", gerr, shot.ShotID)
+		}
+	}
+	if videoURL == "" {
+		videoURL = fmt.Sprintf("%s/sample.mp4?shot=%d&t=%d",
+			mockCDNBase(), shot.ShotID, time.Now().UnixMilli())
+	}
+	log.Printf("video: shot %d 视频 url=%s is_mock=%v", shot.ShotID, videoURL, isMock)
 
 	// 回调幂等：SaveShotVideo 内 CAS（仅 PENDING/FAILED 状态写入，已 SUCCESS 跳过）
 	if err := h.store.SaveShotVideo(ctx, shot.ShotID, videoURL, 100, t.ID); err != nil {
@@ -102,7 +127,7 @@ func (h *VideoHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 		"shot_id":       shot.ShotID,
 		"shot_group_id": shot.ShotGroupID,
 		"progress_pct":  100,
-		"is_mock":       true,
+		"is_mock":       isMock,
 	})
 	return out, nil
 }

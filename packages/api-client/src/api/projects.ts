@@ -1,16 +1,20 @@
 // 创作域 API：项目 CRUD（TAG 3 · 3.0.1~3.0.7）。
 import { api, type Paginated } from "../index";
 
-// 项目状态（03 A.1 状态机）
+// 项目状态（03 A.1 状态机，对齐后端 project_status_enum）
 export const ProjectStatus = {
   DRAFT: "DRAFT",
   SCRIPT_SPLITTING: "SCRIPT_SPLITTING",
+  SCRIPT_SPLIT_FAILED: "SCRIPT_SPLIT_FAILED",
   PARTIAL_ASSETS: "PARTIAL_ASSETS",
+  ALL_ASSETS_READY: "ALL_ASSETS_READY",
+  VIDEO_GENERATING: "VIDEO_GENERATING",
   PARTIAL_VIDEOS: "PARTIAL_VIDEOS",
   ALL_VIDEOS_READY: "ALL_VIDEOS_READY",
   EXPORTING: "EXPORTING",
   COMPLETED: "COMPLETED",
   ARCHIVED: "ARCHIVED",
+  CANCELLED: "CANCELLED",
 } as const;
 
 export type ProjectStatusValue = (typeof ProjectStatus)[keyof typeof ProjectStatus];
@@ -46,12 +50,16 @@ export const ProjectStatusMeta: Record<
 > = {
   DRAFT: { label: "草稿", tone: "gray" },
   SCRIPT_SPLITTING: { label: "剧本拆解中", tone: "blue" },
+  SCRIPT_SPLIT_FAILED: { label: "拆分失败", tone: "gray" },
   PARTIAL_ASSETS: { label: "资产生成中", tone: "violet" },
+  ALL_ASSETS_READY: { label: "资产就绪", tone: "green" },
+  VIDEO_GENERATING: { label: "视频生成中", tone: "blue" },
   PARTIAL_VIDEOS: { label: "视频生成中", tone: "blue" },
   ALL_VIDEOS_READY: { label: "视频就绪", tone: "gold" },
   EXPORTING: { label: "导出中", tone: "gold" },
   COMPLETED: { label: "已完成", tone: "green" },
   ARCHIVED: { label: "已归档", tone: "gray" },
+  CANCELLED: { label: "已取消", tone: "gray" },
 };
 
 // 项目 API（3.0.1~3.0.7）

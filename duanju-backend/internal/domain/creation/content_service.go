@@ -38,8 +38,8 @@ type ContentStore interface {
 	Follow(ctx context.Context, followeeUUID string, followerID int64) error
 	// Unfollow 取消关注。
 	Unfollow(ctx context.Context, followeeUUID string, followerID int64) error
-	// AuditList 待审列表（审核员用）。
-	AuditList(ctx context.Context, page, pageSize int) ([]map[string]any, int, error)
+	// AuditList 审核/作品列表（审核员用，status 按发布状态过滤，默认 PENDING）。
+	AuditList(ctx context.Context, status string, page, pageSize int) ([]map[string]any, int, error)
 }
 
 // ContentService 内容服务。
@@ -138,20 +138,34 @@ func (s *ContentService) Revoke(c *gin.Context, workUUID string) {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
 		return
 	}
-	if err := s.store.Revoke(c.Request.Context(), workUUID, "举报成立，内容下架", uid); err != nil {
+	var req struct {
+		Note string `json:"note"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	note := req.Note
+	if note == "" {
+		note = "举报成立，内容下架"
+	}
+	if err := s.store.Revoke(c.Request.Context(), workUUID, note, uid); err != nil {
 		httpx.Fail(c, http.StatusBadRequest, 20009, err.Error())
 		return
 	}
 	httpx.OK(c, nil)
 }
 
-// AuditList 11.15 待审列表。
+// AuditList 11.15 审核列表（status 过滤：PENDING/PUBLISHED/REJECTED/UNPUBLISHED/REVOKED，默认 PENDING）。
 func (s *ContentService) AuditList(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	items, total, err := s.store.AuditList(c.Request.Context(), page, pageSize)
+	status := strings.ToUpper(c.DefaultQuery("status", "PENDING"))
+	switch status {
+	case "PENDING", "PUBLISHED", "REJECTED", "UNPUBLISHED", "REVOKED":
+	default:
+		status = "PENDING"
+	}
+	items, total, err := s.store.AuditList(c.Request.Context(), status, page, pageSize)
 	if err != nil {
-		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取待审列表失败")
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取审核列表失败")
 		return
 	}
 	httpx.OK(c, gin.H{"items": items, "pagination": gin.H{"page": page, "page_size": pageSize, "total": total}})

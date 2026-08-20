@@ -7,6 +7,7 @@ type ProjectDTO struct {
 	SpaceID        string `json:"space_id"`
 	Title          string `json:"title"`
 	CoverImageURL  string `json:"cover_image_url"`
+	SourceScriptText string `json:"source_script_text"` // 剧本原文（Step1 预填/重拆）
 	ProjectType    string `json:"project_type"`
 	CurrentStep    string `json:"current_step"`
 	Status         string `json:"status"`

@@ -3,11 +3,12 @@ import { api } from "../index";
 
 export interface EpisodeLite {
   episode_id: string;
-  episode_number: number;
+  sort_order: number; // 后端 EpisodeDTO 字段（集序号）
   title: string;
   status: string;
-  beat_count: number;
-  duration_sec: number;
+  current_step: string;
+  narrative_unit_count: number;
+  actual_duration_sec: number;
 }
 
 export interface BeatSummary {
@@ -56,4 +57,9 @@ export const splitApi = {
     api.get<{ items: BeatSummary[] }>(`/episodes/${episodeId}/beats`),
   // 3.1.5 叙事单元详情（含剧本原文）
   beatDetail: (beatId: string) => api.get<BeatDetail>(`/beats/${beatId}`),
+  // 3.3.7c 叙事单元重新规划（开发期 mock：入队 BEAT_REPLAN 任务）
+  replan: (beatId: string, planningMode?: string) =>
+    api.post<{ task_id: string; status: string; is_mock?: boolean }>(`/beats/${beatId}/replan`, {
+      planning_mode: planningMode,
+    }),
 };

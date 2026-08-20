@@ -122,6 +122,11 @@ func (e *Engine) Settle(ctx context.Context, taskID int64, deliverable bool, act
 	if err != nil {
 		return err
 	}
+	// 未冻结积分的任务（如当前拆分任务不计费）：无资金变动，直接标记已结算避免空转账户查找失败
+	if bill.AccountID == 0 && bill.FrozenPoints == 0 {
+		_, err = e.store.MarkTaskSettled(ctx, taskID)
+		return err
+	}
 	acc, err := e.store.GetAccountForUpdate(ctx, bill.OwnerType, bill.OwnerID)
 	if err != nil {
 		return err

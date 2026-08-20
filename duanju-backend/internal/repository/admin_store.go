@@ -30,7 +30,7 @@ func (s *AdminStore) Dashboard(ctx context.Context) (map[string]any, error) {
 	s.pool.QueryRow(ctx, `SELECT count(*) FROM spaces`).Scan(&spaces)
 	s.pool.QueryRow(ctx, `SELECT count(*) FROM works WHERE is_deleted_recyclebin=FALSE`).Scan(&works)
 	s.pool.QueryRow(ctx, `SELECT count(*) FROM task_orders WHERE deleted_at IS NULL`).Scan(&tasks)
-	s.pool.QueryRow(ctx, `SELECT count(*) FROM reports WHERE status='PENDING'`).Scan(&reports)
+	s.pool.QueryRow(ctx, `SELECT count(*) FROM works WHERE publish_status='PENDING' AND is_deleted_recyclebin=FALSE`).Scan(&reports)
 	// DAU 近似：近 24h 活跃（无登录表时以近 24h 注册量近似）
 	s.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE created_at > NOW() - interval '24 hours'`).Scan(&dau)
 	_ = s.pool.QueryRow(ctx, `SELECT COALESCE(SUM(paid_amount_yuan),0) FROM orders WHERE pay_status='PAID'`).Scan(&revenue)
@@ -83,10 +83,10 @@ func (s *AdminStore) BanUser(ctx context.Context, userUUID string, banned bool, 
 	if tag.RowsAffected() == 0 {
 		return errors.New("用户不存在")
 	}
-	// 审计日志
+	// 审计日志（audit_logs 表结构见迁移 000011：user_id/operator_role/detail_json）
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO audit_logs (operator_user_id, action, target_type, target_id, note)
-		VALUES ($1, 'ADMIN_BAN', 'USER', (SELECT id FROM users WHERE user_uuid=$2::uuid), $3)`,
+		INSERT INTO audit_logs (user_id, operator_role, action, target_type, target_id, detail_json)
+		VALUES ($1, 'SUPER_ADMIN', 'ADMIN_BAN', 'USER', (SELECT id FROM users WHERE user_uuid=$2::uuid), jsonb_build_object('note', $3::text))`,
 		operatorID, userUUID, "封禁/解封"); err != nil {
 		return err
 	}
@@ -107,13 +107,21 @@ func (s *AdminStore) ListWorks(ctx context.Context, status string, page, pageSiz
 	var err error
 	if status == "" {
 		rows, err = s.pool.Query(ctx, `
-			SELECT work_uuid::text, title, publish_status::text, COALESCE(view_count,0), COALESCE(like_count,0)
-			FROM works WHERE is_deleted_recyclebin=FALSE ORDER BY id DESC LIMIT $1 OFFSET $2`,
+			SELECT w.work_uuid::text, w.title, w.publish_status::text, COALESCE(w.view_count,0), COALESCE(w.like_count,0),
+			       COALESCE(u.nickname,''), COALESCE(w.tags::text,'[]'), COALESCE(w.favorite_count,0), COALESCE(w.duration_sec,0),
+			       to_char(COALESCE(w.published_at, w.created_at) AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD HH24:MI'),
+			       COALESCE(w.media_url,''), COALESCE(w.is_recommended,FALSE)
+			FROM works w LEFT JOIN users u ON u.id=w.owner_user_id
+			WHERE w.is_deleted_recyclebin=FALSE ORDER BY w.id DESC LIMIT $1 OFFSET $2`,
 			pageSize, (page-1)*pageSize)
 	} else {
 		rows, err = s.pool.Query(ctx, `
-			SELECT work_uuid::text, title, publish_status::text, COALESCE(view_count,0), COALESCE(like_count,0)
-			FROM works WHERE publish_status=$1 AND is_deleted_recyclebin=FALSE ORDER BY id DESC LIMIT $2 OFFSET $3`,
+			SELECT w.work_uuid::text, w.title, w.publish_status::text, COALESCE(w.view_count,0), COALESCE(w.like_count,0),
+			       COALESCE(u.nickname,''), COALESCE(w.tags::text,'[]'), COALESCE(w.favorite_count,0), COALESCE(w.duration_sec,0),
+			       to_char(COALESCE(w.published_at, w.created_at) AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD HH24:MI'),
+			       COALESCE(w.media_url,''), COALESCE(w.is_recommended,FALSE)
+			FROM works w LEFT JOIN users u ON u.id=w.owner_user_id
+			WHERE w.publish_status=$1 AND w.is_deleted_recyclebin=FALSE ORDER BY w.id DESC LIMIT $2 OFFSET $3`,
 			status, pageSize, (page-1)*pageSize)
 	}
 	if err != nil {
@@ -122,11 +130,14 @@ func (s *AdminStore) ListWorks(ctx context.Context, status string, page, pageSiz
 	defer rows.Close()
 	out := make([]map[string]any, 0)
 	for rows.Next() {
-		var uuid, title, st string
-		var views, likes int
-		rows.Scan(&uuid, &title, &st, &views, &likes)
+		var uuid, title, st, author, tags, publishedAt, mediaURL string
+		var views, likes, favorites, duration int
+		var recommended bool
+		rows.Scan(&uuid, &title, &st, &views, &likes, &author, &tags, &favorites, &duration, &publishedAt, &mediaURL, &recommended)
 		out = append(out, map[string]any{
 			"work_id": uuid, "title": title, "publish_status": st, "view_count": views, "like_count": likes,
+			"author": author, "tags": tags, "favorite_count": favorites, "duration_sec": duration, "published_at": publishedAt,
+			"media_url": mediaURL, "is_recommended": recommended,
 		})
 	}
 	return out, total, rows.Err()
@@ -348,9 +359,8 @@ func (s *AdminStore) UpdatePackage(ctx context.Context, code, name string, price
 // UpdateModel 更新模型费率/启用（upsert）。
 func (s *AdminStore) UpdateModel(ctx context.Context, key, name, capability string, cost int, enabled bool) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO models (model_key, name, capability, cost_points_per_call, enabled)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (model_key) DO UPDATE SET name=$2, capability=$3, cost_points_per_call=$4, enabled=$5, updated_at=NOW()`,
+		UPDATE models SET name=$2, capability=$3::text::model_capability_enum, cost_points_per_call=$4, enabled=$5, updated_at=NOW()
+		WHERE model_key=$1 AND deleted_at IS NULL`,
 		key, name, capability, cost, enabled)
 	return err
 }
@@ -377,6 +387,44 @@ func (s *AdminStore) ListAnnouncements(ctx context.Context) ([]map[string]any, e
 		var title, content, start, end string
 		rows.Scan(&id, &title, &content, &start, &end)
 		out = append(out, map[string]any{"id": id, "title": title, "content": content, "start_at": start, "end_at": end})
+	}
+	return out, rows.Err()
+}
+
+// ListPublicAnnouncements 公开公告（生效时间窗内，首页公告条）。
+func (s *AdminStore) ListPublicAnnouncements(ctx context.Context) ([]map[string]any, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT title, content FROM announcements WHERE start_at<=NOW() AND end_at>=NOW() ORDER BY sort_order LIMIT 5`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]map[string]any, 0)
+	for rows.Next() {
+		var title, content string
+		if err := rows.Scan(&title, &content); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{"title": title, "content": content})
+	}
+	return out, rows.Err()
+}
+
+// ListPublicBanners 公开轮播（启用中，首页精选推荐）。
+func (s *AdminStore) ListPublicBanners(ctx context.Context) ([]map[string]any, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT title, image_url, jump_url FROM banners WHERE is_active=TRUE ORDER BY sort_order LIMIT 10`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]map[string]any, 0)
+	for rows.Next() {
+		var title, img, jump string
+		if err := rows.Scan(&title, &img, &jump); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{"title": title, "image_url": img, "jump_url": jump})
 	}
 	return out, rows.Err()
 }

@@ -13,15 +13,17 @@ import (
 )
 
 // 拆分技能 System Prompt（J.2 技能正文规则：角色≤6、场景≤8、景别/运镜/视角枚举、严格 JSON）。
-const splitSystemPrompt = `你是短剧分镜拆解专家。将用户提供的短剧剧本拆解为四层 JSON 结构：
-{"episodes":[{"title":"第1集标题","narrative_units":[{"title":"叙事单元标题","duration_sec":秒数,"script_original_text":"该单元对应剧本原文","shot_groups":[{"title":"镜头块标题","duration_sec":秒数,"shots":[{"duration_sec":秒,"shot_size":"景别","camera_movement":"运镜","camera_angle":"视角","subject_description":"主体描述","background_description":"背景描述","local_light_description":"光影描述","dialogue_text":"台词","ambient_sound":"环境音"}]}]}]}]}
+// 资产粒度：角色/场景/道具均按集抽取（origin_episode_id 指向 1-based 集序号），不按叙事单元拆分。
+const splitSystemPrompt = `你是短剧分镜拆解专家。将用户提供的短剧剧本拆解为 JSON 结构：
+{"episodes":[{"title":"第1集标题","narrative_units":[{"title":"叙事单元标题","duration_sec":秒数,"script_original_text":"该单元对应剧本原文","shot_groups":[{"title":"镜头块标题","duration_sec":秒数,"shots":[{"duration_sec":秒,"shot_size":"景别","camera_movement":"运镜","camera_angle":"视角","subject_description":"主体描述","background_description":"背景描述","local_light_description":"光影描述","dialogue_text":"台词","ambient_sound":"环境音"}]}]}]}],"characters":[{"code":"角色编码","name":"角色名","tags":"标签逗号分隔","description_notes":"角色描述","origin_episode_id":1}],"scenes":[{"code":"场景编码","base_name":"场景名","base_prompt":"场景描述","origin_episode_id":1}],"props":[{"code":"道具编码","name":"道具名","category":"道具类别","description":"道具描述","origin_episode_id":1}]}
 规则：
 1. 每个叙事单元 2~3 个镜头块，每个镜头块 2~4 个镜头；
 2. shot_size 仅限 ECU/CU/MCU/MS/FS/LS/ELS/TWO_SHOT/OTS；
 3. camera_movement 仅限 STATIC/SLOW_PUSH_IN/SLOW_PULL_OUT/FAST_PUSH_IN/DOLLY_IN/DOLLY_OUT/PAN_LEFT/PAN_RIGHT/TRACK_LEFT/TRACK_RIGHT/TILT_UP/TILT_DOWN/CRANE_UP/CRANE_DOWN/HANDHELD_SHAKY/WIPE_CLIP/ZOOM_IN_OPTICAL/SLOW_360_ORBIT；
 4. camera_angle 仅限 EYE_LEVEL_FRONT/SIDE/BACK/SLIGHT_LOW_ANGLE/LOW_ANGLE/SLIGHT_HIGH/HIGH_BIRDVIEW/OTS_LEFT/OTS_RIGHT/DUTCH_ANGLE；
 5. 角色≤6人、场景≤8个；时长合计需覆盖剧本情节；
-6. 只输出合法 JSON，不要任何解释文字。`
+6. 角色/场景/道具按集抽取：每项必须携带 origin_episode_id（首次出现集数的 1-based 序号），不区分叙事单元；category 仅限 WEAPON/CLOTHING_ACCESSORY/FOOD_DRINK/STATIONERY_BOOK/JEWELRY_ORNAMENT/FURNITURE_DECOR/ELECTRONIC_APPLIANCE/VEHICLE/TOOL_MUSICAL_INSTRUMENT/TOY/PLANT_FLOWER/ANIMAL_PET/LIGHTING_SOURCE/DOCUMENT_SCROLL_MAP/FLAG_BANNER/OTHER；
+7. 只输出合法 JSON，不要任何解释文字。`
 
 const polishSystemPrompt = `你是视频提示词润色专家。将镜头要素（主体/背景/光影/台词/环境音/景别/运镜/视角）润色为可直接送视频生成模型的中文提示词，输出一行文本，不要 JSON。`
 
@@ -46,12 +48,15 @@ type ProjectInfo struct {
 	ScriptText string
 }
 
-// SplitStats 拆分写入统计。
+// SplitStats 拆分写入统计（含集级资产）。
 type SplitStats struct {
-	Episodes int `json:"episodes"`
-	Beats    int `json:"beats"`
-	Groups   int `json:"shot_groups"`
-	Shots    int `json:"shots"`
+	Episodes   int `json:"episodes"`
+	Beats      int `json:"beats"`
+	Groups     int `json:"shot_groups"`
+	Shots      int `json:"shots"`
+	Characters int `json:"characters"`
+	Scenes     int `json:"scenes"`
+	Props      int `json:"props"`
 }
 
 // SplitHandler 实现 task.Handler（task_type=SCRIPT_SPLIT）。

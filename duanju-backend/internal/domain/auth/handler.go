@@ -33,6 +33,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		auth.POST("/refresh", h.refresh)
 		auth.POST("/logout", h.logout)
 		auth.GET("/me", middleware.JWT(h.jwtMgr, h.rdb, h.env), h.me)
+		auth.PUT("/me", middleware.JWT(h.jwtMgr, h.rdb, h.env), h.updateMe)
 	}
 }
 
@@ -72,4 +73,13 @@ func (h *Handler) logout(c *gin.Context) {
 
 func (h *Handler) me(c *gin.Context) {
 	h.svc.Me(c)
+}
+
+func (h *Handler) updateMe(c *gin.Context) {
+	var req UpdateMeReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	h.svc.UpdateMe(c, &req)
 }

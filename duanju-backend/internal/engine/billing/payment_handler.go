@@ -4,6 +4,7 @@ package billing
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -21,14 +22,17 @@ func NewPaymentHandler(svc *AlipayService) *PaymentHandler {
 }
 
 // CreateOrderReq 下单请求（9.5）。
+// biz_type=package 订阅套餐（package_code + billing_cycle）；biz_type=point_package 积分包（兼容旧字段）。
 type CreateOrderReq struct {
-	PackageCode   string `json:"package_code" binding:"required"` // POINTS_PKG_SMALL 等
-	AmountYuan    string `json:"amount_yuan" binding:"required"`  // 金额字符串（精确比较）
-	Points        int    `json:"points" binding:"required,min=1"`
+	BizType        string `json:"biz_type"`                    // package | point_package（默认 point_package）
+	PackageCode    string `json:"package_code" binding:"required"` // 套餐编码（packages 或 point_packages）
+	AmountYuan     string `json:"amount_yuan" binding:"required"`  // 金额字符串（精确比较）
+	Points         int    `json:"points"`                      // 积分包必填
+	BillingCycle   string `json:"billing_cycle"`               // 订阅：monthly | yearly
 	IdempotencyKey string `json:"idempotency_key" binding:"required"` // 幂等键（H.1）
 }
 
-// CreateOrder 9.5 创建订单。
+// CreateOrder 9.5 创建订单（订阅套餐/积分包分派）。
 func (h *PaymentHandler) CreateOrder(c *gin.Context) {
 	uid := c.GetInt64(middleware.CtxUserID)
 	if uid == 0 {
@@ -40,9 +44,20 @@ func (h *PaymentHandler) CreateOrder(c *gin.Context) {
 		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
 		return
 	}
-	resp, err := h.svc.CreateOrder(c.Request.Context(), uid, "POINTS_PACKAGE", req.PackageCode, req.AmountYuan, req.Points, req.IdempotencyKey)
+	var resp *CreateOrderResp
+	var err error
+	if req.BizType == "package" {
+		// 订阅套餐：服务端校验 packages 表价目/周期
+		resp, err = h.svc.CreateSubscriptionOrder(c.Request.Context(), uid, req.PackageCode, req.BillingCycle, req.IdempotencyKey)
+	} else {
+		// 积分包（默认）：校验 point_packages 表价目
+		if req.Points <= 0 {
+			httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误：积分包缺少 points")
+			return
+		}
+		resp, err = h.svc.CreateOrder(c.Request.Context(), uid, "POINTS_PACKAGE", req.PackageCode, req.AmountYuan, req.Points, req.IdempotencyKey)
+	}
 	if err != nil {
-		// 档位校验/参数问题透传明确提示（P0 修复）
 		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "下单失败："+err.Error())
 		return
 	}
@@ -91,9 +106,22 @@ func (h *PaymentHandler) Status(c *gin.Context) {
 		httpx.Fail(c, http.StatusNotFound, 80002, "订单不存在")
 		return
 	}
-	httpx.OK(c, gin.H{
+	resp := gin.H{
 		"order_no":   order.OrderNo,
 		"pay_status": order.PayStatus,
 		"points":     order.Points,
-	})
+	}
+	// 订阅订单：附带会员状态（05 9.8 OrderStatusDTO.subscription）
+	if strings.HasPrefix(order.OrderType, "SUBSCRIPTION_") {
+		var planCode, status, renew, endAt string
+		if err := h.svc.QueryMembership(c.Request.Context(), uid, &planCode, &status, &renew, &endAt); err == nil {
+			resp["subscription"] = gin.H{
+				"plan_code":      planCode,
+				"status":        status,
+				"renew_strategy": renew,
+				"expires_at":     endAt,
+			}
+		}
+	}
+	httpx.OK(c, resp)
 }

@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>作品管理 - Empty Broken 管理后台</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          'bg-deep': '#0B0B1A',
+          'bg-card': '#151525',
+          'bg-card-light': '#1A1A2E',
+          'border-dark': '#2A2A3E',
+          'amber-gold': '#fbbf24',
+          'amber-dim': '#d97706',
+          'text-primary': '#ffffff',
+          'text-secondary': '#9ca3af',
+          'text-muted': '#6b7280',
+        },
+        fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+      }
+    }
+  }
+</script>
+<style>
+  * { box-sizing: border-box; }
+  body { background: #0B0B1A; color: #fff; font-family: 'Inter', system-ui, sans-serif; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #151525; }
+  ::-webkit-scrollbar-thumb { background: #2A2A3E; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3a4e; }
+  .menu-item.active {
+    background: linear-gradient(90deg, rgba(251,191,36,0.15) 0%, rgba(251,191,36,0.05) 100%);
+    color: #fbbf24; border-left: 3px solid #fbbf24;
+  }
+  .menu-item.active svg { color: #fbbf24; }
+  .menu-item:hover { background: rgba(255,255,255,0.05); }
+  .notif-dot { position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; border: 2px solid #0D0D0D; }
+  .table-row:hover { background: rgba(255,255,255,0.02); }
+  .tag { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; display: inline-flex; align-items: center; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .action-btn { padding: 4px 8px; border-radius: 6px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; }
+  .action-btn:hover { background: rgba(255,255,255,0.08); }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="flex min-h-screen">
+
+  <!-- SIDEBAR -->
+  <aside class="w-[240px] bg-[#0D0D0D] border-r border-[#2A2A3E] flex flex-col flex-shrink-0 fixed h-full z-20">
+    <div class="h-[60px] flex items-center px-5 border-b border-[#2A2A3E]">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center mr-3">
+        <svg class="w-5 h-5 text-[#0B0B1A]" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      </div>
+      <span class="text-white font-bold text-lg">Empty Broken <span class="text-amber-gold">Admin</span></span>
+    </div>
+    <nav class="flex-1 py-4 overflow-y-auto">
+      <div class="px-3 mb-2 text-[11px] text-text-muted uppercase tracking-wider font-medium">主菜单</div>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="layout-dashboard" class="w-[18px] h-[18px] mr-3"></i><span>工作台</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="users" class="w-[18px] h-[18px] mr-3"></i><span>用户管理</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="shield-check" class="w-[18px] h-[18px] mr-3"></i><span>内容审核</span>
+        <span class="ml-auto text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">12</span>
+      </a>
+      <a href="#" class="menu-item active flex items-center px-5 py-3 text-sm cursor-pointer">
+        <i data-lucide="film" class="w-[18px] h-[18px] mr-3"></i><span>作品管理</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="wallet" class="w-[18px] h-[18px] mr-3"></i><span>计费财务</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="cpu" class="w-[18px] h-[18px] mr-3"></i><span>算力任务</span>
+        <span class="ml-auto text-[10px] bg-amber-gold/20 text-amber-gold px-2 py-0.5 rounded-full">34</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="settings" class="w-[18px] h-[18px] mr-3"></i><span>平台配置</span>
+      </a>
+    </nav>
+    <div class="p-4 border-t border-[#2A2A3E]">
+      <div class="flex items-center">
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center text-[#0B0B1A] font-bold text-sm">A</div>
+        <div class="ml-3 flex-1 min-w-0">
+          <div class="text-sm font-medium text-white truncate">Admin</div>
+          <div class="text-xs text-text-muted truncate">超级管理员</div>
+        </div>
+        <i data-lucide="chevron-up" class="w-4 h-4 text-text-muted"></i>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="flex-1 ml-[240px] flex flex-col min-w-0">
+
+    <!-- TOP BAR -->
+    <header class="h-[60px] bg-[#0D0D0D]/80 backdrop-blur-sm border-b border-[#2A2A3E] flex items-center justify-between px-6 sticky top-0 z-10">
+      <div class="flex items-center">
+        <i data-lucide="home" class="w-4 h-4 text-text-muted mr-2"></i>
+        <span class="text-text-muted text-sm">管理后台</span>
+        <i data-lucide="chevron-right" class="w-4 h-4 text-text-muted mx-2"></i>
+        <span class="text-white text-sm font-medium">作品管理</span>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="relative">
+          <i data-lucide="search" class="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input type="text" placeholder="搜索作品/用户..." class="bg-bg-card border border-[#2A2A3E] rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-text-muted focus:outline-none focus:border-amber-gold/50 w-64 transition-colors">
+        </div>
+        <button class="relative w-9 h-9 rounded-lg bg-bg-card border border-[#2A2A3E] flex items-center justify-center hover:border-[#3A3A4E] transition-colors">
+          <i data-lucide="bell" class="w-4 h-4 text-text-secondary"></i><span class="notif-dot"></span>
+        </button>
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center text-[#0B0B1A] font-bold text-sm cursor-pointer">A</div>
+      </div>
+    </header>
+
+    <!-- CONTENT -->
+    <main class="flex-1 p-6">
+
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">作品管理</h1>
+          <p class="text-text-muted text-sm mt-1">管理平台所有短剧作品，支持上下架、删除、推荐等操作</p>
+        </div>
+        <div class="flex gap-3">
+          <button class="px-4 py-2 bg-bg-card border border-[#2A2A3E] rounded-lg text-sm text-text-secondary hover:border-[#3A3A4E] transition-colors flex items-center gap-2">
+            <i data-lucide="download" class="w-4 h-4"></i>导出数据
+          </button>
+          <button class="px-4 py-2 bg-amber-gold text-[#0B0B1A] rounded-lg text-sm font-semibold hover:bg-amber-400 transition-colors flex items-center gap-2">
+            <i data-lucide="plus" class="w-4 h-4"></i>推荐作品
+          </button>
+        </div>
+      </div>
+
+      <!-- Stats Cards -->
+      <div class="grid grid-cols-4 gap-4 mb-6">
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-text-muted text-sm">作品总数</span>
+            <div class="w-9 h-9 rounded-lg bg-amber-gold/10 flex items-center justify-center">
+              <i data-lucide="film" class="w-4 h-4 text-amber-gold"></i>
+            </div>
+          </div>
+          <div class="text-2xl font-bold text-white">12,847</div>
+          <div class="text-xs text-green-400 mt-1 flex items-center"><i data-lucide="trending-up" class="w-3 h-3 mr-1"></i>较昨日 +128</div>
+        </div>
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-text-muted text-sm">已发布</span>
+            <div class="w-9 h-9 rounded-lg bg-green-500/10 flex items-center justify-center">
+              <i data-lucide="check-circle" class="w-4 h-4 text-green-400"></i>
+            </div>
+          </div>
+          <div class="text-2xl font-bold text-white">10,532</div>
+          <div class="text-xs text-text-muted mt-1">占比 82.0%</div>
+        </div>
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-text-muted text-sm">待审核</span>
+            <div class="w-9 h-9 rounded-lg bg-yellow-500/10 flex items-center justify-center">
+              <i data-lucide="clock" class="w-4 h-4 text-yellow-400"></i>
+            </div>
+          </div>
+          <div class="text-2xl font-bold text-white">156</div>
+          <div class="text-xs text-yellow-400 mt-1 flex items-center"><i data-lucide="alert-circle" class="w-3 h-3 mr-1"></i>需及时处理</div>
+        </div>
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-text-muted text-sm">已下架</span>
+            <div class="w-9 h-9 rounded-lg bg-red-500/10 flex items-center justify-center">
+              <i data-lucide="x-circle" class="w-4 h-4 text-red-400"></i>
+            </div>
+          </div>
+          <div class="text-2xl font-bold text-white">2,159</div>
+          <div class="text-xs text-text-muted mt-1">占比 16.8%</div>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-4 mb-4">
+        <div class="flex items-center gap-4 flex-wrap">
+          <div class="flex items-center gap-2">
+            <span class="text-text-muted text-sm">状态：</span>
+            <select class="bg-bg-deep border border-[#2A2A3E] rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-amber-gold/50">
+              <option>全部状态</option><option>已发布</option><option>待审核</option><option>审核中</option><option>已下架</option><option>已删除</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-text-muted text-sm">分类：</span>
+            <select class="bg-bg-deep border border-[#2A2A3E] rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-amber-gold/50">
+              <option>全部分类</option><option>都市情感</option><option>古装穿越</option><option>悬疑推理</option><option>爽文逆袭</option><option>搞笑喜剧</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-text-muted text-sm">时长：</span>
+            <select class="bg-bg-deep border border-[#2A2A3E] rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-amber-gold/50">
+              <option>全部时长</option><option>1分钟以内</option><option>1-3分钟</option><option>3-5分钟</option><option>5分钟以上</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-text-muted text-sm">日期：</span>
+            <input type="date" class="bg-bg-deep border border-[#2A2A3E] rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-amber-gold/50">
+            <span class="text-text-muted">至</span>
+            <input type="date" class="bg-bg-deep border border-[#2A2A3E] rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-amber-gold/50">
+          </div>
+          <div class="ml-auto flex gap-2">
+            <button class="px-3 py-1.5 bg-bg-deep border border-[#2A2A3E] rounded-lg text-sm text-text-secondary hover:border-[#3A3A4E] transition-colors">重置</button>
+            <button class="px-3 py-1.5 bg-amber-gold text-[#0B0B1A] rounded-lg text-sm font-medium hover:bg-amber-400 transition-colors">筛选</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div class="bg-bg-card border border-[#2A2A3E] rounded-xl overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-[#2A2A3E]">
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase tracking-wider">
+                  <input type="checkbox" class="mr-2 accent-amber-gold">作品信息
+                </th>
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase tracking-wider">作者</th>
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase tracking-wider">分类</th>
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase tracking-wider">播放量</th>
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase tracking-wider">点赞/收藏</th>
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase tracking-wider">状态</th>
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase tracking-wider">发布时间</th>
+                <th class="text-right px-4 py-3 text-text-muted text-xs font-medium uppercase tracking-wider">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-b border-[#2A2A3E]/50 table-row">
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-3">
+                    <input type="checkbox" class="accent-amber-gold">
+                    <div class="w-16 h-10 rounded bg-gradient-to-br from-purple-900 to-indigo-900 flex items-center justify-center flex-shrink-0">
+                      <i data-lucide="play" class="w-4 h-4 text-white/60"></i>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-sm text-white font-medium truncate max-w-[240px]">霸总追妻：重生后我成了千亿继承人</div>
+                      <div class="text-xs text-text-muted">ID: wk_2a8f3d1e · 3分24秒</div>
+                    </div>
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center text-white text-xs font-bold">林</div>
+                    <div><div class="text-sm text-white">林小雨</div><div class="text-xs text-text-muted">@xiaoyu_lin</div></div>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-purple-500/15 text-purple-400">都市情感</span></td>
+                <td class="px-4 py-3 text-sm text-white">128.5万</td>
+                <td class="px-4 py-3 text-sm">
+                  <div class="flex items-center gap-3 text-text-secondary text-xs">
+                    <span><i data-lucide="heart" class="w-3 h-3 inline mr-1"></i>8.2万</span>
+                    <span><i data-lucide="star" class="w-3 h-3 inline mr-1"></i>3.1万</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-green-500/15 text-green-400"><span class="status-dot bg-green-400"></span>已发布</span></td>
+                <td class="px-4 py-3 text-sm text-text-secondary">2026-08-15 14:32</td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex justify-end gap-1">
+                    <button class="action-btn text-text-secondary"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-amber-gold"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-red-400"><i data-lucide="arrow-down-to-line" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-text-muted"><i data-lucide="more-vertical" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+              <tr class="border-b border-[#2A2A3E]/50 table-row">
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-3">
+                    <input type="checkbox" class="accent-amber-gold">
+                    <div class="w-16 h-10 rounded bg-gradient-to-br from-amber-900 to-orange-900 flex items-center justify-center flex-shrink-0">
+                      <i data-lucide="play" class="w-4 h-4 text-white/60"></i>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-sm text-white font-medium truncate max-w-[240px]">穿越古代：我带系统当皇帝</div>
+                      <div class="text-xs text-text-muted">ID: wk_9c7e2b4a · 2分58秒</div>
+                    </div>
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white text-xs font-bold">墨</div>
+                    <div><div class="text-sm text-white">墨尘居士</div><div class="text-xs text-text-muted">@mochen</div></div>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-amber-500/15 text-amber-400">古装穿越</span></td>
+                <td class="px-4 py-3 text-sm text-white">256.8万</td>
+                <td class="px-4 py-3 text-sm">
+                  <div class="flex items-center gap-3 text-text-secondary text-xs">
+                    <span><i data-lucide="heart" class="w-3 h-3 inline mr-1"></i>15.6万</span>
+                    <span><i data-lucide="star" class="w-3 h-3 inline mr-1"></i>6.2万</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-yellow-500/15 text-yellow-400"><span class="status-dot bg-yellow-400"></span>待审核</span></td>
+                <td class="px-4 py-3 text-sm text-text-secondary">2026-08-16 09:15</td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex justify-end gap-1">
+                    <button class="action-btn text-text-secondary"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-green-400"><i data-lucide="check" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-red-400"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-text-muted"><i data-lucide="more-vertical" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+              <tr class="border-b border-[#2A2A3E]/50 table-row">
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-3">
+                    <input type="checkbox" class="accent-amber-gold">
+                    <div class="w-16 h-10 rounded bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center flex-shrink-0">
+                      <i data-lucide="play" class="w-4 h-4 text-white/60"></i>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-sm text-white font-medium truncate max-w-[240px]">迷雾追踪：连环杀人案调查实录</div>
+                      <div class="text-xs text-text-muted">ID: wk_4d1a8f9c · 4分12秒</div>
+                    </div>
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-slate-500 to-slate-700 flex items-center justify-center text-white text-xs font-bold">陈</div>
+                    <div><div class="text-sm text-white">陈推理</div><div class="text-xs text-text-muted">@chen_tuili</div></div>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-blue-500/15 text-blue-400">悬疑推理</span></td>
+                <td class="px-4 py-3 text-sm text-white">89.3万</td>
+                <td class="px-4 py-3 text-sm">
+                  <div class="flex items-center gap-3 text-text-secondary text-xs">
+                    <span><i data-lucide="heart" class="w-3 h-3 inline mr-1"></i>4.7万</span>
+                    <span><i data-lucide="star" class="w-3 h-3 inline mr-1"></i>2.8万</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-red-500/15 text-red-400"><span class="status-dot bg-red-400"></span>已下架</span></td>
+                <td class="px-4 py-3 text-sm text-text-secondary">2026-08-10 16:48</td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex justify-end gap-1">
+                    <button class="action-btn text-text-secondary"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-green-400"><i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-red-400"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+              <tr class="border-b border-[#2A2A3E]/50 table-row">
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-3">
+                    <input type="checkbox" class="accent-amber-gold">
+                    <div class="w-16 h-10 rounded bg-gradient-to-br from-rose-900 to-pink-900 flex items-center justify-center flex-shrink-0">
+                      <i data-lucide="play" class="w-4 h-4 text-white/60"></i>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-sm text-white font-medium truncate max-w-[240px]">废柴逆袭：我靠系统打脸全场</div>
+                      <div class="text-xs text-text-muted">ID: wk_7b3e5c2d · 1分45秒</div>
+                    </div>
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center text-white text-xs font-bold">爽</div>
+                    <div><div class="text-sm text-white">爽文达人</div><div class="text-xs text-text-muted">@shuangwen</div></div>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-rose-500/15 text-rose-400">爽文逆袭</span></td>
+                <td class="px-4 py-3 text-sm text-white">312.4万</td>
+                <td class="px-4 py-3 text-sm">
+                  <div class="flex items-center gap-3 text-text-secondary text-xs">
+                    <span><i data-lucide="heart" class="w-3 h-3 inline mr-1"></i>22.3万</span>
+                    <span><i data-lucide="star" class="w-3 h-3 inline mr-1"></i>9.5万</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  <span class="tag bg-green-500/15 text-green-400"><span class="status-dot bg-green-400"></span>已发布</span>
+                  <span class="tag ml-1 bg-amber-gold/15 text-amber-gold"><i data-lucide="trending-up" class="w-3 h-3 mr-1"></i>推荐</span>
+                </td>
+                <td class="px-4 py-3 text-sm text-text-secondary">2026-08-14 20:03</td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex justify-end gap-1">
+                    <button class="action-btn text-text-secondary"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-amber-gold"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-red-400"><i data-lucide="arrow-down-to-line" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-text-muted"><i data-lucide="more-vertical" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+              <tr class="border-b border-[#2A2A3E]/50 table-row">
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-3">
+                    <input type="checkbox" class="accent-amber-gold">
+                    <div class="w-16 h-10 rounded bg-gradient-to-br from-emerald-900 to-teal-900 flex items-center justify-center flex-shrink-0">
+                      <i data-lucide="play" class="w-4 h-4 text-white/60"></i>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-sm text-white font-medium truncate max-w-[240px]">职场囧途：我的奇葩同事们</div>
+                      <div class="text-xs text-text-muted">ID: wk_1e6d9a4b · 2分30秒</div>
+                    </div>
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center text-white text-xs font-bold">笑</div>
+                    <div><div class="text-sm text-white">笑料百出</div><div class="text-xs text-text-muted">@xiaoliao</div></div>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-emerald-500/15 text-emerald-400">搞笑喜剧</span></td>
+                <td class="px-4 py-3 text-sm text-white">67.2万</td>
+                <td class="px-4 py-3 text-sm">
+                  <div class="flex items-center gap-3 text-text-secondary text-xs">
+                    <span><i data-lucide="heart" class="w-3 h-3 inline mr-1"></i>3.8万</span>
+                    <span><i data-lucide="star" class="w-3 h-3 inline mr-1"></i>1.2万</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-blue-500/15 text-blue-400"><span class="status-dot bg-blue-400"></span>审核中</span></td>
+                <td class="px-4 py-3 text-sm text-text-secondary">2026-08-16 18:22</td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex justify-end gap-1">
+                    <button class="action-btn text-text-secondary"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-text-muted"><i data-lucide="more-vertical" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+              <tr class="table-row">
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-3">
+                    <input type="checkbox" class="accent-amber-gold">
+                    <div class="w-16 h-10 rounded bg-gradient-to-br from-indigo-900 to-purple-900 flex items-center justify-center flex-shrink-0">
+                      <i data-lucide="play" class="w-4 h-4 text-white/60"></i>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-sm text-white font-medium truncate max-w-[240px]">替嫁新娘：冷面总裁的契约妻</div>
+                      <div class="text-xs text-text-muted">ID: wk_5f8c3e7a · 3分05秒</div>
+                    </div>
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center text-white text-xs font-bold">苏</div>
+                    <div><div class="text-sm text-white">苏暖暖</div><div class="text-xs text-text-muted">@susu_nuan</div></div>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-purple-500/15 text-purple-400">都市情感</span></td>
+                <td class="px-4 py-3 text-sm text-white">198.7万</td>
+                <td class="px-4 py-3 text-sm">
+                  <div class="flex items-center gap-3 text-text-secondary text-xs">
+                    <span><i data-lucide="heart" class="w-3 h-3 inline mr-1"></i>12.1万</span>
+                    <span><i data-lucide="star" class="w-3 h-3 inline mr-1"></i>5.4万</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-green-500/15 text-green-400"><span class="status-dot bg-green-400"></span>已发布</span></td>
+                <td class="px-4 py-3 text-sm text-text-secondary">2026-08-13 11:20</td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex justify-end gap-1">
+                    <button class="action-btn text-text-secondary"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-amber-gold"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-red-400"><i data-lucide="arrow-down-to-line" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-text-muted"><i data-lucide="more-vertical" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="flex items-center justify-between px-4 py-3 border-t border-[#2A2A3E]">
+          <div class="text-sm text-text-muted">共 <span class="text-white font-medium">12,847</span> 条，每页显示 10 条</div>
+          <div class="flex items-center gap-1">
+            <button class="w-8 h-8 rounded-lg border border-[#2A2A3E] flex items-center justify-center text-text-muted hover:border-[#3A3A4E]"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+            <button class="w-8 h-8 rounded-lg bg-amber-gold text-[#0B0B1A] font-medium text-sm">1</button>
+            <button class="w-8 h-8 rounded-lg border border-[#2A2A3E] text-text-secondary hover:border-[#3A3A4E] text-sm">2</button>
+            <button class="w-8 h-8 rounded-lg border border-[#2A2A3E] text-text-secondary hover:border-[#3A3A4E] text-sm">3</button>
+            <button class="w-8 h-8 rounded-lg border border-[#2A2A3E] text-text-secondary hover:border-[#3A3A4E] text-sm">4</button>
+            <button class="w-8 h-8 rounded-lg border border-[#2A2A3E] text-text-secondary hover:border-[#3A3A4E] text-sm">5</button>
+            <span class="text-text-muted px-1">...</span>
+            <button class="w-8 h-8 rounded-lg border border-[#2A2A3E] text-text-secondary hover:border-[#3A3A4E] text-sm">1285</button>
+            <button class="w-8 h-8 rounded-lg border border-[#2A2A3E] flex items-center justify-center text-text-secondary hover:border-[#3A3A4E]"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script>lucide.createIcons();</script>
+</body>
+</html>

@@ -48,6 +48,10 @@ func (e *ModelEngine) Chat(ctx context.Context, capability Capability, req *Chat
 		}
 		p, ok := e.providers[k.ProviderName]
 		if !ok {
+			// 厂商名未注册（DB 配置厂商名多样，如 deepseek）：回退 OpenAI 兼容通道
+			p, ok = e.providers["openai-compat"]
+		}
+		if !ok {
 			continue
 		}
 		if !e.acquire(k.ID, k.Concurrency) {
@@ -87,6 +91,9 @@ func (e *ModelEngine) GenerateImage(ctx context.Context, capability Capability, 
 		}
 		p, ok := e.providers[k.ProviderName]
 		if !ok {
+			p, ok = e.providers["openai-compat"]
+		}
+		if !ok {
 			continue
 		}
 		if !e.acquire(k.ID, k.Concurrency) {
@@ -123,6 +130,9 @@ func (e *ModelEngine) GenerateVideo(ctx context.Context, capability Capability, 
 			continue
 		}
 		p, ok := e.providers[k.ProviderName]
+		if !ok {
+			p, ok = e.providers["openai-compat"]
+		}
 		if !ok {
 			continue
 		}

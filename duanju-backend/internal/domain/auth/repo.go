@@ -162,6 +162,43 @@ func (r *Repo) GetByUUID(ctx context.Context, userUUID string) (*UserRow, error)
 	return &u, nil
 }
 
+// UpdateProfile 资料部分更新（nil 字段不更新；avatar 存 MinIO object key）。
+func (r *Repo) UpdateProfile(ctx context.Context, userID int64, nickname, avatarKey *string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE users SET
+			nickname = COALESCE($2, nickname),
+			avatar_url = COALESCE($3, avatar_url),
+			updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL`,
+		userID, nickname, avatarKey)
+	return err
+}
+
+// VerifyOwnedObject 校验对象归属：本人上传且已 CONFIRMED（头像引用安全检查）。
+func (r *Repo) VerifyOwnedObject(ctx context.Context, userID int64, objectKey string) error {
+	var one int
+	err := r.pool.QueryRow(ctx, `
+		SELECT 1 FROM s3_object_metadata
+		WHERE object_key = $1 AND created_by_user_id = $2 AND upload_status = 'CONFIRMED'`,
+		objectKey, userID).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
+// GetAvatarKey 取头像 object key（读取时签新 URL 重定向用）。
+func (r *Repo) GetAvatarKey(ctx context.Context, userUUID string) (string, error) {
+	var key string
+	err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(avatar_url, '') FROM users WHERE deleted_at IS NULL AND user_uuid = $1`,
+		userUUID).Scan(&key)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return key, err
+}
+
 // GetPoints 查询积分账户。
 func (r *Repo) GetPoints(ctx context.Context, userID int64) (*PointRow, error) {
 	var p PointRow

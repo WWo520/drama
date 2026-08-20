@@ -275,7 +275,12 @@ func (s *AssetDetailService) EpisodeAssetsOverview(c *gin.Context, epUUID string
 	}
 	type cnt struct{ total, done int }
 	var chars, scenes, props cnt
-	_ = s.repo.pool.QueryRow(c.Request.Context(), `SELECT count(*), count(*) FILTER (WHERE generation_status='SUCCESS') FROM characters WHERE origin_episode_id=$1 AND deleted_at IS NULL`, epID).Scan(&chars.total, &chars.done)
+	// characters 本身无 generation_status 列，生成状态在 character_variants（与 ListCharacters 口径一致）
+	_ = s.repo.pool.QueryRow(c.Request.Context(), `
+		SELECT count(*), count(*) FILTER (WHERE EXISTS (
+			SELECT 1 FROM character_variants cv
+			WHERE cv.character_id=characters.id AND cv.deleted_at IS NULL AND cv.generation_status='SUCCESS'
+		)) FROM characters WHERE origin_episode_id=$1 AND deleted_at IS NULL`, epID).Scan(&chars.total, &chars.done)
 	_ = s.repo.pool.QueryRow(c.Request.Context(), `SELECT count(*), count(*) FILTER (WHERE generation_status='SUCCESS') FROM scenes WHERE origin_episode_id=$1 AND deleted_at IS NULL`, epID).Scan(&scenes.total, &scenes.done)
 	_ = s.repo.pool.QueryRow(c.Request.Context(), `SELECT count(*), count(*) FILTER (WHERE generation_status='SUCCESS') FROM props WHERE origin_episode_id=$1 AND deleted_at IS NULL`, epID).Scan(&props.total, &props.done)
 	_ = projectID
@@ -335,7 +340,7 @@ func (s *AssetDetailService) EpisodeProps(c *gin.Context, epUUID string) {
 		return
 	}
 	rows, err := s.repo.pool.Query(c.Request.Context(), `
-		SELECT id, COALESCE(code,''), COALESCE(name,''), COALESCE(category,''),
+		SELECT id, COALESCE(code,''), COALESCE(name,''), COALESCE(category::text,''),
 		       COALESCE(main_image_url,''), COALESCE(generation_status::text,''), COALESCE(point_cost,0)
 		FROM props WHERE origin_episode_id=$1 AND deleted_at IS NULL ORDER BY id ASC`, epID)
 	if err != nil {

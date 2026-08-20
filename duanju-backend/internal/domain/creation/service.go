@@ -399,6 +399,7 @@ func toProjectDTO(p *ProjectRow) ProjectDTO {
 		SpaceID:        p.SpaceUUID,
 		Title:          p.Title,
 		CoverImageURL:  cover,
+		SourceScriptText: p.SourceScriptText,
 		ProjectType:    p.ProjectType,
 		CurrentStep:    p.CurrentStep,
 		Status:         p.Status,

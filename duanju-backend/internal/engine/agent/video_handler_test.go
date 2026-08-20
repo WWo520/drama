@@ -84,19 +84,19 @@ func shotTask(shotID int64) *task.Task {
 
 func TestVideoShotSuccess(t *testing.T) {
 	store := newFakeVideoStore()
-	h := NewVideoHandler(store)
+	h := NewVideoHandler(store, nil) // engine 为 nil → 降级 mock 链路
 
 	out, err := h.Execute(context.Background(), shotTask(1))
 	require.NoError(t, err)
 	assert.Contains(t, string(out), `"video_url"`)
 	assert.Contains(t, string(out), `"shot_id":1`)
-	assert.Contains(t, store.saves[1], "mock.cdn.example.com/video/shot-1-")
+	assert.Contains(t, store.saves[1], "/sample.mp4?shot=1&")
 }
 
 func TestVideoIdempotentCallback(t *testing.T) {
 	// 模拟重复/乱序回调：首次写入后再次调用不再覆盖（幂等）
 	store := newFakeVideoStore()
-	h := NewVideoHandler(store)
+	h := NewVideoHandler(store, nil) // engine 为 nil → 降级 mock 链路
 
 	_, err := h.Execute(context.Background(), shotTask(1))
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestVideoIdempotentCallback(t *testing.T) {
 
 func TestShotGroupStatusAfterAllDone(t *testing.T) {
 	store := newFakeVideoStore()
-	h := NewVideoHandler(store)
+	h := NewVideoHandler(store, nil) // engine 为 nil → 降级 mock 链路
 
 	// 处理同块两个镜头
 	_, err := h.Execute(context.Background(), shotTask(1))

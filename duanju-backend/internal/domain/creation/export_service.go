@@ -53,9 +53,25 @@ func (s *ExportService) Trigger(c *gin.Context, projectUUID string) {
 		return
 	}
 
+	// 解析请求体（3.4.1：format/resolution/watermark；缺省 P720 + 合规水印）
+	var req struct {
+		Format     string `json:"format"`
+		Resolution string `json:"resolution"`
+		Watermark  *bool  `json:"watermark"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	resolution := req.Resolution
+	if resolution == "" {
+		resolution = "P720"
+	}
+	watermark := true
+	if req.Watermark != nil {
+		watermark = *req.Watermark
+	}
+
 	spaceID := proj.SpaceID
 	// 创建导出记录 + 任务（返回 taskID 用于计费冻结）
-	exportID, taskID, err := s.exportOps.CreateExportTask(c.Request.Context(), uid, spaceID, proj.ID, proj.ID, "P720", true)
+	exportID, taskID, err := s.exportOps.CreateExportTask(c.Request.Context(), uid, spaceID, proj.ID, proj.ID, resolution, watermark)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建导出任务失败")
 		return

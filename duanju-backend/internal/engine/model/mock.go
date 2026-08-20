@@ -73,7 +73,7 @@ func (m *MockProvider) GenerateVideo(_ context.Context, k *KeyCredential, req *V
 	}, nil
 }
 
-// mockSplitJSON 开发期拆分的 mock 输出（1 集 2 单元 4 块 8 镜头；枚举对齐 02 A3）。
+// mockSplitJSON 开发期拆分的 mock 输出（1 集 2 单元 4 块 8 镜头 + 集级角色/场景/道具；枚举对齐 02 A3）。
 const mockSplitJSON = `{
   "episodes": [
     {
@@ -131,5 +131,13 @@ const mockSplitJSON = `{
   "characters": [
     {"code": "LU_YAN", "name": "陆言", "tags": "主角,刑警", "description_notes": "雨夜追击案的执行者，身手矫健，意志坚定。", "origin_episode_id": 1},
     {"code": "TARGET", "name": "神秘目标", "tags": "反派,悬念", "description_notes": "身份不明，行为诡异，与陆言在雨夜对峙后逃窜。", "origin_episode_id": 1}
+  ],
+  "scenes": [
+    {"code": "RAIN_ALLEY", "base_name": "雨夜巷道", "base_prompt": "昏暗的南方小城雨巷，两侧霓虹灯牌被雨水淋得斑驳，地面积水倒映灯光，雾气与雨丝交织。", "origin_episode_id": 1},
+    {"code": "WASTELAND", "base_name": "墙后荒地", "base_prompt": "矮墙后是一片杂草丛生的荒地，月光破云而出，远处是废弃工地的轮廓。", "origin_episode_id": 1}
+  ],
+  "props": [
+    {"code": "FLASHLIGHT", "name": "强光手电", "category": "ELECTRONIC_APPLIANCE", "description": "刑警随身携带的黑色强光手电，金属外壳，雨夜中光束穿透雨幕。", "origin_episode_id": 1},
+    {"code": "FOLDING_KNIFE", "name": "折叠刀", "category": "WEAPON", "description": "神秘目标藏于腰间的折叠刀，金属刃面在闪电下泛着冷光。", "origin_episode_id": 1}
   ]
 }`

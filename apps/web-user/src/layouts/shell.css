@@ -1,0 +1,1007 @@
+/* ===================================================================
+ * shell.css — 工作台共用布局样式（批次 2：从 workbench-script.html 设计稿原样提取）
+ * 覆盖：WorkflowPill 胶囊导航 / ep-sidebar 剧集侧栏 / topbar / 弹窗 / 下拉 / 开关 / 表单
+ * 侧边栏（luxreal-nav-item / profile-panel / sidebar-*）样式沿用 home.css 全局定义
+ * =================================================================== */
+
+.workflow-active {
+    background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+    box-shadow: 0 0 20px rgba(76, 127, 248, 0.4), 0 0 40px rgba(139, 92, 246, 0.2);
+}
+.nav-active {
+    background: linear-gradient(135deg, #1a1a3e, #252550);
+}
+.scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+    background: #2A2A35;
+    border-radius: 2px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: #3A3A4A;
+}
+.tooltip {
+    position: relative;
+}
+.tooltip::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: calc(100% + 12px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: #1A1A2E;
+    color: #fff;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+    z-index: 100;
+    border: 1px solid #2A2A3E;
+}
+.tooltip::before {
+    content: '';
+    position: absolute;
+    left: calc(100% + 6px);
+    top: 50%;
+    transform: translateY(-50%);
+    border: 5px solid transparent;
+    border-right-color: #1A1A2E;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+    z-index: 100;
+}
+.tooltip:hover::after,
+.tooltip:hover::before {
+    opacity: 1;
+}
+/* Modal base */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.modal-overlay.hidden {
+    display: none;
+}
+.modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+}
+.modal-content {
+    position: relative;
+    z-index: 1;
+    border-radius: 16px;
+    padding: 24px;
+    background: #1E1E24;
+    border: 1px solid #2A2A35;
+}
+/* Dropdown */
+.duration-dropdown {
+    position: fixed;
+    z-index: 50;
+    border-radius: 8px;
+    padding: 4px 0;
+    background: #1E1E24;
+    border: 1px solid #2A2A35;
+    min-width: 120px;
+}
+.duration-dropdown.hidden {
+    display: none;
+}
+.duration-dropdown button {
+    width: 100%;
+    text-align: left;
+    font-size: 14px;
+    padding: 6px 12px;
+    transition: background 0.15s;
+}
+.duration-dropdown button:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+.duration-badge {
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+.duration-badge:hover {
+    border-color: #4C7FF8 !important;
+}
+/* Toggle switch */
+.toggle {
+    width: 40px;
+    height: 24px;
+    border-radius: 9999px;
+    position: relative;
+    cursor: pointer;
+    background: #2A2A35;
+    transition: background 0.2s;
+}
+.toggle.active {
+    background: #4C7FF8;
+}
+.toggle-knob {
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    background: white;
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    transition: transform 0.2s;
+}
+.toggle.active .toggle-knob {
+    transform: translateX(16px);
+}
+/* Segmented control */
+.segmented {
+    display: flex;
+    border-radius: 8px;
+    padding: 2px;
+    background: #1A1A24;
+    border: 1px solid #2A2A35;
+}
+.segmented button {
+    flex: 1;
+    padding: 6px 0;
+    font-size: 14px;
+    border-radius: 6px;
+    color: #8B8B9A;
+    transition: all 0.15s;
+}
+.segmented button.active {
+    background: #4C7FF8;
+    color: white;
+}
+/* Form inputs（wb- 前缀：与登录页 login.css 的同名 .form-input 隔离，避免全局注入顺序覆盖） */
+.wb-input, .wb-textarea, .wb-select {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    background: #1A1A24;
+    border: 1px solid #2A2A35;
+    color: #C0C0CC;
+    outline: none;
+    transition: border-color 0.15s;
+}
+.wb-input:focus, .wb-textarea:focus, .wb-select:focus {
+    border-color: #4C7FF8;
+}
+.wb-input::placeholder, .wb-textarea::placeholder {
+    color: #4A4A5A;
+}
+.wb-select {
+    appearance: none;
+    cursor: pointer;
+}
+.wb-select-wrapper {
+    position: relative;
+}
+.wb-select-wrapper i,
+.wb-select-wrapper svg {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: #6B7088;
+}
+/* Sidebar design tokens */
+:root {
+    --luxreal-sidebar: #0A0A14;
+    --luxreal-sidebar-foreground: #B0B0C8;
+    --luxreal-border: #1A1F2E;
+    --luxreal-primary: #4C7FF8;
+    --luxreal-foreground: #F0F0F5;
+}
+/* Episode Sidebar - LuxReal Unified Style */
+.ep-sidebar {
+    width: 240px;
+    background: #0A0D14;
+    border-right: 1px solid #1A1F2E;
+}
+.ep-sidebar-header {
+    height: 48px;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    border-bottom: 1px solid #1A1F2E;
+    flex-shrink: 0;
+}
+.ep-sidebar-back {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8B8B9A;
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+    margin-right: 4px;
+    text-decoration: none;
+}
+.ep-sidebar-back:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #F0F0F5;
+}
+.ep-sidebar-project {
+    font-size: 13px;
+    font-weight: 500;
+    color: #F0F0F5;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ep-sidebar-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+}
+/* Episode Card */
+.ep-card {
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.ep-card.expanded {
+    background: #0D1119;
+    border: 1px solid rgba(76, 127, 248, 0.3);
+    border-left: 2px solid #4C7FF8;
+}
+.ep-card.collapsed {
+    background: transparent;
+    border: 1px solid #1A1F2E;
+}
+.ep-card.collapsed:hover {
+    border-color: #2A2F3E;
+}
+/* Episode Header */
+.ep-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.ep-header-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.ep-chevron {
+    flex-shrink: 0;
+    color: #6B7088;
+    width: 14px;
+    height: 14px;
+}
+.ep-number {
+    font-size: 11px;
+    color: #6B7088;
+    text-transform: uppercase;
+}
+.ep-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10B981;
+    flex-shrink: 0;
+}
+/* Episode Title */
+.ep-title {
+    margin-top: 4px;
+}
+.ep-card.expanded .ep-title {
+    font-size: 14px;
+    color: #F0F0F5;
+    font-weight: 500;
+}
+.ep-card.collapsed .ep-title {
+    font-size: 13px;
+    color: #8B8B9A;
+    font-weight: normal;
+}
+/* Narrative Units */
+.ep-units {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #1A1F2E;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.ep-unit {
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 6px 10px;
+    border-radius: 6px;
+    color: #8B8B9A;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: transparent;
+    text-align: left;
+    width: 100%;
+}
+.ep-unit:hover {
+    color: #F0F0F5;
+    background: rgba(255, 255, 255, 0.04);
+}
+.ep-unit.active {
+    color: #F0F0F5;
+    background: rgba(76, 127, 248, 0.1);
+    border-left: 2px solid #4C7FF8;
+    padding-left: 8px;
+}
+/* Add Episode Button */
+.ep-add-btn {
+    height: 36px;
+    margin: 0 12px 12px;
+    border: 1px dashed #1A1F2E;
+    border-radius: 8px;
+    background: transparent;
+    font-size: 12px;
+    color: #6B7088;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-shrink: 0;
+    width: calc(100% - 24px);
+}
+.ep-add-btn:hover {
+    border-color: #4C7FF8;
+    color: #4C7FF8;
+}
+/* === Workflow Navigation (pill style, LuxReal aligned) === */
+.workflow-steps {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+}
+.workflow-nav {
+    display: flex;
+    align-items: center;
+    background: rgba(26, 26, 46, 0.8);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 999px;
+    padding: 4px;
+    backdrop-filter: blur(12px);
+}
+.workflow-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 18px;
+    border-radius: 999px;
+    font-size: 13px;
+    color: #8B8B9A;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    white-space: nowrap;
+}
+.workflow-nav-item:hover {
+    color: #fff;
+    background: rgba(255,255,255,0.04);
+}
+.workflow-nav-item.active {
+    background: linear-gradient(135deg, #4C7FF8, #6366F1);
+    color: #fff;
+    font-weight: 500;
+    box-shadow: 0 2px 12px rgba(76, 127, 248, 0.35);
+}
+.workflow-nav-item.active:hover {
+    background: linear-gradient(135deg, #5C8FFF, #7376F9);
+    box-shadow: 0 4px 16px rgba(76, 127, 248, 0.5);
+}
+.workflow-nav-item.disabled {
+    color: #4A4A5A;
+    cursor: not-allowed;
+}
+.workflow-nav-item.disabled:hover {
+    color: #4A4A5A;
+    background: transparent;
+}
+.workflow-nav-num {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: #6B7088;
+    transition: all 0.2s ease;
+}
+.workflow-nav-item.active .workflow-nav-num {
+    background: rgba(255,255,255,0.25);
+    color: #fff;
+}
+.workflow-nav-text {
+    line-height: 1;
+}
+/* Top bar unified styles */
+.topbar-container {
+    height: 64px;
+    background: rgba(13, 17, 25, 0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid #1A1F2E;
+    position: relative;
+}
+/* Workflow Pill Bar optimized */
+.workflow-pill-bar {
+    background: rgba(13, 17, 25, 0.8) !important;
+    border: 1px solid #1A1F2E !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+/* Unified topbar right buttons */
+.topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+}
+.topbar-btn {
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: 1px solid #1A1F2E;
+    background: #0D1119;
+    color: #8B8B9A;
+    white-space: nowrap;
+}
+.topbar-btn:hover {
+    border-color: #2A2F3E;
+    color: #F0F0F5;
+}
+.topbar-btn-primary {
+    border-color: rgba(76, 127, 248, 0.4);
+    color: #4C7FF8;
+}
+.topbar-btn-primary:hover {
+    border-color: rgba(76, 127, 248, 0.6);
+    color: #6B9BFF;
+}
+/* === 内容区单元卡片补充（设计稿内联样式提取） === */
+.unit-card {
+    background: #1E1E24;
+    border: 1px solid #2A2A35;
+}
+.unit-status-done {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10B981;
+}
+.unit-status-running {
+    background: rgba(76, 127, 248, 0.15);
+    color: #4C7FF8;
+}
+.unit-script-box {
+    background: #16161C;
+    border: 1px solid #2A2A35;
+    color: #C0C0CC;
+}
+.settings-bar {
+    background: #16161C;
+    border: 1px solid #2A2A35;
+}
+.settings-chip {
+    background: #1E1E24;
+    border: 1px solid #2A2A35;
+}
+/* Nav badge */
+.nav-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: #EF4444;
+    color: white;
+    font-size: 10px;
+    font-weight: 600;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 5px;
+    line-height: 1;
+}
+/* Avatar circle */
+.avatar-circle {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    cursor: pointer;
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 500;
+}
+/* === Sidebar Credits & Recharge === */
+.sidebar-credits {
+    font-size: 12px;
+    font-weight: 500;
+    color: #F0F0F5;
+    line-height: 1.2;
+    margin: 4px 0 6px;
+    flex-shrink: 0;
+}
+.sidebar-recharge {
+    font-size: 12px;
+    font-weight: 500;
+    color: #fff;
+    background: linear-gradient(135deg, #A78BFA, #8B5CF6);
+    padding: 4px 12px;
+    border-radius: 9999px;
+    cursor: pointer;
+    text-decoration: none;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+.sidebar-recharge:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
+}
+/* Sidebar spacer */
+.sidebar-spacer {
+    flex: 1;
+    min-height: 8px;
+}
+/* Sidebar avatar */
+.sidebar-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 13px;
+    font-weight: 500;
+    position: relative;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+.sidebar-avatar:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 2px rgba(76, 127, 248, 0.3);
+}
+/* Profile Panel（头像位于侧边栏底部，面板锚定左下角并垂直居中对齐头像，::before 三角恰好指向头像） */
+.profile-panel {
+    position: fixed;
+    bottom: 64px; /* 头像中心距视口底约 100px，配合 ::before top:90% 使三角指向头像 */
+    left: 84px;
+    width: 240px;
+    background: #1A1A2E;
+    border: 1px solid #2A2A3E;
+    border-radius: 20px;
+    padding: 16px;
+    z-index: 100;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03) inset;
+}
+.profile-panel::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 90%; /* 对齐头像高度（头像在侧边栏底部，三角靠面板下缘） */
+    transform: translateY(-50%) rotate(45deg);
+    width: 10px;
+    height: 10px;
+    background: #1A1A2E;
+    border-left: 1px solid #2A2A3E;
+    border-bottom: 1px solid #2A2A3E;
+}
+.profile-panel.hidden {
+    display: none;
+}
+.profile-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+.profile-avatar-lg {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 18px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+.profile-avatar-lg::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 12px;
+    height: 12px;
+    background: #22C55E;
+    border: 2px solid #1A1A2E;
+    border-radius: 50%;
+}
+.profile-info {
+    flex: 1;
+    min-width: 0;
+}
+.profile-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 2px;
+}
+.profile-id {
+    font-size: 12px;
+    color: #6B7088;
+}
+.profile-panel-divider {
+    height: 1px;
+    background: rgba(255,255,255,0.06);
+    margin: 12px 0;
+}
+.profile-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.profile-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    color: #C0C0CC;
+    font-size: 13px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.profile-menu-item:hover {
+    background: rgba(255,255,255,0.05);
+    color: #fff;
+}
+.profile-menu-item:hover .profile-menu-arrow {
+    color: #4C7FF8;
+    transform: translateX(2px);
+}
+.profile-menu-arrow {
+    margin-left: auto;
+    color: #4A4A5A;
+    transition: all 0.2s;
+}
+.profile-logout {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 10px;
+    color: #EF4444;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.profile-logout:hover {
+    background: rgba(239,68,68,0.1);
+}
+/* Sidebar navigation item */
+.luxreal-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 10px;
+    color: var(--luxreal-sidebar-foreground);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    gap: 3px;
+    text-decoration: none;
+    font-size: 11px;
+    position: relative;
+}
+.luxreal-nav-item:hover {
+    color: var(--luxreal-foreground);
+    background: rgba(255,255,255,0.05);
+}
+.luxreal-nav-item.active {
+    color: var(--luxreal-primary);
+    background: rgba(59,130,246,0.12);
+}
+.luxreal-nav-item.nav-recharge {
+    color: #A78BFA;
+    background: rgba(139,92,246,0.08);
+}
+.luxreal-nav-item.nav-recharge:hover {
+    color: #C4B5FD;
+    background: rgba(139,92,246,0.14);
+}
+
+/* ===== ProfilePanel v2（对齐 LuxReal 官方实测：05-前后端对齐/01 清单） =====
+   头像右侧展开、底边与头像底边对齐；#292D32/8px 圆角/无边框无三角/中阴影；
+   触发保留点击，面板常驻 DOM 用 .hidden 切换。旧 .profile-panel 类仅供未迁移页面兜底。 */
+.pp-anchor {
+    position: relative;
+}
+.pp-panel {
+    position: absolute;
+    left: 50px; /* 头像左缘 +50px：与侧栏右缘重叠 4px 形成无间隙桥接（官方 left=68/sidebar=72） */
+    bottom: 0;  /* 面板底边与头像底边精确对齐 */
+    width: 340px;
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
+    background: #292D32;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(3, 9, 17, 0.6);
+    z-index: 1050;
+    padding: 2px 0;
+    text-align: left;
+}
+.pp-panel.hidden {
+    display: none;
+}
+.pp-panel::-webkit-scrollbar {
+    display: none;
+}
+/* 用户信息区 */
+.pp-user {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 18px 16px 14px;
+}
+.pp-user-avatar {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 20px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+/* 头像可更换：悬浮相机角标 + 图片覆盖层（onError 隐藏回退字母） */
+.pp-avatar-editable {
+    position: relative;
+    cursor: pointer;
+}
+.pp-avatar-editable:hover .pp-avatar-cam {
+    opacity: 1;
+}
+.pp-avatar-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+}
+.pp-avatar-cam {
+    position: absolute;
+    right: -3px;
+    bottom: -3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #4C7FF8;
+    border: 2px solid #292D32;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    opacity: 0;
+    transition: opacity .15s ease;
+    z-index: 2;
+}
+.pp-user-info {
+    flex: 1;
+    min-width: 0;
+    padding-top: 4px;
+}
+.pp-user-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.96);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 2px;
+}
+.pp-user-id {
+    font-size: 12px;
+    color: rgba(255,255,255,0.4);
+}
+.pp-user-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.pp-logout-mini {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.62);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+.pp-logout-mini:hover {
+    background: rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.96);
+}
+.pp-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    color: rgba(255,255,255,0.5);
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+.pp-icon-btn:hover {
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.86);
+}
+/* 分隔线（通栏白 12%） */
+.pp-divider {
+    height: 1px;
+    background: rgba(255,255,255,0.12);
+}
+/* 创作空间区 */
+.pp-space-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px 6px;
+}
+.pp-group-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.36);
+}
+.pp-space-new {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 12px;
+    color: #4D86FF;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+.pp-space-new:hover {
+    opacity: 0.8;
+}
+.pp-space-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 2px 8px 8px;
+    padding: 16px 20px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+.pp-space-card:hover {
+    background: rgba(255,255,255,0.09);
+}
+.pp-space-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 18px;
+    flex-shrink: 0;
+}
+.pp-space-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 14px;
+    color: rgba(255,255,255,0.86);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.pp-space-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: rgba(255,255,255,0.6);
+    flex-shrink: 0;
+}
+.pp-space-card:hover .pp-space-switch {
+    color: rgba(255,255,255,0.86);
+}
+/* 菜单项（官方规格：32px 高 / 12px 字 / hover 白 6%） */
+.pp-menu {
+    padding: 4px 8px;
+}
+.pp-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    margin: 4px 0;
+    padding: 0 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: rgba(255,255,255,0.96);
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+.pp-menu-item svg {
+    color: rgba(255,255,255,0.5);
+    flex-shrink: 0;
+    transition: color 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+.pp-menu-item:hover {
+    background: rgba(255,255,255,0.06);
+}
+.pp-menu-item:hover svg {
+    color: rgba(255,255,255,0.7);
+}

@@ -1,0 +1,54 @@
+/* ===================================================================
+ * step2.css — Step2 资产生成页专属样式（批次 3：从 workbench-assets.html 设计稿原样提取）
+ * 公共骨架样式（workflow-nav / ep-sidebar / settings-bar / 弹窗基类）见 layouts/shell.css
+ * =================================================================== */
+
+/* 角色剪影占位（未出图时的 3/4 竖图位） */
+.char-silhouette {
+    background: linear-gradient(135deg, #2A2A3E 0%, #1A1A2E 100%);
+    position: relative;
+}
+.char-silhouette::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center 40%, rgba(76, 127, 248, 0.08) 0%, transparent 60%);
+}
+
+/* 场景占位（16:9 横图位） */
+.scene-placeholder {
+    background: linear-gradient(135deg, #252535 0%, #1A1A24 100%);
+}
+
+/* 道具占位（1:1 方图位） */
+.prop-placeholder {
+    background: linear-gradient(135deg, #2A2A38 0%, #1A1E28 100%);
+}
+
+/* 生成中不定进度条（后端无单资产进度，视觉态往返扫动） */
+@keyframes asset-progress-sweep {
+    0% {
+        transform: translateX(-100%);
+    }
+    50% {
+        transform: translateX(20%);
+    }
+    100% {
+        transform: translateX(140%);
+    }
+}
+.asset-progress {
+    position: relative;
+    height: 4px;
+    background: #2A2A35;
+    border-radius: 9999px;
+    overflow: hidden;
+}
+.asset-progress-bar {
+    position: absolute;
+    inset: 0;
+    width: 60%;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, #4C7FF8, #8B5CF6);
+    animation: asset-progress-sweep 1.6s ease-in-out infinite;
+}

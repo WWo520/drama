@@ -24,17 +24,21 @@ type AlipayConfig struct {
 
 // OrderStore 订单数据边界。
 type OrderStore interface {
-	// CreateOrder 幂等创建订单（user_id+idempotency_key UNIQUE）。
-	CreateOrder(ctx context.Context, userID int64, orderType, planCode string, amountYuan string, points int, idemKey string) (orderID int64, orderNo string, err error)
+	// CreateOrder 幂等创建订单（user_id+idempotency_key UNIQUE；订阅传 packageID+days，积分包传 0,0）。
+	CreateOrder(ctx context.Context, userID int64, orderType, planCode string, amountYuan string, points int, idemKey string, packageID int64, days int) (orderID int64, orderNo string, err error)
 	// GetOrderByNo 查订单。
 	GetOrderByNo(ctx context.Context, orderNo string) (*Order, error)
 	// GetOrderByNoForUser 查订单（归属校验：仅订单所有者可见）。
 	GetOrderByNoForUser(ctx context.Context, orderNo string, userID int64) (*Order, error)
 	// GetPackage 查积分套餐（档位校验用）。
 	GetPackage(ctx context.Context, pkgCode string) (*Package, error)
-	// PayCallback 回调事务：订单置 PAID + 加积分 + 流水（pay_transaction_id UNIQUE 幂等）。
+	// GetPlanPackage 查订阅套餐（packages 表，档位校验用）。
+	GetPlanPackage(ctx context.Context, code string) (*PlanPackage, error)
+	// PayCallback 回调事务：订单置 PAID + 加积分 + 流水（pay_transaction_id UNIQUE 幂等；订阅订单额外开通/续期会员）。
 	// 返回 (是否首次处理, 错误)；已处理的交易返回 false。
 	PayCallback(ctx context.Context, orderNo, payTransactionID string, points int) (bool, error)
+	// QueryMembership 查询用户当前 ACTIVE 会员（订阅订单状态轮询附带）。
+	QueryMembership(ctx context.Context, userID int64, planCode, status, renew, endAt *string) error
 	// LogCallback 记录回调日志（H01 生产加固）。
 	LogCallback(ctx context.Context, params map[string]string, step int, result, failReason string) error
 }
@@ -48,17 +52,30 @@ type Package struct {
 	Status      string
 }
 
+// PlanPackage 订阅套餐（packages 行）。
+type PlanPackage struct {
+	ID          int64
+	Code        string
+	Name        string
+	Cycle       string // monthly / yearly / ''
+	PriceYuan   string
+	PointsQuota int
+	Status      string // ACTIVE / OFF
+}
+
 // Order 订单。
 type Order struct {
-	ID            int64
-	OrderNo       string
-	UserID        int64
-	OrderType     string
-	PlanCode      string
-	AmountYuan    string
-	Points        int
-	PayStatus     string
+	ID               int64
+	OrderNo          string
+	UserID           int64
+	OrderType        string
+	PlanCode         string
+	AmountYuan       string
+	Points           int
+	PayStatus        string
 	PayTransactionID string
+	PackageID        int64
+	DaysGranted      int
 }
 
 // AlipayService 支付服务。
@@ -100,7 +117,7 @@ func (s *AlipayService) CreateOrder(ctx context.Context, userID int64, orderType
 	if points != pkg.Points+pkg.BonusPoints {
 		return nil, fmt.Errorf("积分与套餐价目不符")
 	}
-	orderID, orderNo, err := s.store.CreateOrder(ctx, userID, orderType, planCode, amountYuan, points, idemKey)
+	orderID, orderNo, err := s.store.CreateOrder(ctx, userID, orderType, planCode, amountYuan, points, idemKey, 0, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +131,45 @@ func (s *AlipayService) CreateOrder(ctx context.Context, userID int64, orderType
 	}, nil
 }
 
-// HandleCallback 支付宝异步回调（9.7）：严格 7 步验签顺序（04 H.2）。
+// CreateSubscriptionOrder 订阅套餐下单（05 9.5 biz_type=package）：
+// 服务端校验 packages 表价目/状态 → 创建 SUBSCRIPTION_MONTH/YEAR 订单（含套餐积分额度与开通天数）。
+func (s *AlipayService) CreateSubscriptionOrder(ctx context.Context, userID int64, planCode, billingCycle, idemKey string) (*CreateOrderResp, error) {
+	if idemKey == "" {
+		return nil, fmt.Errorf("缺少幂等键")
+	}
+	plan, err := s.store.GetPlanPackage(ctx, planCode)
+	if err != nil {
+		return nil, fmt.Errorf("套餐不存在")
+	}
+	if plan.Status != "ACTIVE" {
+		return nil, fmt.Errorf("套餐已下架")
+	}
+	// 计费周期：请求 billing_cycle 须与套餐配置一致（月度套餐只卖月付；大小写不敏感）
+	cycle := strings.ToLower(plan.Cycle)
+	if cycle == "" {
+		cycle = "monthly"
+	}
+	if billingCycle != "" && strings.ToLower(billingCycle) != cycle {
+		return nil, fmt.Errorf("套餐不支持该计费周期")
+	}
+	orderType := "SUBSCRIPTION_MONTH"
+	days := 30
+	if cycle == "yearly" {
+		orderType = "SUBSCRIPTION_YEAR"
+		days = 365
+	}
+	orderID, orderNo, err := s.store.CreateOrder(ctx, userID, orderType, planCode, plan.PriceYuan, plan.PointsQuota, idemKey, plan.ID, days)
+	if err != nil {
+		return nil, err
+	}
+	_ = orderID
+	return &CreateOrderResp{
+		OrderNo:    orderNo,
+		QRCodeURL:  fmt.Sprintf("https://openapi-sandbox.dl.alipaydev.com/gateway.do?order_no=%s", orderNo),
+		AmountYuan: plan.PriceYuan,
+		ExpireAt:   time.Now().Add(30 * time.Minute).Format(time.RFC3339),
+	}, nil
+}
 // 返回 "success" 或 "fail"。
 func (s *AlipayService) HandleCallback(ctx context.Context, params map[string]string) string {
 	// 步1：验签（mock=HMAC；生产=RSA2）
@@ -155,6 +210,11 @@ func (s *AlipayService) HandleCallback(ctx context.Context, params map[string]st
 	// 步7：返回 success
 	_ = s.store.LogCallback(ctx, params, 7, "success", "")
 	return "success"
+}
+
+// QueryMembership 查询用户当前 ACTIVE 会员（9.8 Status 订阅订单附带；无会员时返回 error 供调用方忽略）。
+func (s *AlipayService) QueryMembership(ctx context.Context, userID int64, planCode, status, renew, endAt *string) error {
+	return s.store.QueryMembership(ctx, userID, planCode, status, renew, endAt)
 }
 
 // VerifyHMAC mock 验签：预共享密钥 HMAC-SHA256。

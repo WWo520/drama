@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>算力任务 - Empty Broken 管理后台</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          'bg-deep': '#0B0B1A',
+          'bg-card': '#151525',
+          'bg-card-light': '#1A1A2E',
+          'border-dark': '#2A2A3E',
+          'amber-gold': '#fbbf24',
+          'amber-dim': '#d97706',
+          'text-primary': '#ffffff',
+          'text-secondary': '#9ca3af',
+          'text-muted': '#6b7280',
+        },
+        fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+      }
+    }
+  }
+</script>
+<style>
+  * { box-sizing: border-box; }
+  body { background: #0B0B1A; color: #fff; font-family: 'Inter', system-ui, sans-serif; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #151525; }
+  ::-webkit-scrollbar-thumb { background: #2A2A3E; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3a4e; }
+  .menu-item.active {
+    background: linear-gradient(90deg, rgba(251,191,36,0.15) 0%, rgba(251,191,36,0.05) 100%);
+    color: #fbbf24; border-left: 3px solid #fbbf24;
+  }
+  .menu-item.active svg { color: #fbbf24; }
+  .menu-item:hover { background: rgba(255,255,255,0.05); }
+  .notif-dot { position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; border: 2px solid #0D0D0D; }
+  .table-row:hover { background: rgba(255,255,255,0.02); }
+  .tag { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; display: inline-flex; align-items: center; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .action-btn { padding: 4px 8px; border-radius: 6px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; }
+  .action-btn:hover { background: rgba(255,255,255,0.08); }
+  .progress-bar { height: 6px; border-radius: 3px; background: #2A2A3E; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+  .progress-running { animation: progressPulse 2s ease-in-out infinite; }
+  @keyframes progressPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  .gpu-bar { height: 8px; border-radius: 4px; background: #1a1a2e; overflow: hidden; }
+  .gpu-fill { height: 100%; border-radius: 4px; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="flex min-h-screen">
+
+  <!-- SIDEBAR -->
+  <aside class="w-[240px] bg-[#0D0D0D] border-r border-[#2A2A3E] flex flex-col flex-shrink-0 fixed h-full z-20">
+    <div class="h-[60px] flex items-center px-5 border-b border-[#2A2A3E]">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center mr-3">
+        <svg class="w-5 h-5 text-[#0B0B1A]" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      </div>
+      <span class="text-white font-bold text-lg">Empty Broken <span class="text-amber-gold">Admin</span></span>
+    </div>
+    <nav class="flex-1 py-4 overflow-y-auto">
+      <div class="px-3 mb-2 text-[11px] text-text-muted uppercase tracking-wider font-medium">主菜单</div>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="layout-dashboard" class="w-[18px] h-[18px] mr-3"></i><span>工作台</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="users" class="w-[18px] h-[18px] mr-3"></i><span>用户管理</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="shield-check" class="w-[18px] h-[18px] mr-3"></i><span>内容审核</span>
+        <span class="ml-auto text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">12</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="film" class="w-[18px] h-[18px] mr-3"></i><span>作品管理</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="wallet" class="w-[18px] h-[18px] mr-3"></i><span>计费财务</span>
+      </a>
+      <a href="#" class="menu-item active flex items-center px-5 py-3 text-sm cursor-pointer">
+        <i data-lucide="cpu" class="w-[18px] h-[18px] mr-3"></i><span>算力任务</span>
+        <span class="ml-auto text-[10px] bg-amber-gold/20 text-amber-gold px-2 py-0.5 rounded-full">34</span>
+      </a>
+      <a href="#" class="menu-item flex items-center px-5 py-3 text-sm text-text-secondary cursor-pointer">
+        <i data-lucide="settings" class="w-[18px] h-[18px] mr-3"></i><span>平台配置</span>
+      </a>
+    </nav>
+    <div class="p-4 border-t border-[#2A2A3E]">
+      <div class="flex items-center">
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center text-[#0B0B1A] font-bold text-sm">A</div>
+        <div class="ml-3 flex-1 min-w-0">
+          <div class="text-sm font-medium text-white truncate">Admin</div>
+          <div class="text-xs text-text-muted truncate">超级管理员</div>
+        </div>
+        <i data-lucide="chevron-up" class="w-4 h-4 text-text-muted"></i>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="flex-1 ml-[240px] flex flex-col min-w-0">
+
+    <!-- TOP BAR -->
+    <header class="h-[60px] bg-[#0D0D0D]/80 backdrop-blur-sm border-b border-[#2A2A3E] flex items-center justify-between px-6 sticky top-0 z-10">
+      <div class="flex items-center">
+        <i data-lucide="home" class="w-4 h-4 text-text-muted mr-2"></i>
+        <span class="text-text-muted text-sm">管理后台</span>
+        <i data-lucide="chevron-right" class="w-4 h-4 text-text-muted mx-2"></i>
+        <span class="text-white text-sm font-medium">算力任务</span>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="relative">
+          <i data-lucide="search" class="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input type="text" placeholder="搜索任务ID..." class="bg-bg-card border border-[#2A2A3E] rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-text-muted focus:outline-none focus:border-amber-gold/50 w-64 transition-colors">
+        </div>
+        <button class="relative w-9 h-9 rounded-lg bg-bg-card border border-[#2A2A3E] flex items-center justify-center hover:border-[#3A3A4E] transition-colors">
+          <i data-lucide="bell" class="w-4 h-4 text-text-secondary"></i><span class="notif-dot"></span>
+        </button>
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-amber-gold to-amber-dim flex items-center justify-center text-[#0B0B1A] font-bold text-sm cursor-pointer">A</div>
+      </div>
+    </header>
+
+    <!-- CONTENT -->
+    <main class="flex-1 p-6">
+
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">算力任务</h1>
+          <p class="text-text-muted text-sm mt-1">监控 AI 生成任务队列与 GPU 集群资源使用情况</p>
+        </div>
+        <div class="flex gap-3">
+          <button class="px-4 py-2 bg-bg-card border border-[#2A2A3E] rounded-lg text-sm text-text-secondary hover:border-[#3A3A4E] transition-colors flex items-center gap-2">
+            <i data-lucide="refresh-cw" class="w-4 h-4"></i>刷新
+          </button>
+          <button class="px-4 py-2 bg-amber-gold text-[#0B0B1A] rounded-lg text-sm font-semibold hover:bg-amber-400 transition-colors flex items-center gap-2">
+            <i data-lucide="settings-2" class="w-4 h-4"></i>算力调度
+          </button>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="grid grid-cols-3 gap-4 mb-6">
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-center justify-between mb-4">
+            <span class="text-text-muted text-sm">GPU 集群利用率</span>
+            <div class="w-9 h-9 rounded-lg bg-green-500/10 flex items-center justify-center">
+              <i data-lucide="server" class="w-4 h-4 text-green-400"></i>
+            </div>
+          </div>
+          <div class="flex items-end gap-2 mb-2">
+            <span class="text-3xl font-bold text-white">73%</span>
+            <span class="text-xs text-green-400 mb-1">健康</span>
+          </div>
+          <div class="gpu-bar"><div class="gpu-fill bg-gradient-to-r from-green-500 to-emerald-400" style="width: 73%"></div></div>
+          <div class="flex justify-between mt-2 text-xs text-text-muted"><span>24 / 32 卡运行中</span><span>8 卡空闲</span></div>
+        </div>
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-center justify-between mb-4">
+            <span class="text-text-muted text-sm">任务队列</span>
+            <div class="w-9 h-9 rounded-lg bg-amber-gold/10 flex items-center justify-center">
+              <i data-lucide="list-todo" class="w-4 h-4 text-amber-gold"></i>
+            </div>
+          </div>
+          <div class="flex items-end gap-2 mb-2">
+            <span class="text-3xl font-bold text-white">34</span>
+            <span class="text-xs text-amber-gold mb-1">排队中</span>
+          </div>
+          <div class="grid grid-cols-4 gap-2 text-center">
+            <div class="bg-bg-deep rounded-lg py-2"><div class="text-lg font-semibold text-amber-gold">34</div><div class="text-[10px] text-text-muted">排队</div></div>
+            <div class="bg-bg-deep rounded-lg py-2"><div class="text-lg font-semibold text-blue-400">12</div><div class="text-[10px] text-text-muted">生成中</div></div>
+            <div class="bg-bg-deep rounded-lg py-2"><div class="text-lg font-semibold text-green-400">286</div><div class="text-[10px] text-text-muted">今日完成</div></div>
+            <div class="bg-bg-deep rounded-lg py-2"><div class="text-lg font-semibold text-red-400">3</div><div class="text-[10px] text-text-muted">失败</div></div>
+          </div>
+        </div>
+        <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5">
+          <div class="flex items-center justify-between mb-4">
+            <span class="text-text-muted text-sm">平均处理时长</span>
+            <div class="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center">
+              <i data-lucide="clock" class="w-4 h-4 text-blue-400"></i>
+            </div>
+          </div>
+          <div class="flex items-end gap-2 mb-2">
+            <span class="text-3xl font-bold text-white">8.5<span class="text-lg">分</span></span>
+            <span class="text-xs text-green-400 mb-1">-12% ↓</span>
+          </div>
+          <div class="space-y-2 mt-3">
+            <div class="flex items-center justify-between text-xs"><span class="text-text-muted">视频生成</span><span class="text-white">12.3 分钟</span></div>
+            <div class="flex items-center justify-between text-xs"><span class="text-text-muted">AI 配音</span><span class="text-white">3.2 分钟</span></div>
+            <div class="flex items-center justify-between text-xs"><span class="text-text-muted">封面生成</span><span class="text-white">1.5 分钟</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- GPU Node Grid -->
+      <div class="bg-bg-card border border-[#2A2A3E] rounded-xl p-5 mb-6">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-white font-semibold">GPU 节点状态</h3>
+          <div class="flex items-center gap-3 text-xs">
+            <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-green-400"></span><span class="text-text-muted">正常</span></span>
+            <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-amber-gold"></span><span class="text-text-muted">高负载</span></span>
+            <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-red-400"></span><span class="text-text-muted">异常</span></span>
+            <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-gray-500"></span><span class="text-text-muted">离线</span></span>
+          </div>
+        </div>
+        <div class="grid grid-cols-8 gap-2">
+          <!-- 32 GPU nodes -->
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-01</div>
+            <div class="text-xs text-white font-bold mt-0.5">68%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-02</div>
+            <div class="text-xs text-white font-bold mt-0.5">82%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <div class="bg-amber-gold/10 border border-amber-gold/30 rounded-lg p-2 text-center cursor-pointer hover:bg-amber-gold/20 transition-colors">
+            <div class="text-[10px] text-amber-gold font-medium">GPU-03</div>
+            <div class="text-xs text-white font-bold mt-0.5">95%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-04</div>
+            <div class="text-xs text-white font-bold mt-0.5">55%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-05</div>
+            <div class="text-xs text-white font-bold mt-0.5">77%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-06</div>
+            <div class="text-xs text-white font-bold mt-0.5">61%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-red-500/20 transition-colors">
+            <div class="text-[10px] text-red-400 font-medium">GPU-07</div>
+            <div class="text-xs text-white font-bold mt-0.5">ERR</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-08</div>
+            <div class="text-xs text-white font-bold mt-0.5">89%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <!-- Row 2 -->
+          <div class="bg-amber-gold/10 border border-amber-gold/30 rounded-lg p-2 text-center cursor-pointer hover:bg-amber-gold/20 transition-colors">
+            <div class="text-[10px] text-amber-gold font-medium">GPU-09</div>
+            <div class="text-xs text-white font-bold mt-0.5">92%</div>
+            <div class="text-[9px] text-text-muted">H100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-10</div>
+            <div class="text-xs text-white font-bold mt-0.5">71%</div>
+            <div class="text-[9px] text-text-muted">H100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-11</div>
+            <div class="text-xs text-white font-bold mt-0.5">63%</div>
+            <div class="text-[9px] text-text-muted">H100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-12</div>
+            <div class="text-xs text-white font-bold mt-0.5">78%</div>
+            <div class="text-[9px] text-text-muted">H100</div>
+          </div>
+          <div class="bg-gray-500/10 border border-gray-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-gray-500/20 transition-colors">
+            <div class="text-[10px] text-gray-400 font-medium">GPU-13</div>
+            <div class="text-xs text-white/50 font-bold mt-0.5">OFF</div>
+            <div class="text-[9px] text-text-muted">H100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-14</div>
+            <div class="text-xs text-white font-bold mt-0.5">59%</div>
+            <div class="text-[9px] text-text-muted">H100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-15</div>
+            <div class="text-xs text-white font-bold mt-0.5">85%</div>
+            <div class="text-[9px] text-text-muted">H100</div>
+          </div>
+          <div class="bg-amber-gold/10 border border-amber-gold/30 rounded-lg p-2 text-center cursor-pointer hover:bg-amber-gold/20 transition-colors">
+            <div class="text-[10px] text-amber-gold font-medium">GPU-16</div>
+            <div class="text-xs text-white font-bold mt-0.5">97%</div>
+            <div class="text-[9px] text-text-muted">H100</div>
+          </div>
+          <!-- Row 3 -->
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-17</div>
+            <div class="text-xs text-white font-bold mt-0.5">45%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-18</div>
+            <div class="text-xs text-white font-bold mt-0.5">72%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-19</div>
+            <div class="text-xs text-white font-bold mt-0.5">66%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-20</div>
+            <div class="text-xs text-white font-bold mt-0.5">81%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-21</div>
+            <div class="text-xs text-white font-bold mt-0.5">53%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-22</div>
+            <div class="text-xs text-white font-bold mt-0.5">74%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-23</div>
+            <div class="text-xs text-white font-bold mt-0.5">69%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-center cursor-pointer hover:bg-green-500/20 transition-colors">
+            <div class="text-[10px] text-green-400 font-medium">GPU-24</div>
+            <div class="text-xs text-white font-bold mt-0.5">88%</div>
+            <div class="text-[9px] text-text-muted">A100</div>
+          </div>
+          <!-- Row 4: idle -->
+          <div class="bg-bg-deep border border-[#2A2A3E] rounded-lg p-2 text-center cursor-pointer hover:border-[#3A3A4E] transition-colors">
+            <div class="text-[10px] text-text-muted font-medium">GPU-25</div>
+            <div class="text-xs text-text-muted font-bold mt-0.5">0%</div>
+            <div class="text-[9px] text-text-muted">空闲</div>
+          </div>
+          <div class="bg-bg-deep border border-[#2A2A3E] rounded-lg p-2 text-center cursor-pointer hover:border-[#3A3A4E] transition-colors">
+            <div class="text-[10px] text-text-muted font-medium">GPU-26</div>
+            <div class="text-xs text-text-muted font-bold mt-0.5">0%</div>
+            <div class="text-[9px] text-text-muted">空闲</div>
+          </div>
+          <div class="bg-bg-deep border border-[#2A2A3E] rounded-lg p-2 text-center cursor-pointer hover:border-[#3A3A4E] transition-colors">
+            <div class="text-[10px] text-text-muted font-medium">GPU-27</div>
+            <div class="text-xs text-text-muted font-bold mt-0.5">0%</div>
+            <div class="text-[9px] text-text-muted">空闲</div>
+          </div>
+          <div class="bg-bg-deep border border-[#2A2A3E] rounded-lg p-2 text-center cursor-pointer hover:border-[#3A3A4E] transition-colors">
+            <div class="text-[10px] text-text-muted font-medium">GPU-28</div>
+            <div class="text-xs text-text-muted font-bold mt-0.5">0%</div>
+            <div class="text-[9px] text-text-muted">空闲</div>
+          </div>
+          <div class="bg-bg-deep border border-[#2A2A3E] rounded-lg p-2 text-center cursor-pointer hover:border-[#3A3A4E] transition-colors">
+            <div class="text-[10px] text-text-muted font-medium">GPU-29</div>
+            <div class="text-xs text-text-muted font-bold mt-0.5">0%</div>
+            <div class="text-[9px] text-text-muted">空闲</div>
+          </div>
+          <div class="bg-bg-deep border border-[#2A2A3E] rounded-lg p-2 text-center cursor-pointer hover:border-[#3A3A4E] transition-colors">
+            <div class="text-[10px] text-text-muted font-medium">GPU-30</div>
+            <div class="text-xs text-text-muted font-bold mt-0.5">0%</div>
+            <div class="text-[9px] text-text-muted">空闲</div>
+          </div>
+          <div class="bg-bg-deep border border-[#2A2A3E] rounded-lg p-2 text-center cursor-pointer hover:border-[#3A3A4E] transition-colors">
+            <div class="text-[10px] text-text-muted font-medium">GPU-31</div>
+            <div class="text-xs text-text-muted font-bold mt-0.5">0%</div>
+            <div class="text-[9px] text-text-muted">空闲</div>
+          </div>
+          <div class="bg-bg-deep border border-[#2A2A3E] rounded-lg p-2 text-center cursor-pointer hover:border-[#3A3A4E] transition-colors">
+            <div class="text-[10px] text-text-muted font-medium">GPU-32</div>
+            <div class="text-xs text-text-muted font-bold mt-0.5">0%</div>
+            <div class="text-[9px] text-text-muted">空闲</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Task List -->
+      <div class="bg-bg-card border border-[#2A2A3E] rounded-xl">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-[#2A2A3E]">
+          <div class="flex items-center gap-4">
+            <button class="text-sm text-amber-gold font-medium border-b-2 border-amber-gold pb-1">全部任务</button>
+            <button class="text-sm text-text-secondary hover:text-white transition-colors pb-1">排队中 (34)</button>
+            <button class="text-sm text-text-secondary hover:text-white transition-colors pb-1">生成中 (12)</button>
+            <button class="text-sm text-text-secondary hover:text-white transition-colors pb-1">已完成</button>
+            <button class="text-sm text-text-secondary hover:text-white transition-colors pb-1">失败 (3)</button>
+          </div>
+          <div class="flex items-center gap-2">
+            <select class="bg-bg-deep border border-[#2A2A3E] rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none text-xs">
+              <option>全部类型</option><option>视频生成</option><option>AI配音</option><option>封面生成</option><option>剧本拆分</option>
+            </select>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-[#2A2A3E]">
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase">任务ID</th>
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase">任务类型</th>
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase">所属作品</th>
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase">用户</th>
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase">进度</th>
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase">状态</th>
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase">GPU节点</th>
+                <th class="text-left px-4 py-3 text-text-muted text-xs font-medium uppercase">耗时</th>
+                <th class="text-right px-4 py-3 text-text-muted text-xs font-medium uppercase">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-b border-[#2A2A3E]/50 table-row">
+                <td class="px-4 py-3 text-sm font-mono text-white">task_8a3f2d1c</td>
+                <td class="px-4 py-3"><span class="tag bg-purple-500/15 text-purple-400">视频生成</span></td>
+                <td class="px-4 py-3 text-sm text-white truncate max-w-[180px]">霸总追妻：重生后我成了千亿继承人</td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <div class="w-6 h-6 rounded-full bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold">林</div>
+                    <span class="text-sm text-text-secondary">林小雨</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3 w-36">
+                  <div class="flex items-center gap-2">
+                    <div class="flex-1 progress-bar"><div class="progress-fill progress-running bg-gradient-to-r from-amber-gold to-yellow-400" style="width: 67%"></div></div>
+                    <span class="text-xs text-white font-medium w-10 text-right">67%</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-blue-500/15 text-blue-400"><span class="status-dot bg-blue-400"></span>生成中</span></td>
+                <td class="px-4 py-3 text-sm font-mono text-text-secondary">GPU-03</td>
+                <td class="px-4 py-3 text-sm text-text-secondary">4分32秒</td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex justify-end gap-1">
+                    <button class="action-btn text-text-secondary"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-red-400"><i data-lucide="square" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+              <tr class="border-b border-[#2A2A3E]/50 table-row">
+                <td class="px-4 py-3 text-sm font-mono text-white">task_7c1e4a9b</td>
+                <td class="px-4 py-3"><span class="tag bg-amber-500/15 text-amber-400">AI配音</span></td>
+                <td class="px-4 py-3 text-sm text-white truncate max-w-[180px]">穿越古代：我带系统当皇帝</td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <div class="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white text-[10px] font-bold">墨</div>
+                    <span class="text-sm text-text-secondary">墨尘居士</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3 w-36">
+                  <div class="flex items-center gap-2">
+                    <div class="flex-1 progress-bar"><div class="progress-fill progress-running bg-gradient-to-r from-amber-gold to-yellow-400" style="width: 42%"></div></div>
+                    <span class="text-xs text-white font-medium w-10 text-right">42%</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-blue-500/15 text-blue-400"><span class="status-dot bg-blue-400"></span>生成中</span></td>
+                <td class="px-4 py-3 text-sm font-mono text-text-secondary">GPU-09</td>
+                <td class="px-4 py-3 text-sm text-text-secondary">1分28秒</td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex justify-end gap-1">
+                    <button class="action-btn text-text-secondary"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-red-400"><i data-lucide="square" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+              <tr class="border-b border-[#2A2A3E]/50 table-row">
+                <td class="px-4 py-3 text-sm font-mono text-white">task_9d4b7c2e</td>
+                <td class="px-4 py-3"><span class="tag bg-purple-500/15 text-purple-400">视频生成</span></td>
+                <td class="px-4 py-3 text-sm text-white truncate max-w-[180px]">替嫁新娘：冷面总裁的契约妻</td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <div class="w-6 h-6 rounded-full bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold">苏</div>
+                    <span class="text-sm text-text-secondary">苏暖暖</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3 w-36">
+                  <div class="flex items-center gap-2">
+                    <div class="flex-1 progress-bar"><div class="progress-fill bg-green-500" style="width: 100%"></div></div>
+                    <span class="text-xs text-green-400 font-medium w-10 text-right">完成</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-green-500/15 text-green-400"><span class="status-dot bg-green-400"></span>已完成</span></td>
+                <td class="px-4 py-3 text-sm font-mono text-text-secondary">GPU-02</td>
+                <td class="px-4 py-3 text-sm text-text-secondary">6分15秒</td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex justify-end gap-1">
+                    <button class="action-btn text-text-secondary"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-amber-gold"><i data-lucide="download" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+              <tr class="border-b border-[#2A2A3E]/50 table-row">
+                <td class="px-4 py-3 text-sm font-mono text-white">task_2f5a8d3c</td>
+                <td class="px-4 py-3"><span class="tag bg-rose-500/15 text-rose-400">封面生成</span></td>
+                <td class="px-4 py-3 text-sm text-white truncate max-w-[180px]">迷雾追踪：连环杀人案调查实录</td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <div class="w-6 h-6 rounded-full bg-gradient-to-br from-slate-500 to-slate-700 flex items-center justify-center text-white text-[10px] font-bold">陈</div>
+                    <span class="text-sm text-text-secondary">陈推理</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3 w-36">
+                  <div class="flex items-center gap-2">
+                    <div class="flex-1 progress-bar"><div class="progress-fill bg-red-500" style="width: 100%"></div></div>
+                    <span class="text-xs text-red-400 font-medium w-10 text-right">失败</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-red-500/15 text-red-400"><span class="status-dot bg-red-400"></span>失败</span></td>
+                <td class="px-4 py-3 text-sm font-mono text-red-400">GPU-07</td>
+                <td class="px-4 py-3 text-sm text-text-secondary">0分45秒</td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex justify-end gap-1">
+                    <button class="action-btn text-text-secondary"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-amber-gold"><i data-lucide="rotate-cw" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+              <tr class="border-b border-[#2A2A3E]/50 table-row">
+                <td class="px-4 py-3 text-sm font-mono text-white">task_6e7c1b4a</td>
+                <td class="px-4 py-3"><span class="tag bg-purple-500/15 text-purple-400">视频生成</span></td>
+                <td class="px-4 py-3 text-sm text-white truncate max-w-[180px]">废柴逆袭：我靠系统打脸全场</td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <div class="w-6 h-6 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center text-white text-[10px] font-bold">爽</div>
+                    <span class="text-sm text-text-secondary">爽文达人</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3 w-36">
+                  <div class="flex items-center gap-2">
+                    <div class="flex-1 progress-bar"><div class="progress-fill bg-gray-500" style="width: 0%"></div></div>
+                    <span class="text-xs text-text-muted font-medium w-10 text-right">排队</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-yellow-500/15 text-yellow-400"><span class="status-dot bg-yellow-400"></span>排队中</span></td>
+                <td class="px-4 py-3 text-sm text-text-muted">等待分配</td>
+                <td class="px-4 py-3 text-sm text-text-secondary">预计 3分20秒</td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex justify-end gap-1">
+                    <button class="action-btn text-text-secondary"><i data-lucide="arrow-up" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-red-400"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+              <tr class="table-row">
+                <td class="px-4 py-3 text-sm font-mono text-white">task_3b9d6f8e</td>
+                <td class="px-4 py-3"><span class="tag bg-cyan-500/15 text-cyan-400">剧本拆分</span></td>
+                <td class="px-4 py-3 text-sm text-white truncate max-w-[180px]">职场囧途：我的奇葩同事们</td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <div class="w-6 h-6 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center text-white text-[10px] font-bold">笑</div>
+                    <span class="text-sm text-text-secondary">笑料百出</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3 w-36">
+                  <div class="flex items-center gap-2">
+                    <div class="flex-1 progress-bar"><div class="progress-fill progress-running bg-gradient-to-r from-amber-gold to-yellow-400" style="width: 88%"></div></div>
+                    <span class="text-xs text-white font-medium w-10 text-right">88%</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3"><span class="tag bg-blue-500/15 text-blue-400"><span class="status-dot bg-blue-400"></span>生成中</span></td>
+                <td class="px-4 py-3 text-sm font-mono text-text-secondary">GPU-16</td>
+                <td class="px-4 py-3 text-sm text-text-secondary">2分10秒</td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex justify-end gap-1">
+                    <button class="action-btn text-text-secondary"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+                    <button class="action-btn text-red-400"><i data-lucide="square" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="flex items-center justify-between px-4 py-3 border-t border-[#2A2A3E]">
+          <div class="text-sm text-text-muted">共 <span class="text-white font-medium">335</span> 条任务记录</div>
+          <div class="flex items-center gap-1">
+            <button class="w-8 h-8 rounded-lg border border-[#2A2A3E] flex items-center justify-center text-text-muted hover:border-[#3A3A4E]"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+            <button class="w-8 h-8 rounded-lg bg-amber-gold text-[#0B0B1A] font-medium text-sm">1</button>
+            <button class="w-8 h-8 rounded-lg border border-[#2A2A3E] text-text-secondary hover:border-[#3A3A4E] text-sm">2</button>
+            <button class="w-8 h-8 rounded-lg border border-[#2A2A3E] text-text-secondary hover:border-[#3A3A4E] text-sm">3</button>
+            <span class="text-text-muted px-1">...</span>
+            <button class="w-8 h-8 rounded-lg border border-[#2A2A3E] flex items-center justify-center text-text-secondary hover:border-[#3A3A4E]"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script>lucide.createIcons();</script>
+</body>
+</html>

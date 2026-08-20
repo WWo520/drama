@@ -21,6 +21,7 @@ const (
 	CodeLoginFailed       = 10006 // 邮箱/手机号或密码错误
 	CodeBanned            = 10007 // 账号被封禁 / 禁用
 	CodeDuplicate         = 10008 // 邮箱/手机号已被注册
+	CodeMaintenance       = 10009 // 平台维护模式（HTTP 503，feature_maintenance=true）
 	CodeProjectNotFound   = 20001 // 项目不存在 / 已删除 / 无权限
 	CodeSpaceNotFound     = 20005 // 空间不存在 / 已关闭 / 不是成员
 	CodeInsufficientPoints = 40003 // 积分余额不足
@@ -75,6 +76,10 @@ func maskSensitive(v any) any {
 		}
 		return out
 	case reflect.Slice, reflect.Array:
+		// []byte（含 json.RawMessage）原样透传：逐字节拆包会变 []any，类型不匹配导致零值（2026-08-20 实测）
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return v
+		}
 		out := make([]any, rv.Len())
 		for i := 0; i < rv.Len(); i++ {
 			out[i] = maskSensitive(rv.Index(i).Interface())

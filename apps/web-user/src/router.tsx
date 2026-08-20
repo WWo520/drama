@@ -14,6 +14,7 @@ import SpaceManagePage from "./pages/SpaceManagePage";
 import CanvasPage from "./pages/CanvasPage";
 import TimelinePage from "./pages/TimelinePage";
 import FeedPage from "./pages/FeedPage";
+import NotificationsPage from "./pages/NotificationsPage";
 import TasksPage from "./pages/TasksPage";
 import AdminPage from "./pages/AdminPage";
 import GlobalWS from "./components/GlobalWS";
@@ -109,6 +110,14 @@ export const router = createBrowserRouter([
     element: (
       <RequireAuth>
         <FeedPage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/notifications",
+    element: (
+      <RequireAuth>
+        <NotificationsPage />
       </RequireAuth>
     ),
   },

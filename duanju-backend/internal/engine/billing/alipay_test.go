@@ -13,10 +13,20 @@ import (
 
 // fakeOrderStore 内存订单存储。
 type fakeOrderStore struct {
-	orders   map[string]*Order // orderNo → order
-	idemKeys map[string]string // idemKey → orderNo
-	pkgs     map[string]*Package
-	seq      int64
+	orders     map[string]*Order // orderNo → order
+	idemKeys   map[string]string // idemKey → orderNo
+	pkgs       map[string]*Package
+	plans      map[string]*PlanPackage
+	membership *fakeMembership
+	seq        int64
+}
+
+// fakeMembership 测试会员快照。
+type fakeMembership struct {
+	PlanCode string
+	Status   string
+	Renew    string
+	EndAt    string
 }
 
 func newFakeOrderStore() *fakeOrderStore {
@@ -31,7 +41,7 @@ func newFakeOrderStore() *fakeOrderStore {
 	}
 }
 
-func (f *fakeOrderStore) CreateOrder(_ context.Context, userID int64, orderType, planCode, amountYuan string, points int, idemKey string) (int64, string, error) {
+func (f *fakeOrderStore) CreateOrder(_ context.Context, userID int64, orderType, planCode, amountYuan string, points int, idemKey string, packageID int64, days int) (int64, string, error) {
 	if no, ok := f.idemKeys[idemKey]; ok {
 		return 0, no, nil
 	}
@@ -39,7 +49,7 @@ func (f *fakeOrderStore) CreateOrder(_ context.Context, userID int64, orderType,
 	no := fmt.Sprintf("P%d", f.seq)
 	f.idemKeys[idemKey] = no
 	f.orders[no] = &Order{ID: f.seq, OrderNo: no, UserID: userID, OrderType: orderType, PlanCode: planCode,
-		AmountYuan: amountYuan, Points: points, PayStatus: "PENDING"}
+		AmountYuan: amountYuan, Points: points, PayStatus: "PENDING", PackageID: packageID, DaysGranted: days}
 	return f.seq, no, nil
 }
 
@@ -65,6 +75,25 @@ func (f *fakeOrderStore) GetPackage(_ context.Context, pkgCode string) (*Package
 		return nil, errors.New("套餐不存在")
 	}
 	return p, nil
+}
+
+func (f *fakeOrderStore) GetPlanPackage(_ context.Context, code string) (*PlanPackage, error) {
+	p, ok := f.plans[code]
+	if !ok {
+		return nil, errors.New("套餐不存在")
+	}
+	return p, nil
+}
+
+func (f *fakeOrderStore) QueryMembership(_ context.Context, userID int64, planCode, status, renew, endAt *string) error {
+	if f.membership == nil {
+		return errors.New("无会员")
+	}
+	*planCode = f.membership.PlanCode
+	*status = f.membership.Status
+	*renew = f.membership.Renew
+	*endAt = f.membership.EndAt
+	return nil
 }
 
 func (f *fakeOrderStore) PayCallback(_ context.Context, orderNo, payTransactionID string, points int) (bool, error) {

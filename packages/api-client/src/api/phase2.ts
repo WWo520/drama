@@ -111,9 +111,17 @@ export const variantApi = {
 };
 
 // ---- 版本回滚（S2-B05）----
+export interface NuVersionItem {
+  version_id: number;
+  version_num: number;
+  label: string;
+  created_from: string;
+  created_at: string;
+}
+
 export const versionApi = {
-  list: (nuId: string) => api.get<{ items: Record<string, unknown>[] }>(`/narrative-units/${nuId}/versions`),
-  rollback: (nuId: string, versionId: string) => api.post<null>(`/narrative-units/${nuId}/rollback/${versionId}`),
+  list: (nuId: string) => api.get<{ items: NuVersionItem[] }>(`/narrative-units/${nuId}/versions`),
+  rollback: (nuId: string, versionId: string | number) => api.post<null>(`/narrative-units/${nuId}/rollback/${versionId}`),
 };
 
 // ---- 预览消耗（S2-B06）----

@@ -9,19 +9,39 @@ import (
 	"strings"
 )
 
-// SplitResult LLM 拆分输出的四层结构 + 角色（03 A.2：集 → 叙事单元 → 镜头块 → 单镜头 + 角色抽取）。
+// SplitResult LLM 拆分输出的四层结构 + 集级资产（03 A.2：集 → 叙事单元 → 镜头块 → 单镜头 + 角色/场景/道具抽取）。
 // 枚举值对齐 02 A3（景别/运镜/视角）——校验器强制。
+// 资产粒度：仅到集级（每集自有角色/场景/道具），不下沉到叙事单元。
 type SplitResult struct {
 	Episodes   []EpisodeSplit   `json:"episodes"`
 	Characters []CharacterSplit `json:"characters,omitempty"`
+	Scenes     []SceneSplit     `json:"scenes,omitempty"`
+	Props      []PropSplit      `json:"props,omitempty"`
 }
 
-// CharacterSplit 角色抽取（Step1 产出，供 Step2 角色卡片）。
+// CharacterSplit 角色抽取（Step1 产出，供 Step2 角色卡片；集级粒度）。
 type CharacterSplit struct {
 	Code            string `json:"code"`
 	Name            string `json:"name"`
 	Tags            string `json:"tags,omitempty"`
 	DescriptionNotes string `json:"description_notes,omitempty"`
+	OriginEpisodeID int    `json:"origin_episode_id"` // 1-based 集序号
+}
+
+// SceneSplit 场景抽取（Step1 产出，供 Step2 场景卡片；集级粒度）。
+type SceneSplit struct {
+	Code            string `json:"code"`
+	BaseName        string `json:"base_name"`
+	BasePrompt      string `json:"base_prompt,omitempty"`
+	OriginEpisodeID int    `json:"origin_episode_id"` // 1-based 集序号
+}
+
+// PropSplit 道具抽取（Step1 产出，供 Step2 道具卡片；集级粒度）。
+type PropSplit struct {
+	Code            string `json:"code"`
+	Name            string `json:"name"`
+	Category        string `json:"category,omitempty"` // prop_category_enum，非法值落库时归一为 OTHER
+	Description     string `json:"description,omitempty"`
 	OriginEpisodeID int    `json:"origin_episode_id"` // 1-based 集序号
 }
 
@@ -134,6 +154,17 @@ func validateStructure(r *SplitResult) error {
 					}
 				}
 			}
+		}
+	}
+	// 集级资产轻量校验：code/name 非空（缺省字段容忍，落库时兜底）
+	for i, sc := range r.Scenes {
+		if strings.TrimSpace(sc.Code) == "" || strings.TrimSpace(sc.BaseName) == "" {
+			return fmt.Errorf("%w: 第%d个场景缺少 code/base_name", ErrInvalidStructure, i+1)
+		}
+	}
+	for i, p := range r.Props {
+		if strings.TrimSpace(p.Code) == "" || strings.TrimSpace(p.Name) == "" {
+			return fmt.Errorf("%w: 第%d个道具缺少 code/name", ErrInvalidStructure, i+1)
 		}
 	}
 	return nil

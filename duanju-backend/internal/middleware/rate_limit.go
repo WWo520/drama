@@ -19,9 +19,11 @@ import (
 func RateLimit(rdb *redis.Client, pool *pgxpool.Pool, env string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit := 120
-		subject := c.GetString("user_id")
-		if subject == "" {
-			subject = c.ClientIP()
+		// CtxUserID 存的是 int64，必须用 GetInt64 读取（GetString 取不到会误判匿名）
+		uid := c.GetInt64(CtxUserID)
+		subject := c.ClientIP()
+		if uid > 0 {
+			subject = strconv.FormatInt(uid, 10)
 		}
 		// H03：API Key 配额优先（quota_per_min 默认 60）
 		if apiKey := c.GetHeader("X-API-Key"); apiKey != "" && pool != nil {
@@ -33,7 +35,7 @@ func RateLimit(rdb *redis.Client, pool *pgxpool.Pool, env string) gin.HandlerFun
 				limit = quota
 			}
 		}
-		if c.GetString("user_id") == "" && !isAPIKeySubject(subject) {
+		if uid == 0 && !isAPIKeySubject(subject) {
 			limit = 20
 		}
 		key := fmt.Sprintf("duanju:%s:rate:api:%s:%d", env, subject, time.Now().Unix()/60)

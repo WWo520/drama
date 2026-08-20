@@ -16,6 +16,7 @@ import (
 	"github.com/duanju/backend/internal/pkg/httpx"
 	"github.com/duanju/backend/internal/pkg/jwt"
 	"github.com/duanju/backend/internal/pkg/password"
+	"github.com/duanju/backend/internal/pkg/platformcfg"
 )
 
 // Service 认证服务。
@@ -25,14 +26,20 @@ type Service struct {
 	rdb    *redis.Client
 	env    string
 	lg     *zap.Logger
+	pf     *platformcfg.Store
 }
 
-func NewService(repo *Repo, jwtMgr *jwt.Manager, rdb *redis.Client, env string, lg *zap.Logger) *Service {
-	return &Service{repo: repo, jwtMgr: jwtMgr, rdb: rdb, env: env, lg: lg}
+func NewService(repo *Repo, jwtMgr *jwt.Manager, rdb *redis.Client, env string, lg *zap.Logger, pf *platformcfg.Store) *Service {
+	return &Service{repo: repo, jwtMgr: jwtMgr, rdb: rdb, env: env, lg: lg, pf: pf}
 }
 
 // Register 注册：创建用户+个人空间+积分账户，签发双 Token（05 1.1）。
 func (s *Service) Register(c *gin.Context, req *RegisterReq) {
+	// 注册开关（feature_register=false 时拒绝；配置缺失/异常默认开放）
+	if open, err := s.pf.Bool(c.Request.Context(), "feature_register"); err == nil && !open {
+		httpx.Fail(c, http.StatusForbidden, httpx.CodeForbidden, "平台暂未开放注册")
+		return
+	}
 	hash, err := password.Hash(req.Password)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "密码哈希失败")
@@ -181,6 +188,52 @@ func (s *Service) Me(c *gin.Context) {
 		FrozenBalance: points.FrozenBalance,
 	}
 	httpx.OK(c, resp)
+}
+
+// UpdateMe 资料更新（PUT /auth/me）：昵称/头像部分更新；头像存 object key，
+// 引用前校验对象归属（本人上传且 CONFIRMED，防引用他人私有对象）。
+func (s *Service) UpdateMe(c *gin.Context, req *UpdateMeReq) {
+	uid := c.GetString(middleware.CtxUserUUID)
+	u, err := s.repo.GetByUUID(c.Request.Context(), uid)
+	if err != nil {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "账号不存在")
+		return
+	}
+	var nickname, avatar *string
+	if req.Nickname != "" {
+		nickname = &req.Nickname
+	}
+	if req.AvatarURL != "" {
+		if !strings.HasPrefix(req.AvatarURL, "spaces/") {
+			httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "头像对象路径非法")
+			return
+		}
+		if err := s.repo.VerifyOwnedObject(c.Request.Context(), u.ID, req.AvatarURL); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "头像对象不存在或不属于当前用户")
+				return
+			}
+			httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "头像校验失败")
+			return
+		}
+		avatar = &req.AvatarURL
+	}
+	if nickname == nil && avatar == nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "无可更新字段")
+		return
+	}
+	if err := s.repo.UpdateProfile(c.Request.Context(), u.ID, nickname, avatar); err != nil {
+		s.lg.Error("资料更新失败", zap.String("request_id", c.GetString("request_id")), zap.Error(err))
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "资料更新失败")
+		return
+	}
+	if nickname != nil {
+		u.Nickname = *nickname
+	}
+	if avatar != nil {
+		u.AvatarURL = avatar
+	}
+	httpx.OK(c, toBrief(u))
 }
 
 // issueTokens 签发双 Token 并写 Refresh Cookie。

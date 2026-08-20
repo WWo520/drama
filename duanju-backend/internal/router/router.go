@@ -3,6 +3,7 @@ package router
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/duanju/backend/internal/pkg/httpx"
 	"github.com/duanju/backend/internal/pkg/jwt"
 	"github.com/duanju/backend/internal/pkg/logger"
+	"github.com/duanju/backend/internal/pkg/platformcfg"
 	"github.com/duanju/backend/internal/repository"
 )
 
@@ -55,6 +57,11 @@ func Setup(cfg *config.Config, lg *zap.Logger, pool *pgxpool.Pool, rdb *redis.Cl
 	// 用户端分组 /api/v1（05 A 章 Base URL）
 	v1 := r.Group("/api/v1")
 
+	// 平台配置读取器（30s TTL 缓存）：维护模式中间件 + 注册开关 + 公开配置接口共用
+	pfStore := platformcfg.New(pool)
+	// 维护模式（feature_maintenance=true 拦截用户端；/auth /admin /healthz 放行）
+	v1.Use(middleware.Maintenance(pfStore))
+
 	jwtMW := middleware.JWT(jwtMgr, rdb, cfg.App.Env)
 
 	// 公开路由组：仅 IP 限流（未登录 20/min）
@@ -62,7 +69,7 @@ func Setup(cfg *config.Config, lg *zap.Logger, pool *pgxpool.Pool, rdb *redis.Cl
 
 	// auth 模块（公开端点 + /auth/me 自带 JWT）
 	authRepo := auth.NewRepo(pool)
-	authSvc := auth.NewService(authRepo, jwtMgr, rdb, cfg.App.Env, lg)
+	authSvc := auth.NewService(authRepo, jwtMgr, rdb, cfg.App.Env, lg, pfStore)
 	auth.NewHandler(authSvc, jwtMgr, rdb, cfg.App.Env).RegisterRoutes(v1Pub)
 
 	// 受保护路由组：JWT → LoadUserID → 限流（登录用户 60/min；修复限流顺序：先解析身份再限流）
@@ -102,6 +109,22 @@ func Setup(cfg *config.Config, lg *zap.Logger, pool *pgxpool.Pool, rdb *redis.Cl
 		lg.Fatal("S3 客户端初始化失败", logger.F("err", err)...)
 	}
 	assetSvc := creation.NewAssetService(creationRepo, assetClient, assetStore, billingEngine)
+
+	// 头像读取：users.avatar_url 存 MinIO object key，读时现签 GET（24h）返回；
+	// 前端 useAvatarUrl 拿到签名 URL 直接渲染 img（预签名 URL 无需鉴权，永不过期体验）。
+	v1Auth.GET("/users/me/avatar", func(c *gin.Context) {
+		key, err := authRepo.GetAvatarKey(c.Request.Context(), c.GetString(middleware.CtxUserUUID))
+		if err != nil || key == "" {
+			httpx.OK(c, gin.H{"avatar_url": ""})
+			return
+		}
+		signed, err := assetClient.PresignDownload(c.Request.Context(), key)
+		if err != nil {
+			httpx.Fail(c, 500, httpx.CodeInternal, "头像地址签发失败")
+			return
+		}
+		httpx.OK(c, gin.H{"avatar_url": signed})
+	})
 
 	// 导出服务（S1-B08）：触发导出 + 列表 + 详情
 	exportStore := repository.NewExportStore(pool)
@@ -160,6 +183,32 @@ func Setup(cfg *config.Config, lg *zap.Logger, pool *pgxpool.Pool, rdb *redis.Cl
 	v1Pub.GET("/packages", extra.Biz.ListPackages)
 	v1Pub.GET("/models", extra.Biz.ListModels)
 	v1Pub.GET("/point-packages", extra.Biz.ListPointPackages)
+
+	// 公开运营内容（10.14~10.16）：平台公开配置（is_public=true）/ 公告（生效时间窗）/ 轮播（启用中）
+	v1Pub.GET("/platform/public-config", func(c *gin.Context) {
+		items, err := pfStore.PublicList(c.Request.Context())
+		if err != nil {
+			httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取公开配置失败")
+			return
+		}
+		httpx.OK(c, gin.H{"items": items})
+	})
+	v1Pub.GET("/announcements", func(c *gin.Context) {
+		items, err := adminStore.ListPublicAnnouncements(c.Request.Context())
+		if err != nil {
+			httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取公告失败")
+			return
+		}
+		httpx.OK(c, gin.H{"items": items})
+	})
+	v1Pub.GET("/banners", func(c *gin.Context) {
+		items, err := adminStore.ListPublicBanners(c.Request.Context())
+		if err != nil {
+			httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取轮播失败")
+			return
+		}
+		httpx.OK(c, gin.H{"items": items})
+	})
 
 	// 计费模块（S1-B09）：9.3 积分账户 / 9.4 积分流水
 	pointsAPI := billing.NewPointsAPI(billingStore)

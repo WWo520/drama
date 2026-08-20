@@ -209,7 +209,8 @@
     box-shadow: 0 8px 32px rgba(76, 127, 248, 0.4);
   }
 
-  .logo-text {
+  .brand-section .logo-text {
+    writing-mode: horizontal-tb;
     font-size: 22px;
     font-weight: 700;
     background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
@@ -668,4 +669,77 @@
   .login-video-box {
     display: none;
   }
+}
+
+/* ===== 附加：左侧虚影视频背景（铺满 + blur 柔化 + 低透明 + 渐变遮罩） ===== */
+.login-video-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+}
+.login-video-bg video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.4;
+  filter: blur(3px) saturate(1.15);
+  transform: scale(1.06);
+}
+.login-video-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(11, 11, 26, 0.5) 0%, rgba(11, 11, 26, 0.25) 45%, rgba(11, 11, 26, 0.62) 100%);
+}
+.brand-content {
+  position: relative;
+  z-index: 2;
+}
+/* 旧卡片式视频容器不再使用（保留定义以防回退） */
+.login-video-box {
+  display: none;
+}
+
+
+/* ===== 附加：品牌名左上角 + 放大；hero 文案右移（用户要求 2026-08-18） ===== */
+.brand-section .logo {
+  position: absolute;
+  top: 48px;
+  left: 80px;
+  margin-bottom: 0;
+}
+.brand-section .logo-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+}
+.brand-section .logo-icon svg {
+  width: 30px;
+  height: 30px;
+}
+.brand-section .logo-text {
+  font-size: 28px;
+}
+.brand-content {
+  padding-left: 64px;
+}
+@media (max-width: 768px) {
+  .brand-section .logo {
+    left: 24px;
+    top: 24px;
+  }
+  .brand-section .logo-text {
+    font-size: 20px;
+  }
+  .brand-content {
+    padding-left: 0;
+    /* logo 为 absolute 定位，移动端预留顶部空间避免与主标题重叠 */
+    padding-top: 84px;
+  }
+}
+
+/* ===== 修复：brand-content 去掉 relative,使 logo 锚定 brand-section(左上角) ===== */
+.brand-content {
+  position: static;
 }

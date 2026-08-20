@@ -1,6 +1,13 @@
 /* home.css：首页样式（批次1 自 create-video.html 提取 + 灯光效果多轮迭代）
    2026-08-20 恢复重建：源文件被 Vite HMR 产物覆盖丢失，本文件由设计稿 style 块全量提取重建，
    灯光 CSS（flashlight 系）按迭代记忆重建，类名与 HomePage.tsx 契约对齐 */
+      /* 纯黑背景：手电筒效果在纯黑背景上最有冲击力 */
+      .home-stage {
+        background-color: #000000 !important;
+      }
+      body {
+        background-color: #000000 !important;
+      }
       .no-scrollbar::-webkit-scrollbar { display: none; }
       .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       [data-icon] {
@@ -1378,8 +1385,8 @@
         position: absolute;
         top: 0;
         left: 0;
-        width: 130vw;
-        height: 220vh;
+        width: 250vh;
+        height: 250vh;
         transform-origin: 0 0;
         filter: blur(36px);
         background: conic-gradient(
@@ -1421,61 +1428,80 @@
         position: absolute;
         top: 0;
         left: 0;
-        width: 120vw;
-        height: 190vh;
+        width: 250vh;
+        height: 250vh;
         transform-origin: 0 0;
-        filter: blur(22px);
+        filter: blur(20px);
         background: conic-gradient(
           from -90deg at 0 0,
-          transparent 35deg,
-          rgba(70,120,255,0.25) 55deg,
-          rgba(120,170,255,0.4) 75deg,
-          rgba(160,200,255,0.45) 90deg,
-          rgba(120,170,255,0.4) 105deg,
-          rgba(70,120,255,0.25) 125deg,
-          transparent 145deg
+          transparent 40deg,
+          rgba(80,130,255,0.32) 58deg,
+          rgba(130,180,255,0.52) 76deg,
+          rgba(170,210,255,0.58) 90deg,
+          rgba(130,180,255,0.52) 104deg,
+          rgba(80,130,255,0.32) 122deg,
+          transparent 140deg
         );
-        -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.7) 55%, transparent 100%);
-        mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.7) 55%, transparent 100%);
-        opacity: 0.85;
+        -webkit-mask-image: linear-gradient(to bottom,
+          rgba(0,0,0,0.3) 0%,
+          rgba(0,0,0,0.8) 3%,
+          rgba(0,0,0,1) 8%,
+          rgba(0,0,0,1) 50%,
+          rgba(0,0,0,0.92) 70%,
+          rgba(0,0,0,0.7) 85%,
+          rgba(0,0,0,0.4) 93%,
+          transparent 100%);
+        mask-image: linear-gradient(to bottom,
+          rgba(0,0,0,0.3) 0%,
+          rgba(0,0,0,0.8) 3%,
+          rgba(0,0,0,1) 8%,
+          rgba(0,0,0,1) 50%,
+          rgba(0,0,0,0.92) 70%,
+          rgba(0,0,0,0.7) 85%,
+          rgba(0,0,0,0.4) 93%,
+          transparent 100%);
+        opacity: 0.92;
       }
       /* 主光束：锥形聚光 —— 光柱主体，最亮最显眼的部分
-         加宽角度 + 减慢沿程衰减 + 提高不透明度，确保光柱从灯头到目标全程可见 */
+         使用正方形元素 + conic-gradient，旋转时光束长度不变
+         250vh 正方形确保从任何角度都能覆盖整个视口 */
       .flashlight-beam {
         position: absolute;
         top: 0;
         left: 0;
-        width: 90vw;
-        height: 200vh;
+        width: 250vh;
+        height: 250vh;
         transform-origin: 0 0;
-        filter: blur(5px);
+        filter: blur(6px);
         background: conic-gradient(
           from -90deg at 0 0,
           transparent 52deg,
-          rgba(100,150,255,0.55) 66deg,
-          rgba(170,210,255,0.85) 78deg,
+          rgba(100,150,255,0.6) 66deg,
+          rgba(170,210,255,0.88) 78deg,
           rgba(255,255,255,1) 90deg,
-          rgba(170,210,255,0.85) 102deg,
-          rgba(100,150,255,0.55) 114deg,
+          rgba(170,210,255,0.88) 102deg,
+          rgba(100,150,255,0.6) 114deg,
           transparent 128deg
         );
         -webkit-mask-image: linear-gradient(to bottom,
-          rgba(0,0,0,0.25) 0%,
-          rgba(0,0,0,0.75) 2%,
-          rgba(0,0,0,1) 6%,
-          rgba(0,0,0,1) 55%,
-          rgba(0,0,0,0.93) 72%,
-          rgba(0,0,0,0.75) 85%,
-          rgba(0,0,0,0.45) 93%,
+          rgba(0,0,0,0.2) 0%,
+          rgba(0,0,0,0.7) 2%,
+          rgba(0,0,0,1) 5%,
+          rgba(0,0,0,1) 35%,
+          rgba(0,0,0,0.95) 55%,
+          rgba(0,0,0,0.82) 70%,
+          rgba(0,0,0,0.55) 85%,
+          rgba(0,0,0,0.25) 93%,
           transparent 100%);
         mask-image: linear-gradient(to bottom,
-          rgba(0,0,0,0.25) 0%,
-          rgba(0,0,0,0.75) 2%,
-          rgba(0,0,0,1) 6%,
-          rgba(0,0,0,1) 55%,
-          rgba(0,0,0,0.93) 72%,
-          rgba(0,0,0,0.75) 85%,
-          rgba(0,0,0,0.45) 93%,
+          rgba(0,0,0,0.2) 0%,
+          rgba(0,0,0,0.7) 2%,
+          rgba(0,0,0,1) 5%,
+          rgba(0,0,0,1) 35%,
+          rgba(0,0,0,0.95) 55%,
+          rgba(0,0,0,0.82) 70%,
+          rgba(0,0,0,0.55) 85%,
+          rgba(0,0,0,0.25) 93%,
           transparent 100%);
         opacity: 1;
       }
@@ -1484,8 +1510,8 @@
         position: absolute;
         top: 0;
         left: 0;
-        width: 70vw;
-        height: 190vh;
+        width: 250vh;
+        height: 250vh;
         transform-origin: 0 0;
         filter: blur(2px);
         background: conic-gradient(
@@ -1525,21 +1551,25 @@
       .flashlight.is-left .flashlight-fog { transform: rotate(var(--beam-a-l, 7deg)) scaleY(var(--beam-l, 1)); }
       .flashlight.is-right .flashlight-fog { transform: rotate(var(--beam-a-r, -7deg)) scaleY(var(--beam-r, 1)); }
 
-      /* 光斑：白热核心 + 冷色雾化外圈，锚定目标区域中心（JS 以 transform 定位） */
+      /* 光斑：光束照射在目标表面形成的高亮区
+         多层径向渐变：中心最亮 → 柔和过渡 → 边缘淡出，与光束自然衔接 */
       .flashlight-spot {
         position: absolute;
         top: 0;
         left: 0;
-        width: 240px;
-        height: 240px;
+        width: 280px;
+        height: 280px;
         border-radius: 50%;
-        filter: blur(5px);
+        filter: blur(8px);
         background: radial-gradient(circle,
           rgba(255,255,255,1) 0%,
-          rgba(195,215,255,0.72) 24%,
-          rgba(120,140,255,0.35) 48%,
-          rgba(95,115,255,0.14) 68%,
-          transparent 84%);
+          rgba(230,242,255,0.9) 10%,
+          rgba(195,220,255,0.78) 22%,
+          rgba(150,185,255,0.58) 38%,
+          rgba(115,155,255,0.38) 55%,
+          rgba(95,135,255,0.2) 70%,
+          rgba(85,125,255,0.08) 85%,
+          transparent 100%);
         opacity: 0;
         will-change: transform, opacity;
       }

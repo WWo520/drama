@@ -270,20 +270,17 @@ export default function HomePage() {
       beamLeft.style.setProperty("--beam-a-l", angleL.toFixed(2) + "deg");
       beamRight.style.setProperty("--beam-a-r", angleR.toFixed(2) + "deg");
 
-      // —— 光束长度：按光源到目标的实际距离计算，确保光束末端到达光斑
+      // —— 光束长度：真实手电筒光束不会因目标近就变短，而是一直延伸
+      // 基础长度保证光束超出目标继续延伸，形成"光柱穿过目标"的真实感
+      // 只在动画节奏上做轻微调制（品牌名阶段左长右短，收尾阶段收回）
       const vh2 = window.innerHeight;
-      const baseBeamH2 = 2 * vh2; // 主光束 200vh ≈ 2vh
-      const distL = Math.sqrt((focusX - 72) ** 2 + (focusY - 40) ** 2);
-      const distR = Math.sqrt((focusX - vw) ** 2 + (focusY - 40) ** 2);
-      let baseLenL = (distL / baseBeamH2) * 1.15;
-      let baseLenR = (distR / baseBeamH2) * 1.15;
-      // 动画节奏：品牌名阶段左长右短，其余等长，收尾同步收回
+      const baseLen = 1.1; // 基础长度 = 200vh * 1.1 ≈ 220vh，足够延伸到页面底部
       let modL = 1, modR = 1;
-      if (t < 4.0) { modL = 1 + 0.25 * brandP; modR = 1 - 0.2 * brandP; }
-      else if (t < 4.6) { const k = ramp(t, 4.0, 4.6); modL = 1.25 - 0.25 * k; modR = 0.8 + 0.2 * k; }
-      else if (t >= 11.8) { const k = ease(ramp(t, 11.8, 14.2)); modL = 1 - 0.7 * k; modR = 1 - 0.7 * k; }
-      const lenL = Math.max(0.2, baseLenL * modL);
-      const lenR = Math.max(0.2, baseLenR * modR);
+      if (t < 4.0) { modL = 1 + 0.25 * brandP; modR = 1 - 0.15 * brandP; }
+      else if (t < 4.6) { const k = ramp(t, 4.0, 4.6); modL = 1.25 - 0.25 * k; modR = 0.85 + 0.15 * k; }
+      else if (t >= 11.8) { const k = ease(ramp(t, 11.8, 14.2)); modL = 1 - 0.75 * k; modR = 1 - 0.75 * k; }
+      const lenL = Math.max(0.2, baseLen * modL);
+      const lenR = Math.max(0.2, baseLen * modR);
       beamLeft.style.setProperty("--beam-l", lenL.toFixed(3));
       beamRight.style.setProperty("--beam-r", lenR.toFixed(3));
       // 光束亮度：苏醒 → 全亮 → 收回（首尾一致 0.3）
@@ -292,7 +289,7 @@ export default function HomePage() {
       beamRight.style.opacity = beamOp.toFixed(3);
       for (const b of [beamLeft, beamRight]) {
         const fog = b.querySelector<HTMLElement>(".flashlight-fog");
-        if (fog) fog.style.opacity = (beamOp * 0.66).toFixed(3);
+        if (fog) fog.style.opacity = (beamOp * 0.95).toFixed(3);
       }
 
       // —— 光斑在各区域内自左向右滑动（0.4s 淡入/淡出交叉衔接） ——

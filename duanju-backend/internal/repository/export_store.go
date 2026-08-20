@@ -129,6 +129,48 @@ func (s *ExportStore) GetExportDetail(ctx context.Context, exportID int64) (*age
 }
 
 // ListExports 导出列表（分页）。
+// ListExportsByUser 我的全部导出（作品列表「视频成片」Tab，user_id 归属）。
+func (s *ExportStore) ListExportsByUser(ctx context.Context, userID int64, page, pageSize int) ([]map[string]any, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
+	var total int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM export_records WHERE user_id=$1 AND deleted_at IS NULL`, userID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT e.export_uuid::text, e.status::text, e.export_type::text, COALESCE(e.config_resolution::text,''),
+		       COALESCE(e.config_watermark,FALSE), COALESCE(e.output_file_url,''), COALESCE(e.output_file_size_bytes,0),
+		       e.expire_at, e.created_at, COALESCE(p.title,''), COALESCE(p.project_uuid::text,'')
+		FROM export_records e LEFT JOIN projects p ON p.id=e.project_id
+		WHERE e.user_id=$1 AND e.deleted_at IS NULL
+		ORDER BY e.created_at DESC LIMIT $2 OFFSET $3`, userID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := make([]map[string]any, 0)
+	for rows.Next() {
+		var uuid, status, etype, res, url, projectTitle, projectUUID string
+		var wm bool
+		var size int64
+		var exp, created time.Time
+		if err := rows.Scan(&uuid, &status, &etype, &res, &wm, &url, &size, &exp, &created, &projectTitle, &projectUUID); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"export_id": uuid, "status": status, "export_type": etype, "resolution": res,
+			"watermark": wm, "output_url": url, "file_size": size,
+			"expire_at": exp.Format(time.RFC3339), "created_at": created.Format(time.RFC3339),
+			"project_title": projectTitle, "project_id": projectUUID,
+		})
+	}
+	return out, total, rows.Err()
+}
+
 func (s *ExportStore) ListExports(ctx context.Context, projectID int64, page, pageSize int) ([]map[string]any, int, error) {
 	if page < 1 { page = 1 }
 	if pageSize < 1 || pageSize > 50 { pageSize = 20 }

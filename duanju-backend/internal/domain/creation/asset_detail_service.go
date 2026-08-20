@@ -261,6 +261,47 @@ func (s *AssetDetailService) EpisodeDetail(c *gin.Context, epUUID string) {
 
 // ---- 3.2.1 资产概览 ----
 
+// ProjectAssets 项目通用素材列表（GET /projects/:project_id/assets，Step2 通用素材 Tab）。
+func (s *AssetDetailService) ProjectAssets(c *gin.Context, projectUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	var projectID int64
+	if err := s.repo.pool.QueryRow(c.Request.Context(), `SELECT id FROM projects WHERE project_uuid=$1::uuid AND deleted_at IS NULL`, projectUUID).Scan(&projectID); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在")
+		return
+	}
+	if s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid) != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	rows, err := s.repo.pool.Query(c.Request.Context(), `
+		SELECT a.asset_uuid::text, a.type::text, COALESCE(a.name,''), COALESCE(a.status::text,''),
+		       COALESCE(a.files_json::text,'{}'), COALESCE(a.origin_episode_id,0)
+		FROM assets a WHERE a.project_id=$1 AND a.deleted_at IS NULL
+		ORDER BY a.created_at DESC LIMIT 200`, projectID)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取素材失败")
+		return
+	}
+	defer rows.Close()
+	items := make([]map[string]any, 0)
+	for rows.Next() {
+		var uuid, typ, name, status, files string
+		var epID int64
+		if err := rows.Scan(&uuid, &typ, &name, &status, &files, &epID); err != nil {
+			continue
+		}
+		items = append(items, map[string]any{
+			"asset_id": uuid, "type": typ, "name": name, "status": status,
+			"files_json": files, "origin_episode_id": epID,
+		})
+	}
+	httpx.OK(c, gin.H{"items": items})
+}
+
 // EpisodeAssetsOverview GET /episodes/:episode_id/assets/overview。
 func (s *AssetDetailService) EpisodeAssetsOverview(c *gin.Context, epUUID string) {
 	uid := userID(c)

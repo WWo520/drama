@@ -3,6 +3,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
@@ -97,15 +98,28 @@ func (s *AdminStore) ListWorks(ctx context.Context, status string, page, pageSiz
 	if page < 1 {
 		page = 1
 	}
+	// status=DELETED 特例：回收站视图（is_deleted_recyclebin=TRUE）
+	inRecycle := status == "DELETED"
 	var total int
-	if status == "" {
+	if inRecycle {
+		s.pool.QueryRow(ctx, `SELECT count(*) FROM works WHERE is_deleted_recyclebin=TRUE`).Scan(&total)
+	} else if status == "" {
 		s.pool.QueryRow(ctx, `SELECT count(*) FROM works WHERE is_deleted_recyclebin=FALSE`).Scan(&total)
 	} else {
 		s.pool.QueryRow(ctx, `SELECT count(*) FROM works WHERE publish_status=$1 AND is_deleted_recyclebin=FALSE`, status).Scan(&total)
 	}
 	var rows pgx.Rows
 	var err error
-	if status == "" {
+	if inRecycle {
+		rows, err = s.pool.Query(ctx, `
+			SELECT w.work_uuid::text, w.title, w.publish_status::text, COALESCE(w.view_count,0), COALESCE(w.like_count,0),
+			       COALESCE(u.nickname,''), COALESCE(w.tags::text,'[]'), COALESCE(w.favorite_count,0), COALESCE(w.duration_sec,0),
+			       to_char(COALESCE(w.published_at, w.created_at) AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD HH24:MI'),
+			       COALESCE(w.media_url,''), COALESCE(w.is_recommended,FALSE)
+			FROM works w LEFT JOIN users u ON u.id=w.owner_user_id
+			WHERE w.is_deleted_recyclebin=TRUE ORDER BY w.id DESC LIMIT $1 OFFSET $2`,
+			pageSize, (page-1)*pageSize)
+	} else if status == "" {
 		rows, err = s.pool.Query(ctx, `
 			SELECT w.work_uuid::text, w.title, w.publish_status::text, COALESCE(w.view_count,0), COALESCE(w.like_count,0),
 			       COALESCE(u.nickname,''), COALESCE(w.tags::text,'[]'), COALESCE(w.favorite_count,0), COALESCE(w.duration_sec,0),
@@ -327,14 +341,37 @@ func (s *AdminStore) ListPlatformConfigs(ctx context.Context) ([]map[string]any,
 	return out, rows.Err()
 }
 
-// GetPreferences 个人偏好（/me/preferences）。
+// GetPreferences 读取个人偏好（theme/language/timezone + 模型配置 model_config）。
 func (s *AdminStore) GetPreferences(ctx context.Context, userID int64) (map[string]any, error) {
-	var theme, lang, tz string
-	err := s.pool.QueryRow(ctx, `SELECT COALESCE(theme,''), COALESCE(language,''), COALESCE(timezone,'') FROM user_preferences WHERE user_id=$1`, userID).Scan(&theme, &lang, &tz)
+	var theme, lang, tz, videoModel, imageModel, llmModel, styleCode, resolution, aspectRatio, uiJSON string
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(theme,''), COALESCE(language,''), COALESCE(timezone,''),
+		       COALESCE(default_video_model,''), COALESCE(default_image_model,''),
+		       COALESCE(default_llm_model,''), COALESCE(default_style_code,''),
+		       COALESCE(default_resolution::text,''), COALESCE(default_aspect_ratio::text,''),
+		       COALESCE(ui_preferences_json::text,'{}')
+		FROM user_preferences WHERE user_id=$1 AND deleted_at IS NULL`, userID).
+		Scan(&theme, &lang, &tz, &videoModel, &imageModel, &llmModel, &styleCode, &resolution, &aspectRatio, &uiJSON)
 	if err != nil {
-		return map[string]any{"theme": "dark", "language": "zh-CN", "timezone": "Asia/Shanghai"}, nil
+		return map[string]any{"theme": "dark", "language": "zh-CN", "timezone": "Asia/Shanghai", "model_config": map[string]any{}}, nil
 	}
-	return map[string]any{"theme": theme, "language": lang, "timezone": tz}, nil
+	mc := map[string]any{
+		"video_model":  videoModel,
+		"image_model":  imageModel,
+		"llm_model":    llmModel,
+		"style_code":   styleCode,
+		"resolution":   resolution,
+		"aspect_ratio": aspectRatio,
+	}
+	if uiJSON != "" && uiJSON != "{}" {
+		var ui map[string]any
+		if json.Unmarshal([]byte(uiJSON), &ui) == nil {
+			for k, v := range ui {
+				mc[k] = v
+			}
+		}
+	}
+	return map[string]any{"theme": theme, "language": lang, "timezone": tz, "model_config": mc}, nil
 }
 // UpdatePlatformConfig 更新平台配置（upsert）。
 func (s *AdminStore) UpdatePlatformConfig(ctx context.Context, key, value, group, desc string, operatorID int64) error {
@@ -365,15 +402,150 @@ func (s *AdminStore) UpdateModel(ctx context.Context, key, name, capability stri
 	return err
 }
 
-// UpdatePreferences 更新个人偏好（upsert）。
-func (s *AdminStore) UpdatePreferences(ctx context.Context, userID int64, theme, lang, tz string) error {
+// UpdatePreferences 更新个人偏好（theme/language/timezone + 模型配置列，仅非空时覆盖）。
+func (s *AdminStore) UpdatePreferences(ctx context.Context, userID int64, theme, lang, tz string, mc creation.ModelPrefs) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO user_preferences (user_id, theme, language, timezone)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (user_id) WHERE (deleted_at IS NULL) DO UPDATE SET theme=$2, language=$3, timezone=$4, updated_at=NOW()`,
-		userID, theme, lang, tz)
+		INSERT INTO user_preferences (user_id, theme, language, timezone, default_video_model, default_image_model, default_llm_model, default_style_code, default_resolution, default_aspect_ratio, ui_preferences_json)
+		VALUES ($1, NULLIF($2,''), NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), NULLIF($9,'')::video_resolution_enum, NULLIF($10,'')::image_aspect_ratio_enum,
+		       CASE WHEN NULLIF($11,'') IS NULL THEN '{}'::jsonb ELSE $11::jsonb END)
+		ON CONFLICT (user_id) WHERE (deleted_at IS NULL) DO UPDATE SET
+			theme=COALESCE(NULLIF($2,''), user_preferences.theme),
+			language=COALESCE(NULLIF($3,''), user_preferences.language),
+			timezone=COALESCE(NULLIF($4,''), user_preferences.timezone),
+			default_video_model=COALESCE(NULLIF($5,''), user_preferences.default_video_model),
+			default_image_model=COALESCE(NULLIF($6,''), user_preferences.default_image_model),
+			default_llm_model=COALESCE(NULLIF($7,''), user_preferences.default_llm_model),
+			default_style_code=COALESCE(NULLIF($8,''), user_preferences.default_style_code),
+			default_resolution=COALESCE(NULLIF($9,'')::video_resolution_enum, user_preferences.default_resolution),
+			default_aspect_ratio=COALESCE(NULLIF($10,'')::image_aspect_ratio_enum, user_preferences.default_aspect_ratio),
+			ui_preferences_json=CASE WHEN NULLIF($11,'') IS NULL THEN user_preferences.ui_preferences_json ELSE $11::jsonb END,
+			updated_at=NOW()`,
+		userID, theme, lang, tz, mc.VideoModel, mc.ImageModel, mc.LLMModel, mc.StyleCode, mc.Resolution, mc.AspectRatio, mc.UIJSON)
 	return err
 }
+// CreateAnnouncement 新增公告。
+func (s *AdminStore) CreateAnnouncement(ctx context.Context, title, content, startAt, endAt string, sortOrder int) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO announcements (title, content, start_at, end_at, sort_order)
+		VALUES ($1, $2, $3::timestamptz, $4::timestamptz, $5)`, title, content, startAt, endAt, sortOrder)
+	return err
+}
+
+// UpdateAnnouncement 更新公告。
+func (s *AdminStore) UpdateAnnouncement(ctx context.Context, id int64, title, content, startAt, endAt string, sortOrder int) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE announcements SET title=$2, content=$3, start_at=$4::timestamptz, end_at=$5::timestamptz, sort_order=$6, updated_at=NOW()
+		WHERE id=$1`, id, title, content, startAt, endAt, sortOrder)
+	return err
+}
+
+// DeleteAnnouncement 删除公告。
+func (s *AdminStore) DeleteAnnouncement(ctx context.Context, id int64) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM announcements WHERE id=$1`, id)
+	return err
+}
+
+// CreateBanner 新增 Banner。
+func (s *AdminStore) CreateBanner(ctx context.Context, title, imageURL, jumpURL, position string, sortOrder int, isActive bool) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO banners (title, image_url, jump_url, position, sort_order, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6)`, title, imageURL, jumpURL, position, sortOrder, isActive)
+	return err
+}
+
+// UpdateBanner 更新 Banner。
+func (s *AdminStore) UpdateBanner(ctx context.Context, id int64, title, imageURL, jumpURL, position string, sortOrder int, isActive bool) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE banners SET title=$2, image_url=$3, jump_url=$4, position=$5, sort_order=$6, is_active=$7
+		WHERE id=$1`, id, title, imageURL, jumpURL, position, sortOrder, isActive)
+	return err
+}
+
+// DeleteBanner 删除 Banner。
+func (s *AdminStore) DeleteBanner(ctx context.Context, id int64) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM banners WHERE id=$1`, id)
+	return err
+}
+
+// UpdatePointPackage 积分包 upsert（pkg_code 已存在则更新）。
+func (s *AdminStore) UpdatePointPackage(ctx context.Context, code, name string, points, bonus int, price, status string) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO point_packages (pkg_code, name, points, bonus_points, price_yuan, status)
+		VALUES ($1, $2, $3, $4, $5::numeric, $6)
+		ON CONFLICT (pkg_code) WHERE (deleted_at IS NULL) DO UPDATE SET
+			name=$2, points=$3, bonus_points=$4, price_yuan=$5::numeric, status=$6, updated_at=NOW()`,
+		code, name, points, bonus, price, status)
+	return err
+}
+
+// UpdateRateLimit 更新限流配置。
+func (s *AdminStore) UpdateRateLimit(ctx context.Context, id int64, limitPerMin, burst int, status string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE rate_limits SET limit_per_min=$2, burst=$3, status=$4, updated_at=NOW() WHERE id=$1`,
+		id, limitPerMin, burst, status)
+	return err
+}
+
+// UpdateTheme 更新界面主题。
+func (s *AdminStore) UpdateTheme(ctx context.Context, id int64, name, primaryColor, accentColor, status string, isDefault bool) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE themes SET name=$2, primary_color=$3, accent_color=$4, status=$5, is_default=$6
+		WHERE id=$1`, id, name, primaryColor, accentColor, status, isDefault)
+	return err
+}
+
+// UpdateStyle 更新风格库条目。
+func (s *AdminStore) UpdateStyle(ctx context.Context, id int64, name, description, thumbnailURL string, sortOrder int, enabled bool) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE style_library SET name=$2, description=$3, thumbnail_url=$4, sort_order=$5, enabled=$6, updated_at=NOW()
+		WHERE id=$1`, id, name, description, thumbnailURL, sortOrder, enabled)
+	return err
+}
+
+// ListWithdrawals 提现申请列表（可按状态过滤）。
+func (s *AdminStore) ListWithdrawals(ctx context.Context, status string, page, pageSize int) ([]map[string]any, int, error) {
+	var total int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM withdrawal_requests WHERE ($1='' OR status=$1)`, status).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT w.request_uuid::text, COALESCE(u.nickname,''), w.amount_yuan::text, w.payee_name, w.payee_account,
+		       w.status, COALESCE(w.review_note,''),
+		       to_char(w.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		FROM withdrawal_requests w LEFT JOIN users u ON u.id=w.user_id
+		WHERE ($1='' OR w.status=$1)
+		ORDER BY w.created_at DESC LIMIT $2 OFFSET $3`, status, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]map[string]any, 0)
+	for rows.Next() {
+		var uuid, nickname, amount, payeeName, payeeAccount, st, note, createdAt string
+		if err := rows.Scan(&uuid, &nickname, &amount, &payeeName, &payeeAccount, &st, &note, &createdAt); err != nil {
+			continue
+		}
+		items = append(items, map[string]any{
+			"request_id": uuid, "user": nickname, "amount_yuan": amount,
+			"payee_name": payeeName, "payee_account": payeeAccount,
+			"status": st, "review_note": note, "created_at": createdAt,
+		})
+	}
+	return items, total, rows.Err()
+}
+
+// ReviewWithdrawal 提现审核：PENDING → APPROVED/REJECTED（仅 PENDING 可流转）。
+func (s *AdminStore) ReviewWithdrawal(ctx context.Context, requestUUID string, approve bool, note string, operatorID int64) error {
+	var updated int64
+	err := s.pool.QueryRow(ctx, `
+		UPDATE withdrawal_requests SET status=$2, review_note=$3, reviewed_by_user_id=$4, reviewed_at=NOW(), updated_at=NOW()
+		WHERE request_uuid=$1::uuid AND status='PENDING'
+		RETURNING id`, requestUUID, map[bool]string{true: "APPROVED", false: "REJECTED"}[approve], note, operatorID).Scan(&updated)
+	if err == pgx.ErrNoRows {
+		return errors.New("提现申请不存在或已审核")
+	}
+	return err
+}
+
 // ListAnnouncements 公告列表。
 func (s *AdminStore) ListAnnouncements(ctx context.Context) ([]map[string]any, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, title, content, start_at::text, end_at::text FROM announcements ORDER BY sort_order`)

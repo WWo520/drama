@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -26,6 +27,8 @@ type CanvasStore interface {
 	SaveNodes(ctx context.Context, canvasID int64, nodes []json.RawMessage) error
 	// CreateCanvas 新建画布。
 	CreateCanvas(ctx context.Context, spaceID, projectID, userID int64, name string) (string, error)
+	// ListCanvases 我的画布列表（分页）。
+	ListCanvases(ctx context.Context, userID int64, page, pageSize int) ([]map[string]any, int, error)
 	// ResolveCanvas 画布 uuid → id。
 	ResolveCanvas(ctx context.Context, canvasUUID string) (int64, error)
 	// SaveSnapshot 保存自动快照。
@@ -36,6 +39,26 @@ type CanvasStore interface {
 	RestoreSnapshot(ctx context.Context, canvasID, snapshotID int64) error
 	// ExecuteWorkflow 执行 DAG（拓扑排序 + 环检测 + 节点执行器）。
 	ExecuteWorkflow(ctx context.Context, canvasUUID string, nodes []map[string]any, edges []map[string]any, userID int64) ([]map[string]any, error)
+}
+
+// List 我的画布列表（GET /canvases，作品列表「画布」Tab）。
+func (s *CanvasService) List(c *gin.Context) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if pageSize > 50 || pageSize < 1 {
+		pageSize = 20
+	}
+	items, total, err := s.store.ListCanvases(c.Request.Context(), uid, page, pageSize)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取画布列表失败")
+		return
+	}
+	httpx.OK(c, gin.H{"items": items, "pagination": gin.H{"page": page, "page_size": pageSize, "total": total}})
 }
 
 // ListSnapshots 快照列表（S2-F03）。

@@ -3,6 +3,7 @@ package creation
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -51,8 +52,43 @@ type AdminStore interface {
 	UpdatePackage(ctx context.Context, code, name string, price string, points int, status string) error
 	// UpdateModel 更新模型。
 	UpdateModel(ctx context.Context, key, name, capability string, cost int, enabled bool) error
-	// UpdatePreferences 更新个人偏好。
-	UpdatePreferences(ctx context.Context, userID int64, theme, lang, tz string) error
+	// CreateAnnouncement 新增公告。
+	CreateAnnouncement(ctx context.Context, title, content, startAt, endAt string, sortOrder int) error
+	// UpdateAnnouncement 更新公告。
+	UpdateAnnouncement(ctx context.Context, id int64, title, content, startAt, endAt string, sortOrder int) error
+	// DeleteAnnouncement 删除公告。
+	DeleteAnnouncement(ctx context.Context, id int64) error
+	// CreateBanner 新增 Banner。
+	CreateBanner(ctx context.Context, title, imageURL, jumpURL, position string, sortOrder int, isActive bool) error
+	// UpdateBanner 更新 Banner。
+	UpdateBanner(ctx context.Context, id int64, title, imageURL, jumpURL, position string, sortOrder int, isActive bool) error
+	// DeleteBanner 删除 Banner。
+	DeleteBanner(ctx context.Context, id int64) error
+	// UpdatePointPackage 积分包 upsert。
+	UpdatePointPackage(ctx context.Context, code, name string, points, bonus int, price, status string) error
+	// UpdateRateLimit 更新限流配置。
+	UpdateRateLimit(ctx context.Context, id int64, limitPerMin, burst int, status string) error
+	// UpdateTheme 更新界面主题。
+	UpdateTheme(ctx context.Context, id int64, name, primaryColor, accentColor, status string, isDefault bool) error
+	// UpdateStyle 更新风格库条目。
+	UpdateStyle(ctx context.Context, id int64, name, description, thumbnailURL string, sortOrder int, enabled bool) error
+	// ListWithdrawals 提现申请列表。
+	ListWithdrawals(ctx context.Context, status string, page, pageSize int) ([]map[string]any, int, error)
+	// ReviewWithdrawal 提现审核（PENDING → APPROVED/REJECTED）。
+	ReviewWithdrawal(ctx context.Context, requestUUID string, approve bool, note string, operatorID int64) error
+	// UpdatePreferences 更新个人偏好（含模型配置）。
+	UpdatePreferences(ctx context.Context, userID int64, theme, lang, tz string, mc ModelPrefs) error
+}
+
+// ModelPrefs 模型配置偏好（创作页模型配置弹窗持久化：user_preferences.default_* 列）。
+type ModelPrefs struct {
+	VideoModel  string // default_video_model
+	ImageModel  string // default_image_model（角色/场景/道具共用）
+	LLMModel    string // default_llm_model
+	StyleCode   string // default_style_code
+	Resolution  string // video_resolution_enum：P480/P720/P1080
+	AspectRatio string // image_aspect_ratio_enum：R16_9/R1_1/R9_16
+	UIJSON      string // ui_preferences_json：{"video_duration":"auto"} 等扩展键
 }
 
 // AdminService 管理后台服务。
@@ -254,7 +290,267 @@ func (s *AdminService) ListHints(c *gin.Context) {
 	httpx.OK(c, gin.H{"items": items})
 }
 
+// ---- 公告/Banner 写接口（P2 运营模块） ----
+
+// CreateAnnouncement 新增公告（POST /admin/announcements）。
+func (s *AdminService) CreateAnnouncement(c *gin.Context) {
+	var req struct {
+		Title     string `json:"title" binding:"required,min=1,max=128"`
+		Content   string `json:"content" binding:"required"`
+		StartAt   string `json:"start_at" binding:"required"`
+		EndAt     string `json:"end_at" binding:"required"`
+		SortOrder int    `json:"sort_order"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	if err := s.store.CreateAnnouncement(c.Request.Context(), req.Title, req.Content, req.StartAt, req.EndAt, req.SortOrder); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "新增公告失败")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// UpdateAnnouncement 更新公告（PUT /admin/announcements/:id）。
+func (s *AdminService) UpdateAnnouncement(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "id 非法")
+		return
+	}
+	var req struct {
+		Title     string `json:"title" binding:"required,min=1,max=128"`
+		Content   string `json:"content" binding:"required"`
+		StartAt   string `json:"start_at" binding:"required"`
+		EndAt     string `json:"end_at" binding:"required"`
+		SortOrder int    `json:"sort_order"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	if err := s.store.UpdateAnnouncement(c.Request.Context(), id, req.Title, req.Content, req.StartAt, req.EndAt, req.SortOrder); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "更新公告失败")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// DeleteAnnouncement 删除公告（DELETE /admin/announcements/:id）。
+func (s *AdminService) DeleteAnnouncement(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "id 非法")
+		return
+	}
+	if err := s.store.DeleteAnnouncement(c.Request.Context(), id); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "删除公告失败")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// CreateBanner 新增 Banner（POST /admin/banners）。
+func (s *AdminService) CreateBanner(c *gin.Context) {
+	var req struct {
+		Title     string `json:"title" binding:"required,min=1,max=64"`
+		ImageURL  string `json:"image_url"`
+		JumpURL   string `json:"jump_url"`
+		Position  string `json:"position"`
+		SortOrder int    `json:"sort_order"`
+		IsActive  bool   `json:"is_active"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	if err := s.store.CreateBanner(c.Request.Context(), req.Title, req.ImageURL, req.JumpURL, req.Position, req.SortOrder, req.IsActive); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "新增 Banner 失败")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// UpdateBanner 更新 Banner（PUT /admin/banners/:id）。
+func (s *AdminService) UpdateBanner(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "id 非法")
+		return
+	}
+	var req struct {
+		Title     string `json:"title" binding:"required,min=1,max=64"`
+		ImageURL  string `json:"image_url"`
+		JumpURL   string `json:"jump_url"`
+		Position  string `json:"position"`
+		SortOrder int    `json:"sort_order"`
+		IsActive  bool   `json:"is_active"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	if err := s.store.UpdateBanner(c.Request.Context(), id, req.Title, req.ImageURL, req.JumpURL, req.Position, req.SortOrder, req.IsActive); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "更新 Banner 失败")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// DeleteBanner 删除 Banner（DELETE /admin/banners/:id）。
+func (s *AdminService) DeleteBanner(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "id 非法")
+		return
+	}
+	if err := s.store.DeleteBanner(c.Request.Context(), id); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "删除 Banner 失败")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// ---- 积分包/限流/主题/风格库写接口 ----
+
+// UpdatePointPackage 积分包 upsert（PUT /admin/point-packages）。
+func (s *AdminService) UpdatePointPackage(c *gin.Context) {
+	var req struct {
+		PackageCode string `json:"package_code" binding:"required"`
+		Name        string `json:"name" binding:"required"`
+		Points      int    `json:"points"`
+		BonusPoints int    `json:"bonus_points"`
+		PriceYuan   string `json:"price_yuan"`
+		Status      string `json:"status"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	if err := s.store.UpdatePointPackage(c.Request.Context(), req.PackageCode, req.Name, req.Points, req.BonusPoints, req.PriceYuan, req.Status); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "更新积分包失败")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// UpdateRateLimit 更新限流配置（PUT /admin/rate-limits/:id）。
+func (s *AdminService) UpdateRateLimit(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "id 非法")
+		return
+	}
+	var req struct {
+		LimitPerMin int    `json:"limit_per_min"`
+		Burst       int    `json:"burst"`
+		Status      string `json:"status"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	if err := s.store.UpdateRateLimit(c.Request.Context(), id, req.LimitPerMin, req.Burst, req.Status); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "更新限流配置失败")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// UpdateTheme 更新界面主题（PUT /admin/themes/:id）。
+func (s *AdminService) UpdateTheme(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "id 非法")
+		return
+	}
+	var req struct {
+		Name         string `json:"name"`
+		PrimaryColor string `json:"primary_color"`
+		AccentColor  string `json:"accent_color"`
+		Status       string `json:"status"`
+		IsDefault    bool   `json:"is_default"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	if err := s.store.UpdateTheme(c.Request.Context(), id, req.Name, req.PrimaryColor, req.AccentColor, req.Status, req.IsDefault); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "更新主题失败")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// UpdateStyle 更新风格库条目（PUT /admin/style-library/:id）。
+func (s *AdminService) UpdateStyle(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "id 非法")
+		return
+	}
+	var req struct {
+		Name         string `json:"name"`
+		Description  string `json:"description"`
+		ThumbnailURL string `json:"thumbnail_url"`
+		SortOrder    int    `json:"sort_order"`
+		Enabled      bool   `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	if err := s.store.UpdateStyle(c.Request.Context(), id, req.Name, req.Description, req.ThumbnailURL, req.SortOrder, req.Enabled); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "更新风格失败")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// ---- 提现审核 ----
+
+// ListWithdrawals 提现申请列表（GET /admin/withdrawals）。
+func (s *AdminService) ListWithdrawals(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if pageSize > 100 || pageSize < 1 {
+		pageSize = 20
+	}
+	status := c.Query("status")
+	items, total, err := s.store.ListWithdrawals(c.Request.Context(), status, page, pageSize)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取提现申请失败")
+		return
+	}
+	httpx.OK(c, gin.H{"items": items, "pagination": gin.H{"page": page, "page_size": pageSize, "total": total}})
+}
+
+// ReviewWithdrawal 提现审核（POST /admin/withdrawals/:id/review）。
+func (s *AdminService) ReviewWithdrawal(c *gin.Context) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	var req struct {
+		Approve bool   `json:"approve"`
+		Note    string `json:"note"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	if err := s.store.ReviewWithdrawal(c.Request.Context(), c.Param("id"), req.Approve, req.Note, uid); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, 20009, err.Error())
+		return
+	}
+	httpx.OK(c, nil)
+}
+
 // UpdatePreferences 更新个人偏好（PUT /me/preferences）。
+// model_config 子对象：video_model/image_model/llm_model/style_code/resolution/aspect_ratio
+// 为固定列；其余键（如 video_duration）归入 ui_preferences_json。
 func (s *AdminService) UpdatePreferences(c *gin.Context) {
 	uid := userID(c)
 	if uid == 0 {
@@ -262,19 +558,55 @@ func (s *AdminService) UpdatePreferences(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Theme    string `json:"theme"`
-		Language string `json:"language"`
-		Timezone string `json:"timezone"`
+		Theme       string         `json:"theme"`
+		Language    string         `json:"language"`
+		Timezone    string         `json:"timezone"`
+		ModelConfig map[string]any `json:"model_config"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
 		return
 	}
-	if err := s.store.UpdatePreferences(c.Request.Context(), uid, req.Theme, req.Language, req.Timezone); err != nil {
+	if err := s.store.UpdatePreferences(c.Request.Context(), uid, req.Theme, req.Language, req.Timezone, buildModelPrefs(req.ModelConfig)); err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "更新偏好失败")
 		return
 	}
 	httpx.OK(c, nil)
+}
+
+// buildModelPrefs 从 model_config 对象提取模型偏好固定字段；未知键归入 UIJSON。
+func buildModelPrefs(mc map[string]any) ModelPrefs {
+	out := ModelPrefs{}
+	if len(mc) == 0 {
+		return out
+	}
+	str := func(k string) string {
+		if v, ok := mc[k]; ok {
+			if s, ok := v.(string); ok {
+				return s
+			}
+		}
+		return ""
+	}
+	out.VideoModel = str("video_model")
+	out.ImageModel = str("image_model")
+	out.LLMModel = str("llm_model")
+	out.StyleCode = str("style_code")
+	out.Resolution = str("resolution")
+	out.AspectRatio = str("aspect_ratio")
+	known := map[string]bool{"video_model": true, "image_model": true, "llm_model": true, "style_code": true, "resolution": true, "aspect_ratio": true}
+	rest := map[string]any{}
+	for k, v := range mc {
+		if !known[k] {
+			rest[k] = v
+		}
+	}
+	if len(rest) > 0 {
+		if b, err := json.Marshal(rest); err == nil {
+			out.UIJSON = string(b)
+		}
+	}
+	return out
 }
 
 // UpdatePlatformConfig 更新平台配置（PUT /admin/platform-config）。

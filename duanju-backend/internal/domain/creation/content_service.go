@@ -32,6 +32,8 @@ type ContentStore interface {
 	Favorite(ctx context.Context, workUUID string, userID int64) error
 	// Comment 评论。
 	Comment(ctx context.Context, workUUID string, userID int64, content string) error
+	// ListComments 评论列表（作品维度，VISIBLE 状态）。
+	ListComments(ctx context.Context, workUUID string, page, pageSize int) ([]map[string]any, int, error)
 	// Report 举报（写入 PENDING 报告）。
 	Report(ctx context.Context, workUUID string, userID int64, reason string) error
 	// Follow 关注用户。
@@ -232,6 +234,18 @@ func (s *ContentService) Comment(c *gin.Context, workUUID string) {
 		return
 	}
 	httpx.OK(c, nil)
+}
+
+// Comments 7.7b 评论列表（GET /works/:work_id/comments）。
+func (s *ContentService) Comments(c *gin.Context, workUUID string) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	items, total, err := s.store.ListComments(c.Request.Context(), workUUID, page, pageSize)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, 20001, "作品不存在")
+		return
+	}
+	httpx.OK(c, gin.H{"items": items, "pagination": gin.H{"page": page, "page_size": pageSize, "total": total}})
 }
 
 // Report 7.10 举报。

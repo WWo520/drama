@@ -19,6 +19,8 @@ type ExportTaskQueue interface {
 	CreateExportTask(ctx context.Context, userID, spaceID, projectID int64, exportID int64, resolution string, watermark bool) (int64, int64, error)
 	// ListExports 导出历史（3.4.3）。
 	ListExports(ctx context.Context, projectID int64, page, pageSize int) ([]map[string]any, int, error)
+	// ListExportsByUser 我的全部导出（作品列表「视频成片」Tab）。
+	ListExportsByUser(ctx context.Context, userID int64, page, pageSize int) ([]map[string]any, int, error)
 	// GetExportByUUID 导出详情（3.4.2；归属校验）。
 	GetExportByUUID(ctx context.Context, exportUUID string, userID int64) (map[string]any, error)
 }
@@ -97,9 +99,20 @@ func (s *ExportService) List(c *gin.Context) {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
 		return
 	}
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if pageSize > 50 || pageSize < 1 {
+		pageSize = 20
+	}
+	// 无 project_id：返回我的全部导出（作品列表「视频成片」Tab）
 	projectUUID := c.Query("project_id")
 	if projectUUID == "" {
-		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "缺少 project_id")
+		items, total, err := s.exportOps.ListExportsByUser(c.Request.Context(), uid, page, pageSize)
+		if err != nil {
+			httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取导出记录失败")
+			return
+		}
+		httpx.OK(c, gin.H{"items": items, "pagination": gin.H{"page": page, "page_size": pageSize, "total": total}})
 		return
 	}
 	proj, err := s.repo.GetProject(c.Request.Context(), projectUUID, uid)
@@ -108,8 +121,6 @@ func (s *ExportService) List(c *gin.Context) {
 		return
 	}
 	// 导出历史（3.4.3）
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	items, total, err := s.exportOps.ListExports(c.Request.Context(), proj.ID, page, pageSize)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取导出历史失败")

@@ -33,6 +33,43 @@ func (s *CanvasStore) CreateCanvas(ctx context.Context, spaceID, projectID, user
 	return canvasUUID, err
 }
 
+// ListCanvases 我的画布列表（分页，canvas_projects.created_by 归属）。
+func (s *CanvasStore) ListCanvases(ctx context.Context, userID int64, page, pageSize int) ([]map[string]any, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
+	var total int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM canvas_projects WHERE created_by=$1 AND deleted_at IS NULL`, userID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT c.canvas_uuid::text, c.name, COALESCE(c.project_id,0), c.version,
+		       to_char(c.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		FROM canvas_projects c WHERE c.created_by=$1 AND c.deleted_at IS NULL
+		ORDER BY c.updated_at DESC LIMIT $2 OFFSET $3`, userID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]map[string]any, 0)
+	for rows.Next() {
+		var uuid, name, updatedAt string
+		var projectID int64
+		var version int
+		if err := rows.Scan(&uuid, &name, &projectID, &version, &updatedAt); err != nil {
+			continue
+		}
+		items = append(items, map[string]any{
+			"canvas_id": uuid, "name": name, "project_id": projectID,
+			"version": version, "updated_at": updatedAt,
+		})
+	}
+	return items, total, rows.Err()
+}
+
 func (s *CanvasStore) ResolveCanvas(ctx context.Context, canvasUUID string) (int64, error) {
 	var id int64
 	err := s.pool.QueryRow(ctx, `SELECT id FROM canvas_projects WHERE canvas_uuid=$1 AND deleted_at IS NULL`, canvasUUID).Scan(&id)

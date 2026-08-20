@@ -98,6 +98,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, adminMW, auditMW gin.Handl
 	// 自由画布（S2-B07）：TAG 4.1~4.2 + 4.4 执行
 	canvases := rg.Group("/canvases")
 	{
+		canvases.GET("", h.canvasList)                        // 我的画布列表（作品列表「画布」Tab）
 		canvases.POST("", h.createCanvas)
 		canvases.GET("/:canvas_id", h.loadCanvas)
 		canvases.PUT("/:canvas_id", h.saveCanvas)
@@ -125,6 +126,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, adminMW, auditMW gin.Handl
 		feed.DELETE("/:work_id/like", h.contentUnLike)
 		feed.POST("/:work_id/favorite", h.contentFavorite)
 		feed.POST("/:work_id/comments", h.contentComment)
+		feed.GET("/:work_id/comments", func(c *gin.Context) { h.contentSvc.Comments(c, c.Param("work_id")) })
 		feed.POST("/:work_id/report", h.contentReport)
 	}
 	// 关注（S3-B02 补齐）
@@ -266,6 +268,7 @@ func (h *Handler) registerExtraRoutes(rg *gin.RouterGroup, extra *ExtraServices,
 	}
 	// ---- 项目导出历史 / 回收站 ----
 	rg.GET("/projects/:project_id/exports", func(c *gin.Context) { h.exportSvc.List(c) })
+	rg.GET("/projects/:project_id/assets", func(c *gin.Context) { extra.AssetDetail.ProjectAssets(c, c.Param("project_id")) })
 	recycle := rg.Group("/recycle-bin")
 	{
 		recycle.POST("/:work_id/restore", func(c *gin.Context) { h.contentSvc.RestoreWork(c, c.Param("work_id")) })
@@ -332,6 +335,18 @@ func (h *Handler) registerExtraRoutes(rg *gin.RouterGroup, extra *ExtraServices,
 		admX.GET("/style-library", extra.AdminExtra.StyleLibrary)
 		admX.GET("/themes", extra.AdminExtra.Themes)
 		admX.GET("/think-levels", extra.AdminExtra.ThinkLevels)
+		admX.PUT("/announcements", h.adminSvc.CreateAnnouncement)          // 公告新增
+		admX.PUT("/announcements/:id", h.adminSvc.UpdateAnnouncement)      // 公告更新
+		admX.DELETE("/announcements/:id", h.adminSvc.DeleteAnnouncement)   // 公告删除
+		admX.POST("/banners", h.adminSvc.CreateBanner)                     // Banner 新增
+		admX.PUT("/banners/:id", h.adminSvc.UpdateBanner)                  // Banner 更新
+		admX.DELETE("/banners/:id", h.adminSvc.DeleteBanner)               // Banner 删除
+		admX.PUT("/point-packages", h.adminSvc.UpdatePointPackage)         // 积分包 upsert
+		admX.PUT("/rate-limits/:id", h.adminSvc.UpdateRateLimit)           // 限流配置更新
+		admX.PUT("/themes/:id", h.adminSvc.UpdateTheme)                    // 主题更新
+		admX.PUT("/style-library/:id", h.adminSvc.UpdateStyle)             // 风格库更新
+		admX.GET("/withdrawals", h.adminSvc.ListWithdrawals)                              // 提现申请列表
+		admX.POST("/withdrawals/:id/review", h.adminSvc.ReviewWithdrawal)                // 提现审核
 		admX.GET("/users/:user_uuid", func(c *gin.Context) { extra.AdminExtra.UserDetail(c, c.Param("user_uuid")) })
 		admX.PUT("/users/:user_uuid/membership", func(c *gin.Context) { extra.AdminExtra.UserMembership(c, c.Param("user_uuid")) })
 		admX.PUT("/users/:user_uuid/points", func(c *gin.Context) { extra.AdminExtra.UserPoints(c, c.Param("user_uuid")) })
@@ -484,6 +499,8 @@ func (h *Handler) listVersions(c *gin.Context) {
 func (h *Handler) rollbackVersion(c *gin.Context) {
 	h.assetSvc.RollbackVersion(c, c.Param("nu_id"), c.Param("version_id"))
 }
+
+func (h *Handler) canvasList(c *gin.Context) { h.canvasSvc.List(c) }
 
 func (h *Handler) createCanvas(c *gin.Context) {
 	uid := userID(c)

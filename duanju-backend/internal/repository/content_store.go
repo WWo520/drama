@@ -246,6 +246,35 @@ func (s *ContentStore) Comment(ctx context.Context, workUUID string, userID int6
 	return tx.Commit(ctx)
 }
 
+// ListComments 评论列表（作品维度，VISIBLE 状态，昵称联表）。
+func (s *ContentStore) ListComments(ctx context.Context, workUUID string, page, pageSize int) ([]map[string]any, int, error) {
+	var wid int64
+	if err := s.pool.QueryRow(ctx, `SELECT id FROM works WHERE work_uuid=$1::uuid`, workUUID).Scan(&wid); err != nil {
+		return nil, 0, errors.New("作品不存在")
+	}
+	var total int
+	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM comments WHERE work_id=$1 AND status='VISIBLE' AND deleted_at IS NULL`, wid).Scan(&total)
+	rows, err := s.pool.Query(ctx, `
+		SELECT c.comment_uuid::text, COALESCE(u.nickname,'用户'), c.content,
+		       to_char(c.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		FROM comments c LEFT JOIN users u ON u.id=c.user_id
+		WHERE c.work_id=$1 AND c.status='VISIBLE' AND c.deleted_at IS NULL
+		ORDER BY c.created_at ASC LIMIT $2 OFFSET $3`, wid, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]map[string]any, 0)
+	for rows.Next() {
+		var uuid, nickname, content, createdAt string
+		if err := rows.Scan(&uuid, &nickname, &content, &createdAt); err != nil {
+			continue
+		}
+		items = append(items, map[string]any{"comment_id": uuid, "author": nickname, "content": content, "created_at": createdAt})
+	}
+	return items, total, rows.Err()
+}
+
 func (s *ContentStore) Report(ctx context.Context, workUUID string, userID int64, reason string) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO reports (work_id, reporter_user_id, reason)

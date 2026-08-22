@@ -33,6 +33,7 @@ type ChatRequest struct {
 	MaxTokens   int
 	Temperature float64
 	JSONMode    bool // 结构化输出
+	NoThinking  bool // deepseek-v4-* 关闭推理（思考模式下 temperature/top_p 无效）
 }
 
 // ChatResponse LLM 响应。

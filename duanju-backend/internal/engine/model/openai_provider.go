@@ -51,6 +51,9 @@ func (p *OpenAICompatProvider) Chat(ctx context.Context, k *KeyCredential, req *
 	if req.JSONMode {
 		body["response_format"] = map[string]string{"type": "json_object"}
 	}
+	if req.NoThinking {
+		body["thinking"] = map[string]string{"type": "disabled"}
+	}
 	payload, _ := json.Marshal(body)
 
 	endpoint := strings.TrimRight(k.BaseURL, "/") + "/chat/completions"

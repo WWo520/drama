@@ -38,10 +38,11 @@ func (f *fakeLLM) Chat(_ context.Context, _ model.Capability, _ *model.ChatReque
 
 // fakeSplitStore 内存记录保存。
 type fakeSplitStore struct {
-	saved    *SplitResult
-	saveErr  error
-	info     *ProjectInfo
-	infoErr  error
+	saved        *SplitResult
+	saveErr      error
+	info         *ProjectInfo
+	infoErr      error
+	markedFailed bool
 }
 
 func (f *fakeSplitStore) SaveSplitResult(_ context.Context, _ int64, r *SplitResult) (*SplitStats, error) {
@@ -57,6 +58,11 @@ func (f *fakeSplitStore) GetProjectInfo(_ context.Context, _ int64) (*ProjectInf
 		return nil, f.infoErr
 	}
 	return f.info, nil
+}
+
+func (f *fakeSplitStore) MarkSplitFailed(_ context.Context, _ int64) error {
+	f.markedFailed = true
+	return nil
 }
 
 const validJSON = `{"episodes":[{"title":"第1集","narrative_units":[{"title":"单元A","duration_sec":10,"script_original_text":"剧本","shot_groups":[{"title":"块1","duration_sec":5,"shots":[{"duration_sec":3,"shot_size":"CU","camera_movement":"SLOW_PUSH_IN","camera_angle":"EYE_LEVEL_FRONT","subject_description":"主体","background_description":"背景","local_light_description":"光影","dialogue_text":"台词","ambient_sound":"环境"}]}]}]}]}`

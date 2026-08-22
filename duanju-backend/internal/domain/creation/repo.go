@@ -268,7 +268,8 @@ func (r *Repo) TransitionStatus(ctx context.Context, id int64, to string) (strin
 }
 
 // CreateSplitTask 创建拆分任务 + Outbox（S1-B04 调度引擎消费；B05 前任务停留在 PENDING）。
-func (r *Repo) CreateSplitTask(ctx context.Context, projectID, spaceID, userID int64, scriptText string) (int64, error) {
+// splitSkillPrompt 为剧本拆分技能提示词（agent_skills.template_content，空=默认标准拆分）。
+func (r *Repo) CreateSplitTask(ctx context.Context, projectID, spaceID, userID int64, scriptText string, episodeDurationMin int, splitSkillPrompt string) (int64, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -279,9 +280,9 @@ func (r *Repo) CreateSplitTask(ctx context.Context, projectID, spaceID, userID i
 	err = tx.QueryRow(ctx, `
 		INSERT INTO generation_tasks (request_id, idempotency_key, space_id, user_id, project_id, task_type, status, request_params_json)
 		VALUES ('split-'||gen_random_uuid(), 'split-'||gen_random_uuid(), $1, $2, $3, 'SCRIPT_SPLIT', 'QUEUED',
-		        jsonb_build_object('script_text', $4::text))
+		        jsonb_build_object('script_text', $4::text, 'episode_duration_min', $5::int, 'split_skill_prompt', $6::text))
 		RETURNING id`,
-		spaceID, userID, projectID, scriptText,
+		spaceID, userID, projectID, scriptText, episodeDurationMin, splitSkillPrompt,
 	).Scan(&taskID)
 	if err != nil {
 		return 0, err
@@ -419,9 +420,14 @@ func (r *Repo) MarkTaskFailed(ctx context.Context, taskID int64, reason string) 
 // ListBeats 叙事单元列表（3.1.4）。
 func (r *Repo) ListBeats(ctx context.Context, episodeID int64) ([]BeatDTO, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT nu_uuid::text, sort_order, title, preset_duration_sec, actual_duration_sec,
-		       status::text, version_num, COALESCE(content, ''), COALESCE(script_original_text, '')
-		FROM narrative_units WHERE episode_id = $1 AND deleted_at IS NULL ORDER BY sort_order`,
+		SELECT nu.nu_uuid::text, nu.sort_order, nu.title, nu.preset_duration_sec, nu.actual_duration_sec,
+		       nu.status::text, nu.version_num, COALESCE(nu.content, ''), COALESCE(nu.script_original_text, ''),
+		       COALESCE(sg.cnt, 0)
+		FROM narrative_units nu
+		LEFT JOIN (
+			SELECT narrative_unit_id, count(*) AS cnt FROM shot_groups WHERE deleted_at IS NULL GROUP BY narrative_unit_id
+		) sg ON sg.narrative_unit_id = nu.id
+		WHERE nu.episode_id = $1 AND nu.deleted_at IS NULL ORDER BY nu.sort_order`,
 		episodeID)
 	if err != nil {
 		return nil, err
@@ -431,10 +437,51 @@ func (r *Repo) ListBeats(ctx context.Context, episodeID int64) ([]BeatDTO, error
 	for rows.Next() {
 		var b BeatDTO
 		if err := rows.Scan(&b.BeatID, &b.SortOrder, &b.Title, &b.PresetDurationSec, &b.ActualDurationSec,
-			&b.Status, &b.VersionNum, &b.Content, &b.ScriptOriginalText); err != nil {
+			&b.Status, &b.VersionNum, &b.Content, &b.ScriptOriginalText, &b.ShotGroupCount); err != nil {
 			return nil, err
 		}
+		// 前端展示原文：script_original_text 优先，content 兜底
+		b.ScriptText = b.ScriptOriginalText
+		if b.ScriptText == "" {
+			b.ScriptText = b.Content
+		}
 		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// GetSkillTemplate 按技能码查询启用中的剧本拆分技能提示词（全局 agent_skills 表）。
+func (r *Repo) GetSkillTemplate(ctx context.Context, skillCode string) (string, error) {
+	var tpl string
+	err := r.pool.QueryRow(ctx, `
+		SELECT template_content FROM agent_skills
+		WHERE skill_code = $1 AND kind = 'SCRIPT_SPLIT' AND enabled = TRUE AND deleted_at IS NULL`,
+		skillCode).Scan(&tpl)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return tpl, err
+}
+
+// ListSkills 启用中的技能列表（按 kind 过滤，sort_order 升序；供用户端 /skills）。
+func (r *Repo) ListSkills(ctx context.Context, kind string) ([]SkillDTO, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT skill_code, name, COALESCE(description, ''), template_content
+		FROM agent_skills
+		WHERE kind = $1::agent_skill_kind_enum AND enabled = TRUE AND deleted_at IS NULL
+		ORDER BY sort_order ASC, id ASC`,
+		kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]SkillDTO, 0)
+	for rows.Next() {
+		var s SkillDTO
+		if err := rows.Scan(&s.SkillCode, &s.Name, &s.Description, &s.TemplateContent); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
 	}
 	return out, rows.Err()
 }

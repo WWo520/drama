@@ -8,7 +8,7 @@ import "strings"
 
 // 枚举 → 合法值集合（供 validator oneof 校验器引用）
 var Allowed = map[string]string{
-	"agent_skill_kind_enum":     "STORYBOARD|TASK_PLAN|POLISH",
+	"agent_skill_kind_enum":     "STORYBOARD|TASK_PLAN|POLISH|SCRIPT_SPLIT",
 	"asset_kind_enum":           "CHARACTER_VARIANT|SCENE|PROP|SMART_SHOT_GROUP_ANCHOR|COMMON_ASSET_UPLOAD",
 	"asset_status_enum":         "GENERATING|DONE|FAILED",
 	"asset_type_enum":           "CHARACTER|SCENE|PROP|SHOT|MATERIAL",
@@ -69,9 +69,10 @@ type agent_skill_kind_enum string
 
 // agent_skill_kind_enum 枚举常量
 const (
-	Agent_skill_kind_enum_STORYBOARD agent_skill_kind_enum = "STORYBOARD"
-	Agent_skill_kind_enum_TASK_PLAN  agent_skill_kind_enum = "TASK_PLAN"
-	Agent_skill_kind_enum_POLISH     agent_skill_kind_enum = "POLISH"
+	Agent_skill_kind_enum_STORYBOARD   agent_skill_kind_enum = "STORYBOARD"
+	Agent_skill_kind_enum_TASK_PLAN    agent_skill_kind_enum = "TASK_PLAN"
+	Agent_skill_kind_enum_POLISH       agent_skill_kind_enum = "POLISH"
+	Agent_skill_kind_enum_SCRIPT_SPLIT agent_skill_kind_enum = "SCRIPT_SPLIT"
 )
 
 // asset_kind_enum 枚举类型

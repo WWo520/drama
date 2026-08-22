@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // SplitResult LLM 拆分输出的四层结构 + 集级资产（03 A.2：集 → 叙事单元 → 镜头块 → 单镜头 + 角色/场景/道具抽取）。
@@ -114,10 +115,50 @@ func ParseAndValidate(raw string) (*SplitResult, error) {
 	if err := json.Unmarshal([]byte(clean), &result); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
 	}
+	repairAssets(&result)
 	if err := validateStructure(&result); err != nil {
 		return nil, err
 	}
 	return &result, nil
+}
+
+// repairAssets 集级资产容错补全：模型偶发省略 scenes/props 的 code/name 字段，
+// 自动补齐（code 按序生成、name 取描述截断），避免因此触发整次拆分重试。
+func repairAssets(r *SplitResult) {
+	for i := range r.Scenes {
+		sc := &r.Scenes[i]
+		if strings.TrimSpace(sc.Code) == "" {
+			sc.Code = fmt.Sprintf("SCENE_%02d", i+1)
+		}
+		if strings.TrimSpace(sc.BaseName) == "" {
+			if name := truncateRunes(strings.TrimSpace(sc.BasePrompt), 12); name != "" {
+				sc.BaseName = name
+			} else {
+				sc.BaseName = fmt.Sprintf("场景%d", i+1)
+			}
+		}
+	}
+	for i := range r.Props {
+		p := &r.Props[i]
+		if strings.TrimSpace(p.Code) == "" {
+			p.Code = fmt.Sprintf("PROP_%02d", i+1)
+		}
+		if strings.TrimSpace(p.Name) == "" {
+			if name := truncateRunes(strings.TrimSpace(p.Description), 12); name != "" {
+				p.Name = name
+			} else {
+				p.Name = fmt.Sprintf("道具%d", i+1)
+			}
+		}
+	}
+}
+
+func truncateRunes(s string, n int) string {
+	rs := []rune(s)
+	if len(rs) > n {
+		return string(rs[:n])
+	}
+	return s
 }
 
 func validateStructure(r *SplitResult) error {
@@ -131,6 +172,10 @@ func validateStructure(r *SplitResult) error {
 		for bi, beat := range ep.NarrativeUnits {
 			if strings.TrimSpace(beat.Title) == "" {
 				return fmt.Errorf("%w: 第%d集第%d个叙事单元缺标题", ErrInvalidStructure, ei+1, bi+1)
+			}
+			// 粒度铁律（对齐 LuxReal/ToonFlow）：单单元 ≤30s，超限视为非法输出触发重试
+			if beat.DurationSec <= 0 || beat.DurationSec > 30 {
+				return fmt.Errorf("%w: 叙事单元 %q 时长 %d 秒超限（须 1~30 秒，请切分为更多单元）", ErrInvalidStructure, beat.Title, beat.DurationSec)
 			}
 			if len(beat.ShotGroups) == 0 {
 				return fmt.Errorf("%w: 叙事单元 %q 缺少 shot_groups", ErrInvalidStructure, beat.Title)
@@ -165,6 +210,304 @@ func validateStructure(r *SplitResult) error {
 	for i, p := range r.Props {
 		if strings.TrimSpace(p.Code) == "" || strings.TrimSpace(p.Name) == "" {
 			return fmt.Errorf("%w: 第%d个道具缺少 code/name", ErrInvalidStructure, i+1)
+		}
+	}
+	return nil
+}
+
+// ValidateExcerptCoverage 校验叙事单元原文摘录的忠实性与完整性（防模型静默丢原文）：
+// 1) 每个单元摘录非空；2) 摘录开头必须逐字命中剧本原文（防改写/缩写）；
+// 3) 全部摘录总长 ≥ 剧本 85%（防遗漏段落）。空白符归一后比较。
+func ValidateExcerptCoverage(r *SplitResult, script string) error {
+	norm := func(s string) string {
+		return strings.Map(func(rt rune) rune {
+			if unicode.IsSpace(rt) {
+				return -1
+			}
+			return rt
+		}, s)
+	}
+	srcNorm := norm(script)
+	srcLen := len([]rune(srcNorm))
+	if srcLen == 0 {
+		return nil
+	}
+	total := 0
+	for ei, ep := range r.Episodes {
+		for bi, b := range ep.NarrativeUnits {
+			ex := strings.TrimSpace(b.ScriptOriginalText)
+			if ex == "" {
+				return fmt.Errorf("%w: 第%d集第%d个叙事单元缺少原文摘录", ErrInvalidStructure, ei+1, bi+1)
+			}
+			exNorm := norm(ex)
+			total += len([]rune(exNorm))
+			// 忠实性抽样：摘录开头 24 字必须在剧本原文中逐字出现（防模型改写/概括）
+			head := []rune(exNorm)
+			if len(head) > 24 {
+				head = head[:24]
+			}
+			if len(head) >= 8 && !strings.Contains(srcNorm, string(head)) {
+				return fmt.Errorf("%w: 叙事单元 %q 的摘录非剧本原文（疑似改写，需逐字摘录）", ErrInvalidStructure, b.Title)
+			}
+		}
+	}
+	if float64(total) < float64(srcLen)*0.85 {
+		return fmt.Errorf("%w: 原文摘录覆盖率过低（%d/%d 字），疑似遗漏剧本内容", ErrInvalidStructure, total, srcLen)
+	}
+	return nil
+}
+
+// NormalizeEpisodeCount 确定性分集后处理：模型偏好在剧情连贯时把全部单元塞进单集（重试纠正仍顽固），
+// 故当输出为单集且要求多集时，按单元边界把叙事单元均衡切分为 minEpisodes 集（按摘录字数贪心配平）；
+// 另对尾部/中部过小集（摘录<120字）向前合并，避免孤儿集。集标题取首单元标题。
+func NormalizeEpisodeCount(r *SplitResult, minEpisodes int) *SplitResult {
+	if len(r.Episodes) == 1 && minEpisodes > 1 {
+		r = splitSingleEpisode(r, minEpisodes)
+	}
+	return mergeTinyEpisodes(r, minEpisodes)
+}
+
+func splitSingleEpisode(r *SplitResult, minEpisodes int) *SplitResult {
+	if len(r.Episodes) != 1 || minEpisodes <= 1 {
+		return r
+	}
+	units := r.Episodes[0].NarrativeUnits
+	if len(units) < minEpisodes {
+		minEpisodes = len(units) // 单元数不够时有多少切多少
+	}
+	if minEpisodes <= 1 {
+		return r
+	}
+	// 按摘录字数贪心均分（保持单元顺序，仅在单元边界下刀）
+	weights := make([]int, len(units))
+	total := 0
+	for i, u := range units {
+		w := len([]rune(strings.Map(func(rt rune) rune {
+			if unicode.IsSpace(rt) {
+				return -1
+			}
+			return rt
+		}, u.ScriptOriginalText)))
+		if w <= 0 {
+			w = 1
+		}
+		weights[i] = w
+		total += w
+	}
+	target := (total + minEpisodes - 1) / minEpisodes
+	eps := make([]EpisodeSplit, 0, minEpisodes)
+	start, acc := 0, 0
+	for i, w := range weights {
+		acc += w
+		left := len(units) - i - 1
+		need := minEpisodes - len(eps)
+		// 剩余单元数刚好够剩余集数，或累计已达目标且后面还有集要分 → 下刀
+		if left == need || (acc >= target && need > 1) {
+			eps = append(eps, EpisodeSplit{
+				Title:          fmt.Sprintf("第%d集 - %s", len(eps)+1, units[start].Title),
+				NarrativeUnits: units[start : i+1],
+			})
+			start, acc = i+1, 0
+		}
+	}
+	if start < len(units) {
+		eps = append(eps, EpisodeSplit{
+			Title:          fmt.Sprintf("第%d集 - %s", len(eps)+1, units[start].Title),
+			NarrativeUnits: units[start:],
+		})
+	}
+	r.Episodes = eps
+	return r
+}
+
+// mergeTinyEpisodes 把摘录总量<120字的过小集向前合并（保留 minEpisodes 下限），
+// 防止模型切分点不当产生孤儿集（如尾集只有十几个字）。
+func mergeTinyEpisodes(r *SplitResult, minEpisodes int) *SplitResult {
+	const minEpRunes = 120
+	epRunes := func(ep EpisodeSplit) int {
+		n := 0
+		for _, u := range ep.NarrativeUnits {
+			n += len([]rune(strings.Map(func(rt rune) rune {
+				if unicode.IsSpace(rt) {
+					return -1
+				}
+				return rt
+			}, u.ScriptOriginalText)))
+		}
+		return n
+	}
+	eps := r.Episodes
+	for i := len(eps) - 1; i >= 1; i-- {
+		if len(eps) <= minEpisodes && i <= minEpisodes-1 {
+			break // 不合并到低于下限
+		}
+		if epRunes(eps[i]) >= minEpRunes {
+			continue
+		}
+		// 并入前一集：单元追加、标题保留前集
+		eps[i-1].NarrativeUnits = append(eps[i-1].NarrativeUnits, eps[i].NarrativeUnits...)
+		eps = append(eps[:i], eps[i+1:]...)
+	}
+	// 重排集标题序号（模型自分的集标题可能因合并出现跳号）
+	for i := range eps {
+		if idx := strings.Index(eps[i].Title, " - "); idx > 0 {
+			eps[i].Title = fmt.Sprintf("第%d集%s", i+1, eps[i].Title[idx:])
+		}
+	}
+	r.Episodes = eps
+	return r
+}
+
+// SplitOversizedUnits 确定性超长单元切分：模型对个别长段落反复不切（重试无效且振荡），
+// 后处理按句号/问号/感叹号边界把摘录>120字的单元切成 ≤120 字子单元；
+// 镜头块按时长比例归属子单元，子单元时长按其镜头块加总回写（满足“块加总=单元”约束）。
+func SplitOversizedUnits(r *SplitResult) *SplitResult {
+	const maxRunes = 120
+	runeLen := func(s string) int {
+		return len([]rune(strings.Map(func(rt rune) rune {
+			if unicode.IsSpace(rt) {
+				return -1
+			}
+			return rt
+		}, s)))
+	}
+	for ei := range r.Episodes {
+		ep := &r.Episodes[ei]
+		out := make([]NarrativeUnit, 0, len(ep.NarrativeUnits))
+		for _, u := range ep.NarrativeUnits {
+			if runeLen(u.ScriptOriginalText) <= maxRunes {
+				out = append(out, u)
+				continue
+			}
+			// 按句末标点切句（保留标点）
+			rs := []rune(u.ScriptOriginalText)
+			var sentences []string
+			last := 0
+			for i, rt := range rs {
+				if rt == '。' || rt == '！' || rt == '？' || rt == '…' || rt == '\n' {
+					sentences = append(sentences, string(rs[last:i+1]))
+					last = i + 1
+				}
+			}
+			if last < len(rs) {
+				sentences = append(sentences, string(rs[last:]))
+			}
+			// 贪心打包：每块摘录 ≤ maxRunes 字
+			type chunk struct {
+				text string
+				size int
+			}
+			var chunks []chunk
+			cur, curSize := "", 0
+			for _, s := range sentences {
+				sl := runeLen(s)
+				if curSize+sl > maxRunes && curSize > 0 {
+					chunks = append(chunks, chunk{cur, curSize})
+					cur, curSize = "", 0
+				}
+				cur += s
+				curSize += sl
+			}
+			if curSize > 0 {
+				chunks = append(chunks, chunk{cur, curSize})
+			}
+			if len(chunks) <= 1 {
+				out = append(out, u)
+				continue
+			}
+			// 镜头块按时长比例归属子单元；单块超过首个子单元预算时归入最大预算子单元
+			totalDur := 0
+			for _, g := range u.ShotGroups {
+				totalDur += g.DurationSec
+			}
+			if totalDur <= 0 {
+				totalDur = u.DurationSec
+			}
+			budgets := make([]int, len(chunks))
+			assigned := make([][]ShotGroup, len(chunks))
+			accSize, accDur := 0, 0
+			for ci, c := range chunks {
+				accSize += c.size
+				if ci == len(chunks)-1 {
+					budgets[ci] = totalDur - accDur
+				} else {
+					budgets[ci] = totalDur * c.size / runeLen(u.ScriptOriginalText)
+				}
+				if budgets[ci] < 1 {
+					budgets[ci] = 1
+				}
+				accDur += budgets[ci]
+			}
+			ci := 0
+			for _, g := range u.ShotGroups {
+				// 顺序填桶：当前桶时长预算满则进下一桶
+				assigned[ci] = append(assigned[ci], g)
+				if ci < len(chunks)-1 && groupDur(assigned[ci]) >= budgets[ci] {
+					ci++
+				}
+			}
+			// 兄弟单元：空桶合并到相邻桶（保证每子单元有镜头块）
+			for i := 0; i < len(chunks); i++ {
+				if len(assigned[i]) == 0 {
+					j := i - 1
+					if j < 0 {
+						j = i + 1
+					}
+					if j >= 0 && j < len(chunks) && len(assigned[j]) > 1 {
+						moved := assigned[j][len(assigned[j])-1]
+						assigned[j] = assigned[j][:len(assigned[j])-1]
+						assigned[i] = append(assigned[i], moved)
+					}
+				}
+			}
+			for i, c := range chunks {
+				sub := NarrativeUnit{
+					Title:              fmt.Sprintf("%s-%d", u.Title, i+1),
+					ScriptOriginalText: strings.TrimSpace(c.text),
+					ShotGroups:         assigned[i],
+				}
+				d := 0
+				for _, g := range assigned[i] {
+					d += g.DurationSec
+				}
+				if d <= 0 {
+					d = budgets[i]
+				}
+				if d > 30 {
+					d = 30
+				}
+				sub.DurationSec = d
+				out = append(out, sub)
+			}
+		}
+		ep.NarrativeUnits = out
+	}
+	return r
+}
+
+func groupDur(gs []ShotGroup) int {
+	d := 0
+	for _, g := range gs {
+		d += g.DurationSec
+	}
+	return d
+}
+
+// ValidateBeatExcerptSize 校验单元摘录体量与时长匹配（防拆分不精准/时长低估）：
+// 单单元摘录超过 120 字（空白归一后）按 4字/秒必然超 30 秒上限，须继续切分。
+func ValidateBeatExcerptSize(r *SplitResult) error {
+	const maxExcerptRunes = 120
+	for ei, ep := range r.Episodes {
+		for bi, b := range ep.NarrativeUnits {
+			n := len([]rune(strings.Map(func(rt rune) rune {
+				if unicode.IsSpace(rt) {
+					return -1
+				}
+				return rt
+			}, b.ScriptOriginalText)))
+			if n > maxExcerptRunes {
+				return fmt.Errorf("%w: 第%d集第%d个叙事单元摘录 %d 字超 %d 字上限，须继续切分", ErrInvalidStructure, ei+1, bi+1, n, maxExcerptRunes)
+			}
 		}
 	}
 	return nil

@@ -130,7 +130,7 @@ func (s *ContentStore) Review(ctx context.Context, workUUID string, approve bool
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO publish_records (work_id, action, operator_user_id, note, snapshot_after_json)
-		VALUES ($1, $2, $3, $4, jsonb_build_object('status',$5))`,
+		VALUES ($1, $2, $3, $4, jsonb_build_object('status',$5::text))`,
 		wid, action, operatorID, note, status); err != nil {
 		return err
 	}

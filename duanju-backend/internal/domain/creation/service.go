@@ -188,7 +188,7 @@ func (s *Service) TouchLastOpened(c *gin.Context, projectUUID string) {
 	httpx.OK(c, nil)
 }
 
-// SplitScript 触发拆分（3.1.1）：DRAFT/FAILED → SCRIPT_SPLITTING + 建拆分任务（状态机校验）。
+// SplitScript 触发拆分（3.1.1）：DRAFT/FAILED 首次拆分；PARTIAL_ASSETS/ALL_ASSETS_READY 需 force=true 重新拆分（覆盖旧产物）。
 func (s *Service) SplitScript(c *gin.Context, projectUUID string) {
 	uid := userID(c)
 	if uid == 0 {
@@ -200,8 +200,37 @@ func (s *Service) SplitScript(c *gin.Context, projectUUID string) {
 		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
 		return
 	}
-	if p.Status != StatusDraft && p.Status != StatusScriptSplitFailed {
+	var req struct {
+		ScriptText         string `json:"script_text"`
+		Force              bool   `json:"force"`                // 重新拆分标记（已有拆分结果时必须显式确认）
+		EpisodeDurationMin int    `json:"episode_duration_min"` // 单集目标时长（分钟；0=后端默认）
+		SplitSkillCode     string `json:"split_skill_code"`     // 剧本拆分技能（agent_skills.skill_code；空=默认标准拆分）
+	}
+	_ = c.ShouldBindJSON(&req)
+	// 拆分技能：状态转移前校验（无效 code 直接拒绝，避免状态回滚）
+	skillPrompt := ""
+	if code := strings.TrimSpace(req.SplitSkillCode); code != "" {
+		tpl, err := s.repo.GetSkillTemplate(c.Request.Context(), code)
+		if err != nil {
+			httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "拆分技能不存在或已停用")
+			return
+		}
+		skillPrompt = tpl
+	}
+	switch p.Status {
+	case StatusDraft, StatusScriptSplitFailed:
+		// 首次拆分/失败重试：直接放行
+	case StatusPartialAssets, StatusAllAssetsReady:
+		// 重新拆分：需 force 显式确认（前端二次弹窗），否则拒绝避免误操作
+		if !req.Force {
+			httpx.Fail(c, http.StatusConflict, 30001, "项目已有拆分结果，重新拆分需确认覆盖")
+			return
+		}
+	case StatusScriptSplitting:
 		httpx.Fail(c, http.StatusConflict, 30001, "剧本拆分正在进行中，请勿重复触发")
+		return
+	default:
+		httpx.Fail(c, http.StatusConflict, 30001, "当前项目阶段不允许重新拆分（请回到资产阶段前操作）")
 		return
 	}
 	// 状态机原子转移
@@ -210,10 +239,6 @@ func (s *Service) SplitScript(c *gin.Context, projectUUID string) {
 		return
 	}
 	// 建拆分任务（S1-B04 调度消费）：剧本来源 = 请求体 script_text 优先，兜底项目 source_script_text
-	var req struct {
-		ScriptText string `json:"script_text"`
-	}
-	_ = c.ShouldBindJSON(&req)
 	script := strings.TrimSpace(req.ScriptText)
 	if script == "" {
 		script = strings.TrimSpace(p.SourceScriptText)
@@ -224,7 +249,7 @@ func (s *Service) SplitScript(c *gin.Context, projectUUID string) {
 		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "请先输入剧本原文")
 		return
 	}
-	if _, err := s.repo.CreateSplitTask(c.Request.Context(), p.ID, p.SpaceID, uid, script); err != nil {
+	if _, err := s.repo.CreateSplitTask(c.Request.Context(), p.ID, p.SpaceID, uid, script, req.EpisodeDurationMin, skillPrompt); err != nil {
 		s.lg.Error("创建拆分任务失败", zap.String("request_id", c.GetString("request_id")), zap.Int64("project_id", p.ID), zap.Error(err))
 		// 任务创建失败：回滚状态机（03 A.2：失败回 DRAFT 可重试）
 		_, _ = s.repo.TransitionStatus(c.Request.Context(), p.ID, StatusDraft)
@@ -387,6 +412,21 @@ func (s *Service) ListBeats(c *gin.Context, episodeUUID string) {
 		return
 	}
 	httpx.OK(c, gin.H{"items": beats})
+}
+
+// ListSkills 用户端技能列表（kind 过滤；当前仅开放 SCRIPT_SPLIT 供 Step1 拆分弹窗选择）。
+func (s *Service) ListSkills(c *gin.Context) {
+	kind := c.DefaultQuery("kind", "SCRIPT_SPLIT")
+	if kind != "SCRIPT_SPLIT" {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "不支持的技能类型")
+		return
+	}
+	items, err := s.repo.ListSkills(c.Request.Context(), kind)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取技能列表失败")
+		return
+	}
+	httpx.OK(c, gin.H{"items": items})
 }
 
 func toProjectDTO(p *ProjectRow) ProjectDTO {

@@ -54,4 +54,14 @@ type BeatDTO struct {
 	VersionNum       int    `json:"version_num"`
 	Content          string `json:"content"`
 	ScriptOriginalText string `json:"script_original_text"`
+	ScriptText       string `json:"script_text"`       // 前端展示用剧本原文（script_original_text 优先，content 兜底）
+	ShotGroupCount   int    `json:"shot_group_count"`  // 镜头块数（Step1 单元卡展示）
+}
+
+// SkillDTO 智能体技能（用户端 /skills 列表项；全局 agent_skills 表）。
+type SkillDTO struct {
+	SkillCode       string `json:"skill_code"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	TemplateContent string `json:"template_content"` // 技能提示词模板（弹窗预览用）
 }

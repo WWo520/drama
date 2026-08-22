@@ -54,6 +54,10 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, adminMW, auditMW gin.Handl
 		episodes.GET("/:episode_id/beats", h.listBeats)
 		episodes.GET("/:episode_id/characters", h.listCharacters)
 	}
+	skills := rg.Group("/skills")
+	{
+		skills.GET("", h.listSkills)
+	}
 	uploads := rg.Group("/uploads")
 	{
 		uploads.POST("/presign", h.presign)
@@ -406,6 +410,10 @@ func (h *Handler) touchLastOpened(c *gin.Context) {
 
 func (h *Handler) splitScript(c *gin.Context) {
 	h.svc.SplitScript(c, c.Param("project_id"))
+}
+
+func (h *Handler) listSkills(c *gin.Context) {
+	h.svc.ListSkills(c)
 }
 
 func (h *Handler) listEpisodes(c *gin.Context) {

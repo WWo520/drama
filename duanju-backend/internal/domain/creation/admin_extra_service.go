@@ -519,6 +519,13 @@ func (s *AdminExtraService) UserPoints(c *gin.Context, userUUID string) {
 		direction = "DEBIT"
 		amount = -req.Amount
 	}
+	// 确保积分账户存在（注册漏建或旧数据不完整兜底）
+	if _, err := tx.Exec(c.Request.Context(), `
+		INSERT INTO point_accounts (owner_type, owner_id, current_balance, frozen_balance)
+		VALUES ('USER', $1, 0, 0) ON CONFLICT (owner_type, owner_id) DO NOTHING`, targetID); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "调整失败")
+		return
+	}
 	if _, err := tx.Exec(c.Request.Context(), `
 		UPDATE point_accounts SET current_balance=current_balance+$2, updated_at=NOW()
 		WHERE owner_type='USER' AND owner_id=$1`, targetID, req.Amount); err != nil {
@@ -527,8 +534,8 @@ func (s *AdminExtraService) UserPoints(c *gin.Context, userUUID string) {
 	}
 	if _, err := tx.Exec(c.Request.Context(), `
 		INSERT INTO point_transactions (account_id, owner_type, owner_id, txn_type, direction, amount,
-			balance_after, operator_user_id, description, idempotency_key)
-		SELECT pa.id, 'USER', $1, 'ADMIN_COMP', $4, $5, pa.current_balance, $2, $3, 'admin-points-'||$1||'-'||extract(epoch from now())::text
+			balance_after, frozen_after, operator_user_id, description, idempotency_key)
+		SELECT pa.id, 'USER', $1, 'ADMIN_COMP', $4, $5, pa.current_balance, pa.frozen_balance, $2, $3, 'admin-points-'||$1||'-'||extract(epoch from now())::text
 		FROM point_accounts pa WHERE pa.owner_type='USER' AND pa.owner_id=$1`,
 		targetID, uid, req.Reason, direction, amount); err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "调整失败")
@@ -1116,7 +1123,7 @@ func (s *AdminExtraService) AdminCreateUser(c *gin.Context) {
 	var newUserID int64
 	if err := tx.QueryRow(c.Request.Context(), `
 		INSERT INTO users (email, phone, password_hash, nickname, status)
-		VALUES ($1, '', $2, $3, 'ACTIVE') RETURNING id`,
+		VALUES ($1, NULL::text, $2, $3, 'ACTIVE') RETURNING id`,
 		req.Email, hash, req.Nickname).Scan(&newUserID); err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "23505") {
 			httpx.Fail(c, http.StatusBadRequest, 20009, "邮箱已被注册")

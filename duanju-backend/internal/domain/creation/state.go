@@ -51,12 +51,14 @@ var allowedTransitions = map[string]map[string]bool{
 		StatusCancelled:       true,
 	},
 	StatusPartialAssets: {
+		StatusScriptSplitting: true, // 重新拆分（覆盖旧拆分产物；限资产阶段，进入视频阶段后不可重拆）
 		StatusAllAssetsReady:   true, // 资产全部成功
 		StatusPartialAssets:    true, // 部分失败可重试（自身保持）
 		StatusVideoGenerating:  true, // 可直接进 Step3（部分资产可用时）
 		StatusCancelled:        true,
 	},
 	StatusAllAssetsReady: {
+		StatusScriptSplitting: true, // 重新拆分（覆盖旧拆分产物）
 		StatusVideoGenerating: true, // 生成分镜/视频
 		StatusPartialAssets:   true, // 重新生成资产（回到 Step2）
 		StatusArchived:        true,

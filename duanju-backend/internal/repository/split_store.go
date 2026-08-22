@@ -37,6 +37,14 @@ func (s *SplitStore) GetProjectInfo(ctx context.Context, projectID int64) (*agen
 	return &info, err
 }
 
+// MarkSplitFailed 拆分失败回滚：项目 SCRIPT_SPLITTING → SCRIPT_SPLIT_FAILED（幂等，前端可重新拆分）。
+func (s *SplitStore) MarkSplitFailed(ctx context.Context, projectID int64) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE projects SET status='SCRIPT_SPLIT_FAILED', updated_at=NOW()
+		WHERE id=$1 AND status='SCRIPT_SPLITTING' AND deleted_at IS NULL`, projectID)
+	return err
+}
+
 // SaveSplitResult 事务：集/单元/块/镜头 四层写入 + 项目状态 SCRIPT_SPLITTING→PARTIAL_ASSETS。
 // 对齐 03 A.4：同一事务内锁项目校验状态幂等 → 批量插入 → 更新状态/统计 → 提交。
 func (s *SplitStore) SaveSplitResult(ctx context.Context, projectID int64, result *agent.SplitResult) (*agent.SplitStats, error) {
@@ -86,7 +94,7 @@ func (s *SplitStore) SaveSplitResult(ctx context.Context, projectID int64, resul
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO episodes (project_id, sort_order, title, original_script_text, current_step, status, narrative_unit_count)
 			VALUES ($1, $2, $3, $4, 'ASSET_GENERATION', 'PARTIAL_ASSETS', $5) RETURNING id`,
-			projectID, ei+1, ep.Title, firstScript(ep), len(ep.NarrativeUnits)).Scan(&epID); err != nil {
+			projectID, ei+1, ep.Title, episodeScript(ep), len(ep.NarrativeUnits)).Scan(&epID); err != nil {
 			return nil, err
 		}
 		stats.Episodes++
@@ -233,13 +241,15 @@ func sanitizePropCategory(cat string) string {
 	return "OTHER"
 }
 
-func firstScript(ep agent.EpisodeSplit) string {
+// episodeScript 集级剧本原文：拼接该集全部叙事单元的原文片段（保持全集原文完整展示）。
+func episodeScript(ep agent.EpisodeSplit) string {
+	parts := make([]string, 0, len(ep.NarrativeUnits))
 	for _, b := range ep.NarrativeUnits {
-		if b.ScriptOriginalText != "" {
-			return b.ScriptOriginalText
+		if t := strings.TrimSpace(b.ScriptOriginalText); t != "" {
+			parts = append(parts, t)
 		}
 	}
-	return ""
+	return strings.Join(parts, "\n")
 }
 
 func promptOriginal(sh agent.Shot) string {

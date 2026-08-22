@@ -69,7 +69,8 @@ CREATE TYPE source_3d_enum AS ENUM ('AI_AUTO_3DGS_RECONSTRUCT','PHOTO_RECONSTRUC
 
 -- ============ A9 其他枚举 ============
 CREATE TYPE model_capability_enum AS ENUM ('LLM','T2I','I2I','T2V','I2V','AUDIO');
-CREATE TYPE agent_skill_kind_enum AS ENUM ('STORYBOARD','TASK_PLAN','POLISH');
+-- SCRIPT_SPLIT 由 000027 ALTER TYPE 追加（存量库动态扩展；此处为全量真源）
+CREATE TYPE agent_skill_kind_enum AS ENUM ('STORYBOARD','TASK_PLAN','POLISH','SCRIPT_SPLIT');
 CREATE TYPE memory_scope_enum AS ENUM ('SESSION','SUMMARY');
 CREATE TYPE think_level_enum AS ENUM ('OFF','LIGHT','DEEP','EXTREME');
 CREATE TYPE work_kind_enum AS ENUM ('PROJECT','CANVAS','VIDEO');

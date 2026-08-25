@@ -2,6 +2,7 @@
 package creation
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -266,11 +267,28 @@ const (
 )
 
 // GenerateVideos 3.3.7a 批量生成 beat 下全部镜头视频（VIDEO_SEGMENT_GEN + Outbox + 按秒计费冻结）。
+// 18 - 视频制作：弹窗参数（分辨率/模型）落任务参数；关联资产未就绪门控（对齐 LuxReal code=6002）。
 func (s *Service) GenerateVideos(c *gin.Context, beatUUID string) {
 	uid := userID(c)
 	if uid == 0 {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
 		return
+	}
+	var req struct {
+		Resolution string `json:"resolution"`  // P480/P720/P1080
+		VideoModel string `json:"video_model"` // 模型展示名（Seedance 2.5/2.0/1.5）
+		ModelKey   string `json:"model_key"`   // 模型 key（命中 models.model_key 才参与路由）
+	}
+	_ = c.ShouldBindJSON(&req)
+	switch strings.TrimSpace(req.Resolution) {
+	case "P480", "P720", "P1080":
+	default:
+		req.Resolution = "" // 非法值回落默认 P720
+	}
+	opts := VideoGenOpts{
+		Resolution: strings.TrimSpace(req.Resolution),
+		VideoModel: strings.TrimSpace(req.VideoModel),
+		ModelKey:   s.repo.ResolveVideoModelKey(c.Request.Context(), strings.TrimSpace(req.ModelKey)),
 	}
 	projectID, err := s.repo.ResolveProjectByBeat(c.Request.Context(), beatUUID)
 	if err != nil {
@@ -286,6 +304,13 @@ func (s *Service) GenerateVideos(c *gin.Context, beatUUID string) {
 		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "叙事单元不存在")
 		return
 	}
+	// 资产未就绪门控（阶段一.3）：命中关联但参考图缺失 → 拒绝并引导回 Step2；
+	// 无关联资产（纯 T2V 单元）或全部就绪才放行。
+	if linked, ready, gerr := s.repo.BeatAssetReadiness(c.Request.Context(), beatID); gerr == nil && linked > 0 && ready < linked {
+		httpx.Fail(c, http.StatusBadRequest, 6002,
+			fmt.Sprintf("本单元有 %d 个关联资产未生成参考图，请先回到资产阶段完成生成后再制作视频", linked-ready))
+		return
+	}
 	shots, err := s.repo.ListShotsByBeat(c.Request.Context(), beatID)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取镜头失败")
@@ -296,7 +321,7 @@ func (s *Service) GenerateVideos(c *gin.Context, beatUUID string) {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "查询空间失败")
 		return
 	}
-	taskIDs, err := s.repo.CreateVideoTasks(c.Request.Context(), projectID, spaceID, uid, beatID, shots)
+	taskIDs, err := s.repo.CreateVideoTasks(c.Request.Context(), projectID, spaceID, uid, beatID, shots, opts)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建视频任务失败")
 		return
@@ -338,6 +363,182 @@ func (s *Service) GenerateVideos(c *gin.Context, beatUUID string) {
 		}
 	}
 	httpx.OK(c, gin.H{"created": len(taskIDs), "total": len(shots), "frozen_count": frozenCount, "total_cost": totalCost})
+}
+
+// RegenerateShot 单镜头重生成（F11：POST /shots/:shot_id/regenerate）。
+// 重置 shot 状态为 PENDING → 创建新任务 → 计费冻结 → 入队。
+func (s *Service) RegenerateShot(c *gin.Context, shotUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	// 解析 shot_uuid → shot_id
+	shotID, err := s.repo.ResolveShotID(c.Request.Context(), shotUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "镜头不存在")
+		return
+	}
+	// 查询 shot 所属项目并校验权限
+	var projectID, beatID int64
+	var durationSec int
+	if err := s.repo.pool.QueryRow(c.Request.Context(), `
+		SELECT sh.project_id, sh.narrative_unit_id, sh.duration_sec
+		FROM shots sh WHERE sh.id=$1 AND sh.deleted_at IS NULL`, shotID).
+		Scan(&projectID, &beatID, &durationSec); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "镜头不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	// 重置 shot 状态为 PENDING（允许重新生成）
+	if _, err := s.repo.pool.Exec(c.Request.Context(), `
+		UPDATE shots SET video_generation_status='PENDING', generated_video_url=NULL, updated_at=NOW()
+		WHERE id=$1`, shotID); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "重置镜头状态失败")
+		return
+	}
+	// 查询空间并创建任务
+	spaceID, err := s.repo.SpaceIDByProject(c.Request.Context(), projectID)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "查询空间失败")
+		return
+	}
+	// 创建 VIDEO_SEGMENT_GEN 任务（单镜头；参数走默认 P720 + 默认模型路由）
+	taskIDs, err := s.repo.CreateVideoTasks(c.Request.Context(), projectID, spaceID, uid, beatID, []ShotVideoDTO{{ShotID: shotID, DurationSec: durationSec, VideoStatus: "PENDING"}}, VideoGenOpts{})
+	if err != nil || len(taskIDs) == 0 {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建视频任务失败")
+		return
+	}
+	// 计费冻结：按镜头时长 × 10 点/秒
+	totalCost := durationSec * 10
+	frozenCount := 0
+	if s.billing != nil {
+		if err := s.billing.Freeze(c.Request.Context(), "USER", uid, taskIDs[0], totalCost, &billing.TxnMeta{
+			SpaceID:        spaceID,
+			OperatorUserID: uid,
+			ProjectID:      &projectID,
+			Description:    fmt.Sprintf("单镜头重生成 shot_id=%d", shotID),
+		}); err != nil {
+			// 冻结失败：任务标记失败
+			_ = s.repo.MarkTaskFailed(c.Request.Context(), taskIDs[0], "积分冻结失败")
+			httpx.Fail(c, http.StatusBadRequest, httpx.CodeInsufficientPoints, "积分不足，无法重新生成")
+			return
+		}
+		frozenCount = 1
+	}
+	httpx.OK(c, gin.H{"task_id": taskIDs[0], "shot_id": shotID, "frozen_count": frozenCount, "total_cost": totalCost})
+}
+
+// UpdateNarrativeUnit 编辑叙事单元（F4：PATCH /narrative-units/:nu_id）。
+// 编辑前自动保存版本快照（S2-B05），编辑后 version_num+1。
+func (s *Service) UpdateNarrativeUnit(c *gin.Context, nuUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	var req struct {
+		Title              string `json:"title"`
+		Content            string `json:"content"`
+		ScriptOriginalText string `json:"script_original_text"`
+		PresetDurationSec  *int   `json:"preset_duration_sec"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	// 解析 nu_uuid → (id, project_id) 并校验权限
+	nuID, projectID, err := s.repo.ResolveNarrativeUnit(c.Request.Context(), nuUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "叙事单元不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	// 读取当前内容（用于版本快照）
+	var curTitle, curContent, curScript string
+	var curDur *int
+	if err := s.repo.pool.QueryRow(c.Request.Context(), `
+		SELECT COALESCE(title,''), COALESCE(content,''), COALESCE(script_original_text,''), preset_duration_sec
+		FROM narrative_units WHERE id=$1 AND deleted_at IS NULL`, nuID).
+		Scan(&curTitle, &curContent, &curScript, &curDur); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "叙事单元不存在")
+		return
+	}
+	// 保存编辑前版本快照（回滚用）
+	_ = s.repo.SaveVersionSnapshot(c.Request.Context(), nuID, uid, curScript, curContent)
+	// 更新字段（仅更新非空字段）
+	if req.Title != "" && req.Title != curTitle {
+		curTitle = req.Title
+	}
+	if req.Content != "" && req.Content != curContent {
+		curContent = req.Content
+	}
+	if req.ScriptOriginalText != "" && req.ScriptOriginalText != curScript {
+		curScript = req.ScriptOriginalText
+	}
+	if req.PresetDurationSec != nil {
+		curDur = req.PresetDurationSec
+	}
+	if _, err := s.repo.pool.Exec(c.Request.Context(), `
+		UPDATE narrative_units SET title=$2, content=$3, script_original_text=$4,
+		       preset_duration_sec=$5, version_num=version_num+1, updated_at=NOW()
+		WHERE id=$1 AND deleted_at IS NULL`,
+		nuID, curTitle, curContent, curScript, curDur); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "更新叙事单元失败")
+		return
+	}
+	httpx.OK(c, gin.H{"nu_id": nuUUID, "title": curTitle, "version_num": 0})
+}
+
+// DeleteNarrativeUnit 删除叙事单元（F4：DELETE /narrative-units/:nu_id）。
+// 软删除：级联标记 shot_groups/shots 删除（保留数据可回滚）。
+func (s *Service) DeleteNarrativeUnit(c *gin.Context, nuUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	nuID, projectID, err := s.repo.ResolveNarrativeUnit(c.Request.Context(), nuUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "叙事单元不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	tx, err := s.repo.pool.Begin(c.Request.Context())
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "删除失败")
+		return
+	}
+	defer tx.Rollback(c.Request.Context())
+	// 软删除 shots（先删除子表，避免外键冲突）
+	if _, err := tx.Exec(c.Request.Context(), `UPDATE shots SET deleted_at=NOW() WHERE narrative_unit_id=$1 AND deleted_at IS NULL`, nuID); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "删除镜头失败")
+		return
+	}
+	// 软删除 shot_groups
+	if _, err := tx.Exec(c.Request.Context(), `UPDATE shot_groups SET deleted_at=NOW() WHERE narrative_unit_id=$1 AND deleted_at IS NULL`, nuID); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "删除镜头块失败")
+		return
+	}
+	// 软删除叙事单元
+	if _, err := tx.Exec(c.Request.Context(), `UPDATE narrative_units SET deleted_at=NOW(), updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL`, nuID); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "删除叙事单元失败")
+		return
+	}
+	if err := tx.Commit(c.Request.Context()); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "删除失败")
+		return
+	}
+	httpx.OK(c, nil)
 }
 
 // ListBeatShots 单镜头视频列表（Step3 轮询）。
@@ -435,19 +636,19 @@ func toProjectDTO(p *ProjectRow) ProjectDTO {
 		cover = *p.CoverImageURL
 	}
 	return ProjectDTO{
-		ProjectID:      p.ProjectUUID,
-		SpaceID:        p.SpaceUUID,
-		Title:          p.Title,
-		CoverImageURL:  cover,
-		SourceScriptText: p.SourceScriptText,
-		ProjectType:    p.ProjectType,
-		CurrentStep:    p.CurrentStep,
-		Status:         p.Status,
+		ProjectID:         p.ProjectUUID,
+		SpaceID:           p.SpaceUUID,
+		Title:             p.Title,
+		CoverImageURL:     cover,
+		SourceScriptText:  p.SourceScriptText,
+		ProjectType:       p.ProjectType,
+		CurrentStep:       p.CurrentStep,
+		Status:            p.Status,
 		TotalEpisodeCount: p.TotalEpisodeCount,
 		TotalDurationSec:  p.TotalDurationSec,
-		LastOpenedAt:   p.LastOpenedAt,
-		CreatedAt:      p.CreatedAt,
-		UpdatedAt:      p.UpdatedAt,
+		LastOpenedAt:      p.LastOpenedAt,
+		CreatedAt:         p.CreatedAt,
+		UpdatedAt:         p.UpdatedAt,
 	}
 }
 

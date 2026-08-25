@@ -89,6 +89,9 @@ func (s *SplitStore) SaveSplitResult(ctx context.Context, projectID int64, resul
 	}
 
 	totalDuration := 0
+	// 资产建链收集器（U5/F10：单元文本 + 镜头文本，资产入库后统一匹配写链）
+	unitTexts := make([]UnitTextInput, 0, 16)
+	shotTexts := make([]ShotTextInput, 0, 64)
 	for ei, ep := range result.Episodes {
 		var epID int64
 		if err := tx.QueryRow(ctx, `
@@ -104,7 +107,7 @@ func (s *SplitStore) SaveSplitResult(ctx context.Context, projectID int64, resul
 				INSERT INTO narrative_units (episode_id, project_id, sort_order, title, preset_duration_sec, actual_duration_sec,
 					content, script_original_text, status, version_num)
 				VALUES ($1, $2, $3, $4, $5, $5, $6, $7, 'SUCCESS', 1) RETURNING id`,
-				epID, projectID, bi+1, beat.Title, beat.DurationSec, beat.ScriptOriginalText, beat.ScriptOriginalText).Scan(&nuID); err != nil {
+				epID, projectID, bi+1, beat.Title, int(beat.DurationSec), beat.ScriptOriginalText, beat.ScriptOriginalText).Scan(&nuID); err != nil {
 				return nil, err
 			}
 			stats.Beats++
@@ -116,28 +119,35 @@ func (s *SplitStore) SaveSplitResult(ctx context.Context, projectID int64, resul
 				nuID, beat.ScriptOriginalText, string(sbJSON)); err != nil {
 				return nil, err
 			}
+			// 单元文本收集（原文 + 镜头文案拼接，供资产建链匹配）
+			unitTexts = append(unitTexts, UnitTextInput{NarrativeUnitID: nuID, Text: beat.ScriptOriginalText})
+			nuText := &unitTexts[len(unitTexts)-1]
 			for gi, sg := range beat.ShotGroups {
 				var sgID int64
 				if err := tx.QueryRow(ctx, `
 					INSERT INTO shot_groups (narrative_unit_id, project_id, sort_order, group_type, title, duration_sec, shot_count)
 					VALUES ($1, $2, $3, 'NAMED_SEGMENT', $4, $5, $6) RETURNING id`,
-					nuID, projectID, gi+1, sg.Title, sg.DurationSec, len(sg.Shots)).Scan(&sgID); err != nil {
+					nuID, projectID, gi+1, sg.Title, int(sg.DurationSec), len(sg.Shots)).Scan(&sgID); err != nil {
 					return nil, err
 				}
 				stats.Groups++
 				for si, sh := range sg.Shots {
-					if _, err := tx.Exec(ctx, `
+					var shotID int64
+					if err := tx.QueryRow(ctx, `
 						INSERT INTO shots (shot_group_id, narrative_unit_id, project_id, sort_order, duration_sec,
 							shot_size, camera_movement, camera_angle, subject_description, background_description,
 							local_light_description, dialogue_text, ambient_sound, prompt_original, prompt_refined)
-						VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-						sgID, nuID, projectID, si+1, sh.DurationSec, sh.ShotSize, sh.CameraMovement, sh.CameraAngle,
+						VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
+						sgID, nuID, projectID, si+1, int(sh.DurationSec), sh.ShotSize, sh.CameraMovement, sh.CameraAngle,
 						sh.SubjectDescription, sh.BackgroundDescription, sh.LocalLightDescription,
-						sh.DialogueText, sh.AmbientSound, promptOriginal(sh), sh.PromptRefined); err != nil {
+						sh.DialogueText, sh.AmbientSound, promptOriginal(sh), sh.PromptRefined).Scan(&shotID); err != nil {
 						return nil, err
 					}
 					stats.Shots++
-					totalDuration += sh.DurationSec
+					totalDuration += int(sh.DurationSec)
+					shotText := ShotMatchText(sh.SubjectDescription, sh.BackgroundDescription, sh.DialogueText, sh.AmbientSound)
+					shotTexts = append(shotTexts, ShotTextInput{ShotID: shotID, NarrativeUnitID: nuID, Text: shotText})
+					nuText.Text += " " + shotText
 				}
 			}
 		}
@@ -154,46 +164,65 @@ func (s *SplitStore) SaveSplitResult(ctx context.Context, projectID int64, resul
 			projectID, sortOrder).Scan(&epID)
 		return epID
 	}
+	// 资产清单（含 DB ID，供资产建链匹配）
+	linkAssets := make([]AssetLinkItem, 0, len(result.Characters)+len(result.Scenes)+len(result.Props))
 	if len(result.Characters) > 0 {
 		for _, ch := range result.Characters {
 			epID := resolveEp(ch.OriginEpisodeID)
 			// tags 列是 JSONB：字符串 → JSON 数组
 			tagsJSON, _ := json.Marshal(splitTags(ch.Tags))
-			if _, err := tx.Exec(ctx, `
+			var charID int64
+			if err := tx.QueryRow(ctx, `
 				INSERT INTO characters (project_id, code, name, tags, description_notes, origin_episode_id)
 				VALUES ($1, $2, $3, $4::jsonb, $5, NULLIF($6, 0))
-				ON CONFLICT (project_id, code) WHERE deleted_at IS NULL DO NOTHING`,
-				projectID, ch.Code, ch.Name, string(tagsJSON), ch.DescriptionNotes, epID); err != nil {
+				ON CONFLICT (project_id, code) WHERE deleted_at IS NULL DO UPDATE SET updated_at=NOW() RETURNING id`,
+				projectID, ch.Code, ch.Name, string(tagsJSON), ch.DescriptionNotes, epID).Scan(&charID); err != nil {
 				return nil, err
 			}
 			stats.Characters++
+			linkAssets = append(linkAssets, AssetLinkItem{Kind: "CHARACTER", ID: charID, Name: ch.Name})
 		}
 	}
 	if len(result.Scenes) > 0 {
 		for _, sc := range result.Scenes {
 			epID := resolveEp(sc.OriginEpisodeID)
-			if _, err := tx.Exec(ctx, `
+			var sceneID int64
+			if err := tx.QueryRow(ctx, `
 				INSERT INTO scenes (project_id, code, base_name, base_prompt, origin_episode_id)
 				VALUES ($1, $2, $3, $4, NULLIF($5, 0))
-				ON CONFLICT (project_id, code) WHERE deleted_at IS NULL DO NOTHING`,
-				projectID, sc.Code, sc.BaseName, sc.BasePrompt, epID); err != nil {
+				ON CONFLICT (project_id, code) WHERE deleted_at IS NULL DO UPDATE SET updated_at=NOW() RETURNING id`,
+				projectID, sc.Code, sc.BaseName, sc.BasePrompt, epID).Scan(&sceneID); err != nil {
 				return nil, err
 			}
 			stats.Scenes++
+			linkAssets = append(linkAssets, AssetLinkItem{Kind: "SCENE", ID: sceneID, Name: sc.BaseName})
 		}
 	}
 	if len(result.Props) > 0 {
 		for _, p := range result.Props {
 			epID := resolveEp(p.OriginEpisodeID)
-			if _, err := tx.Exec(ctx, `
+			var propID int64
+			if err := tx.QueryRow(ctx, `
 				INSERT INTO props (project_id, code, name, category, description_prompt, origin_episode_id)
 				VALUES ($1, $2, $3, $4::prop_category_enum, $5, NULLIF($6, 0))
-				ON CONFLICT (project_id, code) WHERE deleted_at IS NULL DO NOTHING`,
-				projectID, p.Code, p.Name, sanitizePropCategory(p.Category), p.Description, epID); err != nil {
+				ON CONFLICT (project_id, code) WHERE deleted_at IS NULL DO UPDATE SET updated_at=NOW() RETURNING id`,
+				projectID, p.Code, p.Name, sanitizePropCategory(p.Category), p.Description, epID).Scan(&propID); err != nil {
 				return nil, err
 			}
 			stats.Props++
+			linkAssets = append(linkAssets, AssetLinkItem{Kind: "PROP", ID: propID, Name: p.Name})
 		}
+	}
+
+	// 资产自动建链（U5/F10，18 - 视频制作 阶段一）：单元/镜头文本实体匹配 →
+	// nu_asset_links + shot_asset_refs + shots.linked_assets_json，供视频生成注入参考图。
+	if len(linkAssets) > 0 {
+		unitLinks, shotLinks, lerr := LinkAssetsInTx(ctx, tx, unitTexts, shotTexts, linkAssets)
+		if lerr != nil {
+			return nil, lerr
+		}
+		stats.AssetUnitLinks = unitLinks
+		stats.AssetShotLinks = shotLinks
 	}
 
 	// 项目状态转移：SCRIPT_SPLITTING → PARTIAL_ASSETS（03 A.2 拆分成功），冗余统计更新

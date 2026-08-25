@@ -2,12 +2,12 @@
 // 样式：shell.css（luxreal-nav-item / sidebar-avatar / pp-panel 等）
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Compass, Folder, Sparkles } from "lucide-react";
+import { Coins, Compass, Folder, Sparkles } from "lucide-react";
 
-import { api } from "@duanju/api-client";
 import { useAuthStore } from "../stores/authStore";
 import ProfilePanel from "../components/ProfilePanel";
 import { useAvatarUrl } from "../hooks/useAvatarUrl";
+import { cachedGet, invalidateCachedGet } from "../utils/cachedApi";
 import "./shell.css";
 
 export type NavKey = "create" | "discover" | "works";
@@ -24,16 +24,25 @@ export default function AppShell({
   const [profileOpen, setProfileOpen] = useState(false);
   const [points, setPoints] = useState<number | null>(null);
 
-  // 积分余额（侧边栏真实数据）
+  // 积分余额（侧边栏真实数据；TTL 缓存 + WS 积分变化事件主动失效，限流治理）
+  const loadPoints = async () => {
+    try {
+      const acc = await cachedGet<{ current_balance: number }>("/points", 15000);
+      setPoints(acc.current_balance);
+    } catch {
+      /* 积分失败不阻塞布局 */
+    }
+  };
   useEffect(() => {
-    (async () => {
-      try {
-        const acc = await api.get<{ current_balance: number }>("/points");
-        setPoints(acc.current_balance);
-      } catch {
-        /* 积分失败不阻塞布局 */
-      }
-    })();
+    void loadPoints();
+    // WS POINTS_BALANCE_CHANGED → 失效缓存并立即重取（充值/消耗后余额准实时）
+    const handler = () => {
+      invalidateCachedGet("/points");
+      void loadPoints();
+    };
+    window.addEventListener("points:changed", handler);
+    return () => window.removeEventListener("points:changed", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const initial = (user?.nickname || "Y").slice(0, 1).toUpperCase();
@@ -58,23 +67,23 @@ export default function AppShell({
         <div className="flex-1" style={{ minHeight: 20 }} />
 
         {/* Center nav - vertically centered */}
-        <nav className="flex flex-col items-center gap-2 flex-shrink-0">
+        <nav className="flex flex-col items-center gap-4 flex-shrink-0">
           <Link to="/" className={`luxreal-nav-item ${active === "create" ? "active" : ""}`} title="创作">
-            <Sparkles size={22} />
+            <Sparkles size={24} />
             <span>创作</span>
           </Link>
           <Link to="/feed" className={`luxreal-nav-item ${active === "discover" ? "active" : ""}`} title="发现">
-            <Compass size={22} />
+            <Compass size={24} />
             <span>发现</span>
           </Link>
           <Link to="/projects" className={`luxreal-nav-item ${active === "works" ? "active" : ""}`} title="作品">
-            <Folder size={22} />
+            <Folder size={24} />
             <span>作品</span>
           </Link>
         </nav>
 
         {/* Spacer to push lower nav down */}
-        <div className="flex-1" style={{ minHeight: 20 }} />
+        <div className="flex-1" style={{ minHeight: 40 }} />
 
         {/* Avatar（点击开关头像资料面板，LuxReal 对齐版 pp-panel） */}
         <div className="pp-anchor" style={{ marginBottom: 4 }}>
@@ -99,8 +108,13 @@ export default function AppShell({
           <ProfilePanel open={profileOpen} onClose={() => setProfileOpen(false)} />
         </div>
 
-        {/* Credits number */}
-        <span className="sidebar-credits">{points === null ? "…" : points.toLocaleString()}</span>
+        {/* Credits number（金色徽章 Coins 图标 + 余额） */}
+        <span className="sidebar-credits">
+          <span className="sidebar-credits-badge">
+            <Coins size={16} className="sidebar-credits-icon" />
+          </span>
+          {points === null ? "…" : points.toLocaleString()}
+        </span>
         {/* Recharge link */}
         <Link to="/points" className="sidebar-recharge" title="充值">充值</Link>
       </aside>

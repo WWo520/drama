@@ -5,6 +5,7 @@ export type agent_skill_kind_enum =
   | 'STORYBOARD'
   | 'TASK_PLAN'
   | 'POLISH'
+  | 'SCRIPT_SPLIT'
 
 export type asset_kind_enum =
   | 'CHARACTER_VARIANT'
@@ -483,7 +484,7 @@ export type work_kind_enum =
 
 // 枚举名 → 合法值集合
 export const EnumAllowed: Record<string, readonly string[]> = {
-  agent_skill_kind_enum: ['STORYBOARD', 'TASK_PLAN', 'POLISH'],
+  agent_skill_kind_enum: ['STORYBOARD', 'TASK_PLAN', 'POLISH', 'SCRIPT_SPLIT'],
   asset_kind_enum: ['CHARACTER_VARIANT', 'SCENE', 'PROP', 'SMART_SHOT_GROUP_ANCHOR', 'COMMON_ASSET_UPLOAD'],
   asset_status_enum: ['GENERATING', 'DONE', 'FAILED'],
   asset_type_enum: ['CHARACTER', 'SCENE', 'PROP', 'SHOT', 'MATERIAL'],

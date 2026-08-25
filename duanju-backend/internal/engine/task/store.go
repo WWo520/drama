@@ -57,6 +57,10 @@ type Store interface {
 	// 返回 (是否进入死信, 错误)。
 	FailTask(ctx context.Context, taskID int64, leaseOwner string, reason string, retryCount int16, nextRetryAt time.Time) (dead bool, err error)
 
+	// UnclaimTask 无执行器释放：RUNNING→QUEUED（不计重试、不判失败；Worker 能力不匹配不是任务错误）。
+	// 返回 false 表示租约已丢失（其他路径已处理）。
+	UnclaimTask(ctx context.Context, taskID int64, leaseOwner string) (bool, error)
+
 	// RequeueQueued 重试到点任务：FAILED_RETRYING(next_retry_at<=now) → QUEUED + 新 Outbox（同一事务）。
 	// 返回需要入 Redis 的任务列表。
 	RequeueDue(ctx context.Context, now time.Time) ([]*Task, error)
@@ -72,6 +76,9 @@ type Store interface {
 
 	// ReapExpired 回收租约过期的 RUNNING 任务（→QUEUED，DB 恢复器；01 B.3.1 ④）。
 	ReapExpired(ctx context.Context, now time.Time) ([]*Task, error)
+
+	// RequeueStuckQueued 修复卡死 QUEUED 任务（enqueued_at 早于阈值；08 审查 Major#14：Claim 后 DB 错误导致任务永久卡 QUEUED）。
+	RequeueStuckQueued(ctx context.Context, stuckBefore time.Time) ([]*Task, error)
 
 	// EnqueueTask 提交任务入队：PENDING→QUEUED + Outbox（Worker 重试场景用，事务内）。
 	EnqueueTask(ctx context.Context, taskID int64, queueName string) error

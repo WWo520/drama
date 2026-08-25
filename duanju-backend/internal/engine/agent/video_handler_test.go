@@ -40,6 +40,11 @@ func (f *fakeVideoStore) LoadShot(_ context.Context, shotID int64) (*ShotInfo, e
 	return s, nil
 }
 
+// LoadShotRefs 测试桩（F10：参考图列表为空）。
+func (f *fakeVideoStore) LoadShotRefs(_ context.Context, _ int64, _ int64) ([]string, error) {
+	return nil, nil
+}
+
 func (f *fakeVideoStore) SaveShotVideo(_ context.Context, shotID int64, videoURL string, _ int, _ int64) error {
 	f.saves[shotID] = videoURL
 	return nil
@@ -84,7 +89,7 @@ func shotTask(shotID int64) *task.Task {
 
 func TestVideoShotSuccess(t *testing.T) {
 	store := newFakeVideoStore()
-	h := NewVideoHandler(store, nil) // engine 为 nil → 降级 mock 链路
+	h := NewVideoHandler(store, nil, "dev") // engine 为 nil → 降级 mock 链路
 
 	out, err := h.Execute(context.Background(), shotTask(1))
 	require.NoError(t, err)
@@ -96,7 +101,7 @@ func TestVideoShotSuccess(t *testing.T) {
 func TestVideoIdempotentCallback(t *testing.T) {
 	// 模拟重复/乱序回调：首次写入后再次调用不再覆盖（幂等）
 	store := newFakeVideoStore()
-	h := NewVideoHandler(store, nil) // engine 为 nil → 降级 mock 链路
+	h := NewVideoHandler(store, nil, "dev") // engine 为 nil → 降级 mock 链路
 
 	_, err := h.Execute(context.Background(), shotTask(1))
 	require.NoError(t, err)
@@ -114,7 +119,7 @@ func TestVideoIdempotentCallback(t *testing.T) {
 
 func TestShotGroupStatusAfterAllDone(t *testing.T) {
 	store := newFakeVideoStore()
-	h := NewVideoHandler(store, nil) // engine 为 nil → 降级 mock 链路
+	h := NewVideoHandler(store, nil, "dev") // engine 为 nil → 降级 mock 链路
 
 	// 处理同块两个镜头
 	_, err := h.Execute(context.Background(), shotTask(1))

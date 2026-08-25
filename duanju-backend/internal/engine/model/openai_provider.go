@@ -24,7 +24,9 @@ func NewOpenAICompatProvider(name string, caps ...Capability) *OpenAICompatProvi
 	return &OpenAICompatProvider{
 		name: name,
 		caps: caps,
-		http: &http.Client{Timeout: 120 * time.Second},
+		// 拆分类长输出（推理模型 + 16K tokens）实测 100~110s 且方差大，120s 会薛定谔式超时；
+		// 上层由任务租约/心跳兜底，此处放宽到 300s。
+		http: &http.Client{Timeout: 300 * time.Second},
 	}
 }
 

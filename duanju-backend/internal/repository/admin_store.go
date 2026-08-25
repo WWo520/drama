@@ -207,6 +207,18 @@ func (s *AdminStore) ListReports(ctx context.Context, page, pageSize int) ([]map
 	}
 	return out, total, rows.Err()
 }
+
+// ReviewReport 举报处理（A2：通过/驳回，仅 PENDING 可流转；reports 表字段精简，仅更新 status）。
+func (s *AdminStore) ReviewReport(ctx context.Context, reportID int64, approve bool, _ string, _ int64) error {
+	var updated int64
+	err := s.pool.QueryRow(ctx, `
+		UPDATE reports SET status=$2 WHERE id=$1 AND status='PENDING'
+		RETURNING id`, reportID, map[bool]string{true: "PROCESSED", false: "DISMISSED"}[approve]).Scan(&updated)
+	if err == pgx.ErrNoRows {
+		return errors.New("举报不存在或已处理")
+	}
+	return err
+}
 // ListOrders 订单列表（P2：11.7 订单管理）。
 func (s *AdminStore) ListOrders(ctx context.Context, page, pageSize int) ([]map[string]any, int, error) {
 	if page < 1 {
@@ -406,7 +418,7 @@ func (s *AdminStore) UpdateModel(ctx context.Context, key, name, capability stri
 func (s *AdminStore) UpdatePreferences(ctx context.Context, userID int64, theme, lang, tz string, mc creation.ModelPrefs) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO user_preferences (user_id, theme, language, timezone, default_video_model, default_image_model, default_llm_model, default_style_code, default_resolution, default_aspect_ratio, ui_preferences_json)
-		VALUES ($1, NULLIF($2,''), NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), NULLIF($9,'')::video_resolution_enum, NULLIF($10,'')::image_aspect_ratio_enum,
+		VALUES ($1, COALESCE(NULLIF($2,''),'light'), COALESCE(NULLIF($3,''),'zh-CN'), COALESCE(NULLIF($4,''),'Asia/Shanghai'), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), NULLIF($9,'')::video_resolution_enum, NULLIF($10,'')::image_aspect_ratio_enum,
 		       CASE WHEN NULLIF($11,'') IS NULL THEN '{}'::jsonb ELSE $11::jsonb END)
 		ON CONFLICT (user_id) WHERE (deleted_at IS NULL) DO UPDATE SET
 			theme=COALESCE(NULLIF($2,''), user_preferences.theme),

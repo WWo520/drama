@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  Bell, CheckCheck, CheckCircle, Compass, Film, Folder,
+  Bell, CheckCheck, CheckCircle, Coins, Compass, Film, Folder,
   Loader2, Sparkles,
 } from "lucide-react";
 
@@ -161,15 +161,15 @@ export default function NotificationsPage() {
           {/* 中心导航（消息页无 active，对齐设计稿） */}
           <nav className="flex flex-col items-center gap-2 flex-shrink-0">
             <Link to="/" className="luxreal-nav-item" title="创作">
-              <Sparkles size={22} />
+              <Sparkles size={24} />
               <span>创作</span>
             </Link>
             <Link to="/feed" className="luxreal-nav-item" title="发现">
-              <Compass size={22} />
+              <Compass size={24} />
               <span>发现</span>
             </Link>
             <Link to="/projects" className="luxreal-nav-item" title="作品">
-              <Folder size={22} />
+              <Folder size={24} />
               <span>作品</span>
             </Link>
           </nav>
@@ -201,8 +201,13 @@ export default function NotificationsPage() {
             <ProfilePanel open={profileOpen} onClose={() => setProfileOpen(false)} />
           </div>
 
-          {/* 积分（真实余额） */}
-          <span className="sidebar-credits">{points === null ? "…" : points.toLocaleString()}</span>
+          {/* 积分（真实余额，金色徽章 Coins 图标 + 数字） */}
+          <span className="sidebar-credits">
+            <span className="sidebar-credits-badge">
+              <Coins size={16} className="sidebar-credits-icon" />
+            </span>
+            {points === null ? "…" : points.toLocaleString()}
+          </span>
           {/* 充值 */}
           <Link to="/points" className="sidebar-recharge" title="充值">
             充值

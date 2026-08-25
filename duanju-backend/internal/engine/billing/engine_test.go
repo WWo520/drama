@@ -81,6 +81,52 @@ func (f *fakeBillStore) ListTransactions(context.Context, int64, int, int) ([]ma
 	return nil, 0, nil
 }
 
+// FreezeAtomic 原子冻结（08 审查 Major#10 接口演进；fake 模拟同等语义）。
+func (f *fakeBillStore) FreezeAtomic(_ context.Context, ownerType string, ownerID, taskID int64, amount int, _ *TxnMeta) (bool, error) {
+	if b, ok := f.bills[taskID]; ok && b.FrozenPoints > 0 {
+		return true, nil // 幂等：已冻结
+	}
+	a, ok := f.accounts[ownerType+":"+fmt.Sprint(ownerID)]
+	if !ok {
+		return false, errors.New("no account")
+	}
+	if a.CurrentBalance < amount {
+		return false, fmt.Errorf("%w: 需 %d 积分，当前 %d", ErrInsufficient, amount, a.CurrentBalance)
+	}
+	a.CurrentBalance -= amount
+	a.FrozenBalance += amount
+	f.bills[taskID] = &TaskBill{TaskID: taskID, AccountID: a.ID, OwnerType: ownerType, OwnerID: ownerID, FrozenPoints: amount}
+	f.txns = append(f.txns, "freeze")
+	return false, nil
+}
+
+// SettleAtomic 原子结算（08 审查 Major#11 接口演进；fake 模拟同等语义）。
+func (f *fakeBillStore) SettleAtomic(_ context.Context, taskID int64, deliverable bool, actualCost int, _ *TxnMeta) (bool, error) {
+	if f.settled[taskID] {
+		return true, nil // 幂等：已结算
+	}
+	f.settled[taskID] = true
+	b, ok := f.bills[taskID]
+	if !ok || b.FrozenPoints == 0 {
+		return false, nil // 不计费任务
+	}
+	a := f.accounts[b.OwnerType+":"+fmt.Sprint(b.OwnerID)]
+	cost := b.FrozenPoints
+	if actualCost > 0 && actualCost < cost {
+		cost = actualCost
+	}
+	if deliverable {
+		a.FrozenBalance -= b.FrozenPoints
+		a.CurrentBalance += b.FrozenPoints - cost // 差额解冻
+		f.txns = append(f.txns, "deduct")
+	} else {
+		a.FrozenBalance -= b.FrozenPoints
+		a.CurrentBalance += b.FrozenPoints
+		f.txns = append(f.txns, "unfreeze")
+	}
+	return false, nil
+}
+
 func meta() *TxnMeta { return &TxnMeta{SpaceID: 10, OperatorUserID: 1} }
 
 func TestThreeStageSuccess(t *testing.T) {

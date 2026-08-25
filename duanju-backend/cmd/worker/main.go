@@ -4,11 +4,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/duanju/backend/internal/engine/agent"
 	"github.com/duanju/backend/internal/engine/billing"
 	"github.com/duanju/backend/internal/engine/model"
+	"github.com/duanju/backend/internal/engine/notify"
 	"github.com/duanju/backend/internal/engine/task"
 	"github.com/duanju/backend/internal/pkg/cryptox"
 	"github.com/duanju/backend/internal/pkg/db"
@@ -66,19 +69,20 @@ func main() {
 	// 真实 LLM Provider（OpenAI 兼容：DeepSeek/Qwen/GLM 等，按厂商 name 匹配注册）
 	realLLM := model.NewOpenAICompatProvider("openai-compat", model.CapLLM)
 	mockLLM := model.NewMockProvider("mock-llm", model.CapLLM)
-	// 真实异步生成 Provider（火山引擎即梦/可灵风格：创建任务 + 轮询，覆盖 T2I/T2V/I2V）。
+	// 真实异步生成 Provider（火山引擎即梦/可灵风格：创建任务 + 轮询，覆盖 T2V/I2V）。
 	// DB 配置厂商 name 为 volcengine/jimeng/kling 等时按名匹配；未配置时回退 mock（开发期）。
-	volc := model.NewAsyncTaskProvider("volcengine", []model.Capability{model.CapT2I, model.CapI2I, model.CapT2V, model.CapI2V}, model.AsyncProviderOption{
-		ImageCreatePath: "/api/v1/images/generations",
-		ImageQueryPath:  "/api/v1/images/generations/{id}",
-		VideoCreatePath: "/api/v1/videos/generations",
-		VideoQueryPath:  "/api/v1/videos/generations/{id}",
+	// 火山 Seedream 图片走同步 images/generations（见 volcImage）；视频（Seedance）走 contents/generations/tasks。
+	volcVideo := model.NewAsyncTaskProvider("volcengine", []model.Capability{model.CapT2V, model.CapI2V}, model.AsyncProviderOption{
+		VideoCreatePath: "/api/v3/contents/generations/tasks",
+		VideoQueryPath:  "/api/v3/contents/generations/tasks/{id}",
 	})
+	volcImage := model.NewVolcImageProvider("volcengine", []model.Capability{model.CapT2I, model.CapI2I}, "")
+	volc := model.MergeProviders(volcImage, volcVideo)
 	jimeng := model.NewAsyncTaskProvider("jimeng", []model.Capability{model.CapT2I, model.CapI2I, model.CapT2V, model.CapI2V}, model.AsyncProviderOption{
-		ImageCreatePath: "/api/v1/images/generations",
-		ImageQueryPath:  "/api/v1/images/generations/{id}",
-		VideoCreatePath: "/api/v1/videos/generations",
-		VideoQueryPath:  "/api/v1/videos/generations/{id}",
+		ImageCreatePath: "/api/v3/contents/generations/tasks",
+		ImageQueryPath:  "/api/v3/contents/generations/tasks/{id}",
+		VideoCreatePath: "/api/v3/contents/generations/tasks",
+		VideoQueryPath:  "/api/v3/contents/generations/tasks/{id}",
 	})
 	kling := model.NewAsyncTaskProvider("kling", []model.Capability{model.CapT2I, model.CapI2I, model.CapT2V, model.CapI2V}, model.AsyncProviderOption{
 		ImageCreatePath: "/v1/images/text2image",
@@ -96,13 +100,20 @@ func main() {
 	splitStore := repository.NewSplitStore(pool)
 	splitHandler := agent.NewSplitHandler(modelEngine, splitStore)
 
+	// 18 - 视频制作 阶段二：分镜脚本独立生成（STORYBOARD_PLAN_V1_LUXCHAT，单叙事单元重跑分镜技能）
+	storyboardStore := repository.NewStoryboardStore(pool)
+	storyboardPlanHandler := agent.NewStoryboardPlanHandler(modelEngine, storyboardStore)
+
 	// Worker-Asset（S1-B06）：三种图生成任务
 	assetStore := repository.NewAssetStore(pool)
-	assetHandler := agent.NewAssetHandler(assetStore, modelEngine)
+	assetHandler := agent.NewAssetHandler(assetStore, modelEngine, cfg.App.Env)
 
 	// Worker-Video（S1-B07）：Step3 视频生成
 	videoStore := repository.NewVideoStore(pool)
-	videoHandler := agent.NewVideoHandler(videoStore, modelEngine)
+	videoHandler := agent.NewVideoHandler(videoStore, modelEngine, cfg.App.Env)
+
+	// 18 - 视频制作：镜头级参考图生成（对齐 LuxReal「镜头N的参考图」，SHOT_REF_IMAGE_GEN，归入 asset 能力）
+	shotRefHandler := agent.NewShotRefImageHandler(videoStore, modelEngine, cfg.App.Env)
 
 	// Worker-Export（S1-B08）：Step4 导出 MP4
 	exportStore := repository.NewExportStore(pool)
@@ -125,9 +136,11 @@ func main() {
 	var handlers []task.Handler
 	if *role == "split" {
 		handlers = append(handlers, splitHandler)
+		handlers = append(handlers, storyboardPlanHandler) // 18 - 视频制作：分镜独立生成
 	}
 	if *role == "split" || *role == "asset" {
 		handlers = append(handlers, assetHandler)
+		handlers = append(handlers, shotRefHandler) // 镜头级参考图生成（asset 能力）
 	}
 	if *role == "split" || *role == "video" {
 		handlers = append(handlers, videoHandler)
@@ -136,6 +149,49 @@ func main() {
 		handlers = append(handlers, exportHandler)
 	}
 	worker := task.NewWorker(store, queue, handlers)
+
+	// 任务终态 WS 推送（跨进程桥：Redis Pub/Sub → API 进程 Hub → 用户 WS；轮询对齐 LuxReal 的 WS 驱动基础）
+	// 注意：WS 订阅 topic 真源是 user:{user_uuid}（JWT uid 即 user_uuid），数字 id 需换查 UUID。
+	userUUID := func(ctx context.Context, id int64) string {
+		var u string
+		if err := pool.QueryRow(ctx, `SELECT user_uuid::text FROM users WHERE id=$1`, id).Scan(&u); err != nil {
+			return ""
+		}
+		return u
+	}
+	worker.Notifier = func(ctx context.Context, t *task.Task, status, reason string) {
+		if status == task.StatusFailedDead && t.TaskType == splitHandler.Name() && t.ProjectID != nil {
+			// 拆分任务死信兜底回滚：Execute 内部已回滚，但 SaveSplitResult DB 异常等路径漏回滚时，
+			// 项目会永久卡在 SCRIPT_SPLITTING（前端无限轮询"拆分中"）。幂等：仅 SCRIPT_SPLITTING 状态生效。
+			if rerr := splitStore.MarkSplitFailed(ctx, *t.ProjectID); rerr != nil {
+				lg.Warn("拆分任务死信回滚项目状态失败", logger.F("err", rerr.Error(), "project_id", *t.ProjectID)...)
+			}
+		}
+		uuid := userUUID(ctx, t.UserID)
+		if uuid == "" {
+			return
+		}
+		msgType := notify.TypeTaskSuccess
+		if status == task.StatusFailedDead {
+			msgType = notify.TypeTaskFailed
+		}
+		data := map[string]any{
+			"task_uuid": t.TaskUUID,
+			"task_type": t.TaskType,
+			"status":    status,
+			"ts":        time.Now().Format(time.RFC3339),
+		}
+		if reason != "" {
+			data["reason"] = reason
+		}
+		if perr := notify.PublishPush(ctx, rdb, cfg.App.Env, notify.PushEnvelope{
+			UserID: uuid,
+			Type:   msgType,
+			Data:   data,
+		}); perr != nil {
+			lg.Debug("任务终态推送失败", logger.F("err", perr.Error())...)
+		}
+	}
 
 	// 计费引擎（S1-B09）：任务结算回调（成功扣费/失败解冻）
 	billingStore := repository.NewBillingStore(pool)
@@ -152,7 +208,31 @@ func main() {
 			action, taskID, deliverable); aerr != nil {
 			lg.Warn("审计写入失败", logger.F("err", aerr.Error())...)
 		}
-		return billingEngine.Settle(ctx, taskID, deliverable, 0, &billing.TxnMeta{})
+		// 读取任务 space_id 填充计费快照（空 TxnMeta 会导致 point_transactions.related_space_id 外键失败）
+		meta := &billing.TxnMeta{}
+		var spaceID, userID int64
+		if err := pool.QueryRow(ctx, `SELECT space_id, user_id FROM generation_tasks WHERE id=$1`, taskID).Scan(&spaceID, &userID); err == nil {
+			meta.SpaceID = spaceID
+		}
+		if err := billingEngine.Settle(ctx, taskID, deliverable, 0, meta); err != nil {
+			if errors.Is(err, billing.ErrAlreadySettled) {
+				return nil // 幂等：已结算（重复回调），不重复推送
+			}
+			return err
+		}
+		// 积分余额变化推送（前端据此刷新余额/停止轮询；topic 用 user_uuid）
+		if userID > 0 {
+			if uuid := userUUID(ctx, userID); uuid != "" {
+				if perr := notify.PublishPush(ctx, rdb, cfg.App.Env, notify.PushEnvelope{
+					UserID: uuid,
+					Type:   notify.TypePointsChanged,
+					Data:   map[string]any{"source": "task_settle", "ts": time.Now().Format(time.RFC3339)},
+				}); perr != nil {
+					lg.Debug("积分变化推送失败", logger.F("err", perr.Error())...)
+				}
+			}
+		}
+		return nil
 	}
 	for i := 0; i < *concurrency; i++ {
 		go worker.Run(ctx)

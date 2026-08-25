@@ -27,7 +27,7 @@ type OpenAPIStore interface {
 	// RegisterWebhook 注册回调。
 	RegisterWebhook(ctx context.Context, userID int64, url, secret string, events []string) error
 	// VerifyWebhook 签名校验（HMAC-SHA256）。
-	VerifyWebhook(ctx context.Context, url string, payload []byte, signature string) (bool, error)
+	VerifyWebhook(ctx context.Context, userID int64, url string, payload []byte, signature string) (bool, error)
 }
 
 // OpenAPIService 开发者服务。
@@ -121,11 +121,12 @@ func (s *OpenAPIService) RegisterWebhook(c *gin.Context) {
 	httpx.OK(c, nil)
 }
 
-// VerifyWebhookSignature 回调验签（HMAC-SHA256）。
+// VerifyWebhookSignature 回调验签（HMAC-SHA256；08 审查 Major#18：按当前用户归属验签）。
 func (s *OpenAPIService) VerifyWebhookSignature(c *gin.Context, url string) {
+	uid := userID(c)
 	payload, _ := c.GetRawData()
 	sig := c.GetHeader("X-Signature")
-	ok, err := s.store.VerifyWebhook(c.Request.Context(), url, payload, sig)
+	ok, err := s.store.VerifyWebhook(c.Request.Context(), uid, url, payload, sig)
 	if err != nil || !ok {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "签名校验失败")
 		return

@@ -2,6 +2,13 @@
 # 用法：.\start-backend.ps1 -Role api | worker
 param([string]$Role = "api")
 
+# 模型密钥加密主密钥：与 Worker 侧保持一致（从仓库根 .env 读取，缺失则回退 JWT_SECRET）
+$rootEnv = Join-Path $PSScriptRoot "..\.env"
+if (Test-Path $rootEnv) {
+  $line = Select-String -Path $rootEnv -Pattern "^MODEL_KEY_ENC_SECRET=(.+)$" | Select-Object -First 1
+  if ($line) { $env:MODEL_KEY_ENC_SECRET = $line.Matches[0].Groups[1].Value.Trim() }
+}
+
 $env:DATABASE_URL = "postgres://duanju:duanju_dev_pwd@127.0.0.1:5432/duanju?sslmode=disable"
 $env:REDIS_ADDR = "127.0.0.1:6380"
 $env:JWT_SECRET = "dev-only-secret-change-in-prod"

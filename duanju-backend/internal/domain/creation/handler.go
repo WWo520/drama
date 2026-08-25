@@ -20,10 +20,11 @@ type Handler struct {
 	marketSvc  *MarketService
 	adminSvc   *AdminService
 	openSvc    *OpenAPIService
+	env        string // 08 审查 Critical#3：开发期激活端点生产不注册
 }
 
-func NewHandler(svc *Service, assetSvc *AssetService, exportSvc *ExportService, canvasSvc *CanvasService, memberSvc *MembershipService, contentSvc *ContentService, marketSvc *MarketService, adminSvc *AdminService, openSvc *OpenAPIService) *Handler {
-	return &Handler{svc: svc, assetSvc: assetSvc, exportSvc: exportSvc, canvasSvc: canvasSvc, memberSvc: memberSvc, contentSvc: contentSvc, marketSvc: marketSvc, adminSvc: adminSvc, openSvc: openSvc}
+func NewHandler(svc *Service, assetSvc *AssetService, exportSvc *ExportService, canvasSvc *CanvasService, memberSvc *MembershipService, contentSvc *ContentService, marketSvc *MarketService, adminSvc *AdminService, openSvc *OpenAPIService, env string) *Handler {
+	return &Handler{svc: svc, assetSvc: assetSvc, exportSvc: exportSvc, canvasSvc: canvasSvc, memberSvc: memberSvc, contentSvc: contentSvc, marketSvc: marketSvc, adminSvc: adminSvc, openSvc: openSvc, env: env}
 }
 
 // ExtraServices 补齐服务集（S5 接口覆盖率）。
@@ -53,6 +54,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, adminMW, auditMW gin.Handl
 	{
 		episodes.GET("/:episode_id/beats", h.listBeats)
 		episodes.GET("/:episode_id/characters", h.listCharacters)
+		episodes.POST("/:episode_id/reextract-assets", h.reextractEpisodeAssets)
 	}
 	skills := rg.Group("/skills")
 	{
@@ -66,23 +68,39 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, adminMW, auditMW gin.Handl
 	assets := rg.Group("/assets")
 	{
 		assets.POST("/batch-generate", h.batchGenerate)
+		// 资产详情弹窗（对齐 LuxReal）：初始数据/提示词编辑/重置/AI优化/历史/换图
+		// 独立 /asset-dialog 组（避免与 /assets/:asset_id 通配符冲突）
 	}
+	dialog := rg.Group("/asset-dialog")
+	{
+		dialog.GET("/:kind/:target_id/dialog", func(c *gin.Context) { extra.AssetDetail.DialogData(c, c.Param("kind"), c.Param("target_id")) })
+		dialog.PUT("/:kind/:target_id/prompt", func(c *gin.Context) { extra.AssetDetail.UpdatePrompt(c, c.Param("kind"), c.Param("target_id")) })
+		dialog.POST("/:kind/:target_id/prompt/reset", func(c *gin.Context) { extra.AssetDetail.ResetPrompt(c, c.Param("kind"), c.Param("target_id")) })
+		dialog.POST("/:kind/:target_id/prompt/optimize", func(c *gin.Context) { extra.AssetDetail.OptimizePrompt(c, c.Param("kind"), c.Param("target_id")) })
+		dialog.GET("/:kind/:target_id/history", func(c *gin.Context) { extra.AssetDetail.History(c, c.Param("kind"), c.Param("target_id")) })
+		dialog.POST("/:kind/:target_id/set-image", func(c *gin.Context) { extra.AssetDetail.SetImage(c, c.Param("kind"), c.Param("target_id")) })
+	}
+	// 生成历史收藏
+	rg.POST("/generated-images/:id/favorite", func(c *gin.Context) { extra.AssetDetail.ToggleFavorite(c, c.Param("id")) })
 	// 9.3.1 生成消耗预览（S2-B06 跨集复用豁免）
 	preview := rg.Group("/points")
 	{
 		preview.POST("/preview", h.previewPoints)
 	}
-	// 多变体（S2-B04）：3.2.6 创建变体 / 3.2.7 变体列表
+	// 多变体（S2-B04）：3.2.6 创建变体 / 3.2.7 变体列表 + 剧本自动生成形象
 	chars := rg.Group("/characters")
 	{
 		chars.GET("/:character_id/variants", h.listVariants)
 		chars.POST("/:character_id/variants", h.createVariant)
+		chars.POST("/:character_id/generate-variants", h.generateVariantsFromScript)
 	}
 	// 版本回滚（S2-B05）
 	nus := rg.Group("/narrative-units")
 	{
 		nus.GET("/:nu_id/versions", h.listVersions)
 		nus.POST("/:nu_id/rollback/:version_id", h.rollbackVersion)
+		nus.PATCH("/:nu_id", h.updateNarrativeUnit)  // F4: 叙事单元编辑（title/content/script_original_text/preset_duration_sec）
+		nus.DELETE("/:nu_id", h.deleteNarrativeUnit) // F4: 叙事单元删除（软删除级联）
 	}
 	exportGroup := rg.Group("/projects")
 	{
@@ -102,13 +120,13 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, adminMW, auditMW gin.Handl
 	// 自由画布（S2-B07）：TAG 4.1~4.2 + 4.4 执行
 	canvases := rg.Group("/canvases")
 	{
-		canvases.GET("", h.canvasList)                        // 我的画布列表（作品列表「画布」Tab）
+		canvases.GET("", h.canvasList) // 我的画布列表（作品列表「画布」Tab）
 		canvases.POST("", h.createCanvas)
 		canvases.GET("/:canvas_id", h.loadCanvas)
 		canvases.PUT("/:canvas_id", h.saveCanvas)
 		canvases.PUT("/:canvas_id/nodes", h.saveNodes)
 		canvases.POST("/:canvas_id/execute", h.executeCanvas)
-		canvases.GET("/:canvas_id/snapshots", h.listSnapshots)                    // S2-F03 快照列表
+		canvases.GET("/:canvas_id/snapshots", h.listSnapshots)                         // S2-F03 快照列表
 		canvases.POST("/:canvas_id/snapshots/:snapshot_id/restore", h.restoreSnapshot) // 恢复
 	}
 	// 月卡会员（S2-B09）：9.9 购买/查询 + 9.10 取消 + 4.5 SSE（S2-B10）
@@ -117,7 +135,10 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, adminMW, auditMW gin.Handl
 		mems.POST("/purchase", h.membershipPurchase)
 		mems.GET("", h.membershipDetail)
 		mems.POST("/cancel", h.membershipCancel)
-		mems.POST("/orders/:order_no/activate", h.membershipActivate) // 开发期激活（鉴权+归属校验）
+		// 08 审查 Critical#3：开发期零支付激活端点，生产环境不注册（防免费开会员）
+		if h.env != "production" {
+			mems.POST("/orders/:order_no/activate", h.membershipActivate) // 开发期激活（鉴权+归属校验）
+		}
 	}
 	rg.GET("/ai/dialog/stream", h.aiDialogSSE)
 	// 内容域（S3-B01~B03）：信息流/作品/互动/审核
@@ -169,24 +190,24 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, adminMW, auditMW gin.Handl
 	// 管理后台（S3-B07/B08）：TAG 11（RBAC：SUPER_ADMIN）
 	adm := rg.Group("/admin", adminMW)
 	{
-		adm.GET("/dashboard", h.adminDashboard)                       // 11.0 指标
-		adm.GET("/users", h.adminUsers)                       // 11.2 用户列表
-		adm.PATCH("/users/:user_uuid/ban", h.adminBanUser)     // 11.5 封禁
-		adm.GET("/works", h.adminWorks)                        // 内容列表
-		adm.DELETE("/works/:work_id", h.adminDeleteWork)       // 11.73 强制删除
-		adm.GET("/reports", h.adminReports)                    // 11.74 举报列表
-		adm.GET("/orders", h.adminOrders)                    // P2 订单管理
-		adm.GET("/packages", h.adminPackages)                // P2 套餐管理
-		adm.GET("/models", h.adminModels)                    // P2 模型管理
-		adm.GET("/audit-logs", h.adminAuditLogs)             // P2 审计日志
-		adm.GET("/roles", h.adminRoles)                     // P2 角色列表
-		adm.GET("/platform-config", h.adminPlatformConfig)   // P2 平台配置
+		adm.GET("/dashboard", h.adminDashboard)                  // 11.0 指标
+		adm.GET("/users", h.adminUsers)                          // 11.2 用户列表
+		adm.PATCH("/users/:user_uuid/ban", h.adminBanUser)       // 11.5 封禁
+		adm.GET("/works", h.adminWorks)                          // 内容列表
+		adm.DELETE("/works/:work_id", h.adminDeleteWork)         // 11.73 强制删除
+		adm.GET("/reports", h.adminReports)                      // 11.74 举报列表
+		adm.GET("/orders", h.adminOrders)                        // P2 订单管理
+		adm.GET("/packages", h.adminPackages)                    // P2 套餐管理
+		adm.GET("/models", h.adminModels)                        // P2 模型管理
+		adm.GET("/audit-logs", h.adminAuditLogs)                 // P2 审计日志
+		adm.GET("/roles", h.adminRoles)                          // P2 角色列表
+		adm.GET("/platform-config", h.adminPlatformConfig)       // P2 平台配置
 		adm.PUT("/platform-config", h.adminUpdatePlatformConfig) // P2 更新配置
-		adm.PUT("/packages", h.adminUpdatePackage)           // P2 更新套餐
-		adm.PUT("/models", h.adminUpdateModel)               // P2 更新模型
-		adm.GET("/announcements", h.adminAnnouncements)      // P2 公告列表
-		adm.GET("/banners", h.adminBanners)                  // P2 Banner 列表
-		adm.GET("/hints", h.adminHints)                      // P2 提示列表
+		adm.PUT("/packages", h.adminUpdatePackage)               // P2 更新套餐
+		adm.PUT("/models", h.adminUpdateModel)                   // P2 更新模型
+		adm.GET("/announcements", h.adminAnnouncements)          // P2 公告列表
+		adm.GET("/banners", h.adminBanners)                      // P2 Banner 列表
+		adm.GET("/hints", h.adminHints)                          // P2 提示列表
 	}
 	// 开发者（S3-B09）：API Key + Webhook
 	dev := rg.Group("/api-keys")
@@ -234,12 +255,20 @@ func (h *Handler) registerExtraRoutes(rg *gin.RouterGroup, extra *ExtraServices,
 	{
 		shots.GET("/:shot_id", func(c *gin.Context) { extra.Storyboard.ShotDetail(c, c.Param("shot_id")) })
 		shots.POST("/batch", extra.Storyboard.ShotsBatch)
+		shots.POST("/:shot_id/regenerate", h.regenerateShot) // F11: 单镜头重生成
+		// 18 - 视频制作：生成镜头级参考图（对齐 LuxReal「镜头N的参考图」，SHOT_REF_IMAGE_GEN）
+		shots.POST("/:shot_id/generate-reference-image", func(c *gin.Context) {
+			extra.Storyboard.GenerateShotRefImage(c, c.Param("shot_id"))
+		})
 	}
 	storyboards := rg.Group("/storyboards")
 	{
 		storyboards.GET("/:storyboard_id", func(c *gin.Context) { extra.Storyboard.StoryboardDetail(c, c.Param("storyboard_id")) })
 		storyboards.POST("/:storyboard_id/image/edit", func(c *gin.Context) { extra.Storyboard.StoryboardImageEdit(c, c.Param("storyboard_id")) })
-		storyboards.POST("/:storyboard_id/video", func(c *gin.Context) { extra.Storyboard.StoryboardVideo(c, c.Param("storyboard_id")) })
+		// 18 - 视频制作 阶段三：单分镜视频 → 复用单镜头重生成真实链路（计费 + Outbox）
+		storyboards.POST("/:storyboard_id/video", func(c *gin.Context) {
+			h.svc.RegenerateShot(c, c.Param("storyboard_id"))
+		})
 		storyboards.POST("/batch-generate-image", extra.Storyboard.BatchGenerateStoryboardImage)
 	}
 	tasks := rg.Group("/tasks")
@@ -263,6 +292,8 @@ func (h *Handler) registerExtraRoutes(rg *gin.RouterGroup, extra *ExtraServices,
 		epGroup.GET("/:episode_id/assets/overview", func(c *gin.Context) { extra.AssetDetail.EpisodeAssetsOverview(c, c.Param("episode_id")) })
 		epGroup.GET("/:episode_id/scenes", func(c *gin.Context) { extra.AssetDetail.EpisodeScenes(c, c.Param("episode_id")) })
 		epGroup.GET("/:episode_id/props", func(c *gin.Context) { extra.AssetDetail.EpisodeProps(c, c.Param("episode_id")) })
+		// 17 - 工作台对齐：叙事单元↔资产关联清单（Step3 关联资产占位 + 就绪度）
+		epGroup.GET("/:episode_id/asset-links", func(c *gin.Context) { extra.Storyboard.EpisodeAssetLinks(c, c.Param("episode_id")) })
 	}
 	assetGroup := rg.Group("/assets")
 	{
@@ -325,8 +356,8 @@ func (h *Handler) registerExtraRoutes(rg *gin.RouterGroup, extra *ExtraServices,
 		admX.GET("/providers", extra.AdminExtra.ModelProvidersList)
 		admX.POST("/providers", extra.AdminExtra.ModelProviderCreate)
 		admX.PUT("/providers/:provider_id", func(c *gin.Context) { extra.AdminExtra.ModelProviderUpdate(c, c.Param("provider_id")) })
-		admX.GET("/model-list", extra.AdminExtra.ModelListAdmin) // 11.39 模型列表（含厂商）
-		admX.POST("/model-create", extra.AdminExtra.ModelCreate) // 新建模型
+		admX.GET("/model-list", extra.AdminExtra.ModelListAdmin)   // 11.39 模型列表（含厂商）
+		admX.POST("/model-create", extra.AdminExtra.ModelCreate)   // 新建模型
 		admX.GET("/model-key-list", extra.AdminExtra.ModelKeyList) // 11.43 密钥列表（隐藏密文）
 		admX.POST("/model-key-create", extra.AdminExtra.ModelKeyCreate)
 		admX.PUT("/model-key-update/:key_id", func(c *gin.Context) { extra.AdminExtra.ModelKeyUpdate(c, c.Param("key_id")) })
@@ -339,18 +370,18 @@ func (h *Handler) registerExtraRoutes(rg *gin.RouterGroup, extra *ExtraServices,
 		admX.GET("/style-library", extra.AdminExtra.StyleLibrary)
 		admX.GET("/themes", extra.AdminExtra.Themes)
 		admX.GET("/think-levels", extra.AdminExtra.ThinkLevels)
-		admX.PUT("/announcements", h.adminSvc.CreateAnnouncement)          // 公告新增
-		admX.PUT("/announcements/:id", h.adminSvc.UpdateAnnouncement)      // 公告更新
-		admX.DELETE("/announcements/:id", h.adminSvc.DeleteAnnouncement)   // 公告删除
-		admX.POST("/banners", h.adminSvc.CreateBanner)                     // Banner 新增
-		admX.PUT("/banners/:id", h.adminSvc.UpdateBanner)                  // Banner 更新
-		admX.DELETE("/banners/:id", h.adminSvc.DeleteBanner)               // Banner 删除
-		admX.PUT("/point-packages", h.adminSvc.UpdatePointPackage)         // 积分包 upsert
-		admX.PUT("/rate-limits/:id", h.adminSvc.UpdateRateLimit)           // 限流配置更新
-		admX.PUT("/themes/:id", h.adminSvc.UpdateTheme)                    // 主题更新
-		admX.PUT("/style-library/:id", h.adminSvc.UpdateStyle)             // 风格库更新
-		admX.GET("/withdrawals", h.adminSvc.ListWithdrawals)                              // 提现申请列表
-		admX.POST("/withdrawals/:id/review", h.adminSvc.ReviewWithdrawal)                // 提现审核
+		admX.PUT("/announcements", h.adminSvc.CreateAnnouncement)         // 公告新增
+		admX.PUT("/announcements/:id", h.adminSvc.UpdateAnnouncement)     // 公告更新
+		admX.DELETE("/announcements/:id", h.adminSvc.DeleteAnnouncement)  // 公告删除
+		admX.POST("/banners", h.adminSvc.CreateBanner)                    // Banner 新增
+		admX.PUT("/banners/:id", h.adminSvc.UpdateBanner)                 // Banner 更新
+		admX.DELETE("/banners/:id", h.adminSvc.DeleteBanner)              // Banner 删除
+		admX.PUT("/point-packages", h.adminSvc.UpdatePointPackage)        // 积分包 upsert
+		admX.PUT("/rate-limits/:id", h.adminSvc.UpdateRateLimit)          // 限流配置更新
+		admX.PUT("/themes/:id", h.adminSvc.UpdateTheme)                   // 主题更新
+		admX.PUT("/style-library/:id", h.adminSvc.UpdateStyle)            // 风格库更新
+		admX.GET("/withdrawals", h.adminSvc.ListWithdrawals)              // 提现申请列表
+		admX.POST("/withdrawals/:id/review", h.adminSvc.ReviewWithdrawal) // 提现审核
 		admX.GET("/users/:user_uuid", func(c *gin.Context) { extra.AdminExtra.UserDetail(c, c.Param("user_uuid")) })
 		admX.PUT("/users/:user_uuid/membership", func(c *gin.Context) { extra.AdminExtra.UserMembership(c, c.Param("user_uuid")) })
 		admX.PUT("/users/:user_uuid/points", func(c *gin.Context) { extra.AdminExtra.UserPoints(c, c.Param("user_uuid")) })
@@ -358,15 +389,16 @@ func (h *Handler) registerExtraRoutes(rg *gin.RouterGroup, extra *ExtraServices,
 		admX.PUT("/users/:user_uuid/status", func(c *gin.Context) { extra.AdminExtra.UserStatus(c, c.Param("user_uuid")) })
 		admX.POST("/works/:work_id/audit", func(c *gin.Context) { extra.AdminExtra.WorkAudit(c, c.Param("work_id")) })
 		admX.PUT("/works/:work_id/unlist", func(c *gin.Context) { extra.AdminExtra.WorkUnlist(c, c.Param("work_id")) })
-		admX.GET("/tasks", extra.AdminExtra.Tasks)                                                     // 11.57 算力任务列表
-		admX.GET("/tasks/stats", extra.AdminExtra.TaskStats)                                           // 任务统计（队列/耗时）
+		admX.GET("/tasks", extra.AdminExtra.Tasks)                // 11.57 算力任务列表
+		admX.GET("/tasks/stats", extra.AdminExtra.TaskStats)      // 任务统计（队列/耗时）
+		admX.POST("/reports/:id/review", h.adminSvc.ReviewReport) // A2: 举报处理（通过/驳回）
 		admX.POST("/tasks/:task_id/retry", func(c *gin.Context) { extra.AdminExtra.TaskRetryAdmin(c, c.Param("task_id")) })
 		admX.POST("/tasks/:task_id/cancel", func(c *gin.Context) { extra.AdminExtra.TaskCancelAdmin(c, c.Param("task_id")) })
 		admX.GET("/tasks/:task_id", func(c *gin.Context) { extra.AdminExtra.TaskDetailAdmin(c, c.Param("task_id")) })
 		admX.PUT("/tasks/:task_id/priority", func(c *gin.Context) { extra.AdminExtra.TaskPriorityAdmin(c, c.Param("task_id")) })
 		admX.PUT("/works/:work_id", func(c *gin.Context) { extra.AdminExtra.WorkUpdate(c, c.Param("work_id")) })
 		admX.PUT("/works/:work_id/recommend", func(c *gin.Context) { extra.AdminExtra.WorkRecommend(c, c.Param("work_id")) })
-		admX.POST("/users", extra.AdminExtra.AdminCreateUser)                                  // 管理端新增用户
+		admX.POST("/users", extra.AdminExtra.AdminCreateUser) // 管理端新增用户
 	}
 }
 
@@ -488,6 +520,11 @@ func (h *Handler) generateVideos(c *gin.Context) {
 	h.svc.GenerateVideos(c, c.Param("beat_id"))
 }
 
+// regenerateShot 单镜头重生成（F11：POST /shots/:shot_id/regenerate）。
+func (h *Handler) regenerateShot(c *gin.Context) {
+	h.svc.RegenerateShot(c, c.Param("shot_id"))
+}
+
 func (h *Handler) listVariants(c *gin.Context) {
 	h.assetSvc.ListVariants(c, c.Param("character_id"))
 }
@@ -500,12 +537,30 @@ func (h *Handler) createVariant(c *gin.Context) {
 	h.assetSvc.CreateVariant(c, c.Param("character_id"))
 }
 
+func (h *Handler) generateVariantsFromScript(c *gin.Context) {
+	h.assetSvc.GenerateVariantsFromScript(c, c.Param("character_id"))
+}
+
+func (h *Handler) reextractEpisodeAssets(c *gin.Context) {
+	h.assetSvc.ReextractEpisodeAssets(c, c.Param("episode_id"))
+}
+
 func (h *Handler) listVersions(c *gin.Context) {
 	h.assetSvc.ListVersions(c, c.Param("nu_id"))
 }
 
 func (h *Handler) rollbackVersion(c *gin.Context) {
 	h.assetSvc.RollbackVersion(c, c.Param("nu_id"), c.Param("version_id"))
+}
+
+// updateNarrativeUnit 叙事单元编辑（F4：PATCH /narrative-units/:nu_id）。
+func (h *Handler) updateNarrativeUnit(c *gin.Context) {
+	h.svc.UpdateNarrativeUnit(c, c.Param("nu_id"))
+}
+
+// deleteNarrativeUnit 叙事单元删除（F4：DELETE /narrative-units/:nu_id）。
+func (h *Handler) deleteNarrativeUnit(c *gin.Context) {
+	h.svc.DeleteNarrativeUnit(c, c.Param("nu_id"))
 }
 
 func (h *Handler) canvasList(c *gin.Context) { h.canvasSvc.List(c) }
@@ -593,54 +648,64 @@ func (h *Handler) restoreSnapshot(c *gin.Context) {
 	h.canvasSvc.RestoreSnapshot(c, c.Param("canvas_id"), c.Param("snapshot_id"))
 }
 
-func (h *Handler) contentFeed(c *gin.Context) { h.contentSvc.Feed(c) }
-func (h *Handler) contentSubmit(c *gin.Context) { h.contentSvc.Submit(c) }
-func (h *Handler) contentWork(c *gin.Context) { h.contentSvc.Work(c, c.Param("work_id")) }
-func (h *Handler) contentLike(c *gin.Context) { h.contentSvc.Like(c, c.Param("work_id")) }
-func (h *Handler) contentUnLike(c *gin.Context) { h.contentSvc.UnLike(c, c.Param("work_id")) }
-func (h *Handler) contentFavorite(c *gin.Context) { h.contentSvc.Favorite(c, c.Param("work_id")) }
-func (h *Handler) contentComment(c *gin.Context) { h.contentSvc.Comment(c, c.Param("work_id")) }
-func (h *Handler) contentReport(c *gin.Context) { h.contentSvc.Report(c, c.Param("work_id")) }
-func (h *Handler) contentFollow(c *gin.Context) { h.contentSvc.Follow(c, c.Param("user_uuid")) }
-func (h *Handler) contentUnfollow(c *gin.Context) { h.contentSvc.Unfollow(c, c.Param("user_uuid")) }
+func (h *Handler) contentFeed(c *gin.Context)      { h.contentSvc.Feed(c) }
+func (h *Handler) contentSubmit(c *gin.Context)    { h.contentSvc.Submit(c) }
+func (h *Handler) contentWork(c *gin.Context)      { h.contentSvc.Work(c, c.Param("work_id")) }
+func (h *Handler) contentLike(c *gin.Context)      { h.contentSvc.Like(c, c.Param("work_id")) }
+func (h *Handler) contentUnLike(c *gin.Context)    { h.contentSvc.UnLike(c, c.Param("work_id")) }
+func (h *Handler) contentFavorite(c *gin.Context)  { h.contentSvc.Favorite(c, c.Param("work_id")) }
+func (h *Handler) contentComment(c *gin.Context)   { h.contentSvc.Comment(c, c.Param("work_id")) }
+func (h *Handler) contentReport(c *gin.Context)    { h.contentSvc.Report(c, c.Param("work_id")) }
+func (h *Handler) contentFollow(c *gin.Context)    { h.contentSvc.Follow(c, c.Param("user_uuid")) }
+func (h *Handler) contentUnfollow(c *gin.Context)  { h.contentSvc.Unfollow(c, c.Param("user_uuid")) }
 func (h *Handler) contentAuditList(c *gin.Context) { h.contentSvc.AuditList(c) }
-func (h *Handler) contentReview(c *gin.Context) { h.contentSvc.Review(c, c.Param("work_id")) }
-func (h *Handler) contentRevoke(c *gin.Context) { h.contentSvc.Revoke(c, c.Param("work_id")) }
+func (h *Handler) contentReview(c *gin.Context)    { h.contentSvc.Review(c, c.Param("work_id")) }
+func (h *Handler) contentRevoke(c *gin.Context)    { h.contentSvc.Revoke(c, c.Param("work_id")) }
 
-func (h *Handler) marketTemplates(c *gin.Context) { h.marketSvc.ListTemplates(c) }
+func (h *Handler) marketTemplates(c *gin.Context)      { h.marketSvc.ListTemplates(c) }
 func (h *Handler) marketCreateTemplate(c *gin.Context) { h.marketSvc.CreateTemplate(c) }
-func (h *Handler) marketApplyTemplate(c *gin.Context) { h.marketSvc.ApplyTemplate(c, c.Param("template_id")) }
-func (h *Handler) marketStyles(c *gin.Context) { h.marketSvc.ListStyles(c) }
-func (h *Handler) marketApplyStyle(c *gin.Context) { h.marketSvc.ApplyStyle(c, c.Param("project_id")) }
-func (h *Handler) marketOrders(c *gin.Context) { h.marketSvc.ListOrders(c) }
+func (h *Handler) marketApplyTemplate(c *gin.Context) {
+	h.marketSvc.ApplyTemplate(c, c.Param("template_id"))
+}
+func (h *Handler) marketStyles(c *gin.Context)      { h.marketSvc.ListStyles(c) }
+func (h *Handler) marketApplyStyle(c *gin.Context)  { h.marketSvc.ApplyStyle(c, c.Param("project_id")) }
+func (h *Handler) marketOrders(c *gin.Context)      { h.marketSvc.ListOrders(c) }
 func (h *Handler) marketCreateOrder(c *gin.Context) { h.marketSvc.CreateOrder(c) }
-func (h *Handler) marketCreateIntent(c *gin.Context) { h.marketSvc.CreateIntent(c, c.Param("order_id")) }
-func (h *Handler) marketAcceptIntent(c *gin.Context) { h.marketSvc.AcceptIntent(c, c.Param("order_id")) }
-func (h *Handler) marketUpdateOrderStatus(c *gin.Context) { h.marketSvc.UpdateOrderStatus(c, c.Param("order_id")) }
+func (h *Handler) marketCreateIntent(c *gin.Context) {
+	h.marketSvc.CreateIntent(c, c.Param("order_id"))
+}
+func (h *Handler) marketAcceptIntent(c *gin.Context) {
+	h.marketSvc.AcceptIntent(c, c.Param("order_id"))
+}
+func (h *Handler) marketUpdateOrderStatus(c *gin.Context) {
+	h.marketSvc.UpdateOrderStatus(c, c.Param("order_id"))
+}
 
-func (h *Handler) adminDashboard(c *gin.Context) { h.adminSvc.Dashboard(c) }
-func (h *Handler) adminUsers(c *gin.Context) { h.adminSvc.ListUsers(c) }
-func (h *Handler) adminBanUser(c *gin.Context) { h.adminSvc.BanUser(c, c.Param("user_uuid")) }
-func (h *Handler) adminWorks(c *gin.Context) { h.adminSvc.ListWorks(c) }
-func (h *Handler) adminDeleteWork(c *gin.Context) { h.adminSvc.DeleteWork(c, c.Param("work_id")) }
-func (h *Handler) adminReports(c *gin.Context) { h.adminSvc.ListReports(c) }
-func (h *Handler) adminOrders(c *gin.Context) { h.adminSvc.ListOrders(c) }
-func (h *Handler) adminPackages(c *gin.Context) { h.adminSvc.ListPackages(c) }
-func (h *Handler) adminModels(c *gin.Context) { h.adminSvc.ListModels(c) }
-func (h *Handler) adminAuditLogs(c *gin.Context) { h.adminSvc.ListAuditLogs(c) }
-func (h *Handler) adminRoles(c *gin.Context) { h.adminSvc.ListRoles(c) }
-func (h *Handler) adminPlatformConfig(c *gin.Context) { h.adminSvc.ListPlatformConfigs(c) }
-func (h *Handler) myPreferences(c *gin.Context) { h.adminSvc.MyPreferences(c) }
-func (h *Handler) updateMyPreferences(c *gin.Context) { h.adminSvc.UpdatePreferences(c) }
+func (h *Handler) adminDashboard(c *gin.Context)            { h.adminSvc.Dashboard(c) }
+func (h *Handler) adminUsers(c *gin.Context)                { h.adminSvc.ListUsers(c) }
+func (h *Handler) adminBanUser(c *gin.Context)              { h.adminSvc.BanUser(c, c.Param("user_uuid")) }
+func (h *Handler) adminWorks(c *gin.Context)                { h.adminSvc.ListWorks(c) }
+func (h *Handler) adminDeleteWork(c *gin.Context)           { h.adminSvc.DeleteWork(c, c.Param("work_id")) }
+func (h *Handler) adminReports(c *gin.Context)              { h.adminSvc.ListReports(c) }
+func (h *Handler) adminOrders(c *gin.Context)               { h.adminSvc.ListOrders(c) }
+func (h *Handler) adminPackages(c *gin.Context)             { h.adminSvc.ListPackages(c) }
+func (h *Handler) adminModels(c *gin.Context)               { h.adminSvc.ListModels(c) }
+func (h *Handler) adminAuditLogs(c *gin.Context)            { h.adminSvc.ListAuditLogs(c) }
+func (h *Handler) adminRoles(c *gin.Context)                { h.adminSvc.ListRoles(c) }
+func (h *Handler) adminPlatformConfig(c *gin.Context)       { h.adminSvc.ListPlatformConfigs(c) }
+func (h *Handler) myPreferences(c *gin.Context)             { h.adminSvc.MyPreferences(c) }
+func (h *Handler) updateMyPreferences(c *gin.Context)       { h.adminSvc.UpdatePreferences(c) }
 func (h *Handler) adminUpdatePlatformConfig(c *gin.Context) { h.adminSvc.UpdatePlatformConfig(c) }
-func (h *Handler) adminUpdatePackage(c *gin.Context) { h.adminSvc.UpdatePackage(c) }
-func (h *Handler) adminUpdateModel(c *gin.Context) { h.adminSvc.UpdateModel(c) }
-func (h *Handler) adminAnnouncements(c *gin.Context) { h.adminSvc.ListAnnouncements(c) }
-func (h *Handler) adminBanners(c *gin.Context) { h.adminSvc.ListBanners(c) }
-func (h *Handler) adminHints(c *gin.Context) { h.adminSvc.ListHints(c) }
+func (h *Handler) adminUpdatePackage(c *gin.Context)        { h.adminSvc.UpdatePackage(c) }
+func (h *Handler) adminUpdateModel(c *gin.Context)          { h.adminSvc.UpdateModel(c) }
+func (h *Handler) adminAnnouncements(c *gin.Context)        { h.adminSvc.ListAnnouncements(c) }
+func (h *Handler) adminBanners(c *gin.Context)              { h.adminSvc.ListBanners(c) }
+func (h *Handler) adminHints(c *gin.Context)                { h.adminSvc.ListHints(c) }
 
-func (h *Handler) openCreateKey(c *gin.Context) { h.openSvc.CreateKey(c) }
-func (h *Handler) openListKeys(c *gin.Context) { h.openSvc.ListKeys(c) }
-func (h *Handler) openRevokeKey(c *gin.Context) { h.openSvc.RevokeKey(c, c.Param("key_prefix")) }
+func (h *Handler) openCreateKey(c *gin.Context)       { h.openSvc.CreateKey(c) }
+func (h *Handler) openListKeys(c *gin.Context)        { h.openSvc.ListKeys(c) }
+func (h *Handler) openRevokeKey(c *gin.Context)       { h.openSvc.RevokeKey(c, c.Param("key_prefix")) }
 func (h *Handler) openRegisterWebhook(c *gin.Context) { h.openSvc.RegisterWebhook(c) }
-func (h *Handler) openVerifyWebhook(c *gin.Context) { h.openSvc.VerifyWebhookSignature(c, c.PostForm("url")) }
+func (h *Handler) openVerifyWebhook(c *gin.Context) {
+	h.openSvc.VerifyWebhookSignature(c, c.PostForm("url"))
+}

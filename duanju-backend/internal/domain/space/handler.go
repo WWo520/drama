@@ -12,10 +12,11 @@ import (
 // Handler 空间路由处理器。
 type Handler struct {
 	svc *Service
+	env string // 08 审查 Critical#2：开发期入账端点生产不注册
 }
 
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *Service, env string) *Handler {
+	return &Handler{svc: svc, env: env}
 }
 
 // RegisterRoutes 注册 /spaces/* 路由（05 TAG 2 子集；JWT + LoadUserID 已由 router 层组挂载）。
@@ -39,7 +40,10 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		spaces.GET("/:space_id/billing/transactions", h.teamBillingTxns) // 9.4 团队流水
 		spaces.GET("/:space_id/billing/report", h.teamBillingReport)     // 成员消费报表
 		spaces.POST("/:space_id/billing/recharge", h.teamRecharge)       // 2.14 团队充值订单
-		spaces.POST("/billing/orders/:order_no/pay", h.teamRechargeCallback) // 团队订单入账（开发期）
+		// 08 审查 Critical#2：开发期直接入账端点，生产环境不注册（真实支付回调接入前彻底移除攻击面）
+		if h.env != "production" {
+			spaces.POST("/billing/orders/:order_no/pay", h.teamRechargeCallback) // 团队订单入账（仅开发期）
+		}
 		// S5 补齐：团队积分/消费/扩容/转让
 		spaces.GET("/:space_id/points", h.spacePoints)                 // 2.13 团队共享积分账户
 		spaces.GET("/:space_id/points/consumption", h.spacePointsConsumption)      // 2.15 成员消耗汇总

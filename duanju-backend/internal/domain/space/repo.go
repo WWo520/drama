@@ -137,7 +137,7 @@ func (r *Repo) CheckMembership(ctx context.Context, spaceID, userID int64) (stri
 // GetUserIDByUUID 按 user_uuid 查数字主键（供 LoadUserID 中间件注入 ctx）。
 func (r *Repo) GetUserIDByUUID(ctx context.Context, userUUID string) (int64, error) {
 	var id int64
-	err := r.pool.QueryRow(ctx, `SELECT id FROM users WHERE user_uuid = $1 AND deleted_at IS NULL`, userUUID).Scan(&id)
+	err := r.pool.QueryRow(ctx, `SELECT id FROM users WHERE user_uuid = $1 AND deleted_at IS NULL AND status<>'BANNED'`, userUUID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, ErrNotFound
 	}

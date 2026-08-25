@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  ChevronLeft, ChevronRight, Compass, Copy, Download, Edit3, Folder, FolderOpen,
+  ChevronLeft, ChevronRight, Coins, Compass, Copy, Download, Edit3, Folder, FolderOpen,
   Loader2, MoreHorizontal, Play, Plus, RefreshCw,
   Sparkles, Trash2, X,
 } from "lucide-react";
@@ -71,6 +71,17 @@ export default function ProjectListPage() {
   const [points, setPoints] = useState<number | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
 
+  // 画布列表（GET /canvases）
+  const [canvases, setCanvases] = useState<{ canvas_id: string; name: string; project_id: number; version: number; updated_at: string }[]>([]);
+  const [canvasLoading, setCanvasLoading] = useState(false);
+
+  // 视频成片（GET /exports 无 project_id → 我的全部导出）
+  const [exports, setExports] = useState<{
+    export_id: string; status: string; resolution: string; output_url: string;
+    file_size: number; created_at: string; project_title: string;
+  }[]>([]);
+  const [exportsLoading, setExportsLoading] = useState(false);
+
   // 卡片 … 下拉菜单 / 重命名 / 删除
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<ProjectSummary | null>(null);
@@ -95,6 +106,26 @@ export default function ProjectListPage() {
   useEffect(() => {
     void load(page);
   }, [load, page]);
+
+  // Tab 切换按需加载（画布 / 视频成片）
+  useEffect(() => {
+    if (tab === "canvas") {
+      setCanvasLoading(true);
+      api
+        .get<{ items: { canvas_id: string; name: string; project_id: number; version: number; updated_at: string }[] }>("/canvases", { params: { page_size: 50 } })
+        .then((d) => setCanvases(d.items ?? []))
+        .catch(() => setCanvases([]))
+        .finally(() => setCanvasLoading(false));
+    }
+    if (tab === "video") {
+      setExportsLoading(true);
+      api
+        .get<{ items: { export_id: string; status: string; resolution: string; output_url: string; file_size: number; created_at: string; project_title: string }[] }>("/exports", { params: { page_size: 50 } })
+        .then((d) => setExports(d.items ?? []))
+        .catch(() => setExports([]))
+        .finally(() => setExportsLoading(false));
+    }
+  }, [tab]);
 
   // 侧栏积分余额（与 HomePage 同源）
   useEffect(() => {
@@ -287,15 +318,15 @@ export default function ProjectListPage() {
           {/* 中心导航（作品 active） */}
           <nav className="flex flex-col items-center gap-2 flex-shrink-0">
             <Link to="/" className="luxreal-nav-item" title="创作">
-              <Sparkles size={22} />
+              <Sparkles size={24} />
               <span>创作</span>
             </Link>
             <Link to="/feed" className="luxreal-nav-item" title="发现">
-              <Compass size={22} />
+              <Compass size={24} />
               <span>发现</span>
             </Link>
             <Link to="/projects" className="luxreal-nav-item active" title="作品">
-              <Folder size={22} />
+              <Folder size={24} />
               <span>作品</span>
             </Link>
           </nav>
@@ -324,8 +355,13 @@ export default function ProjectListPage() {
             <ProfilePanel open={profileOpen} onClose={() => setProfileOpen(false)} />
           </div>
 
-          {/* 积分（真实余额） */}
-          <span className="sidebar-credits">{points === null ? "…" : points.toLocaleString()}</span>
+          {/* 积分（真实余额，金色徽章 Coins 图标 + 数字） */}
+          <span className="sidebar-credits">
+            <span className="sidebar-credits-badge">
+              <Coins size={16} className="sidebar-credits-icon" />
+            </span>
+            {points === null ? "…" : points.toLocaleString()}
+          </span>
           {/* 充值 */}
           <Link to="/points" className="sidebar-recharge" title="充值">
             充值
@@ -359,25 +395,99 @@ export default function ProjectListPage() {
             </div>
 
             {tab === "canvas" ? (
-              /* 画布：后端暂无画布数据，空态占位 */
-              <div className="flex flex-col items-center justify-center gap-2 py-24">
-                <p className="text-sm text-[var(--luxreal-muted-foreground)]">画布功能即将上线</p>
-              </div>
+              /* 画布：GET /canvases 我的画布列表 */
+              canvasLoading ? (
+                <div className="flex items-center justify-center py-24 text-sm text-[var(--luxreal-muted-foreground)]">
+                  <Loader2 size={16} className="animate-spin mr-2" /> 加载画布…
+                </div>
+              ) : canvases.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-24">
+                  <p className="text-sm text-[var(--luxreal-muted-foreground)]">还没有画布，去自由画布创建一个吧</p>
+                  <button className="btn-new-project" onClick={() => navigate("/canvas")}>
+                    <Plus size={16} />
+                    <span>新建画布</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-4 gap-5 mt-6">
+                  {canvases.map((c) => (
+                    <div
+                      key={c.canvas_id}
+                      className="project-card cursor-pointer group"
+                      onClick={() => navigate("/canvas")}
+                      style={{ background: "linear-gradient(135deg, #1E1E24, #14141C)", border: "1px solid var(--luxreal-border)" }}
+                    >
+                      <div className="card-gradient-overlay" />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="w-12 h-12 rounded-xl bg-[#4C7FF8]/10 border border-[#4C7FF8]/20 flex items-center justify-center">
+                          <Play size={22} className="text-[#4C7FF8]" />
+                        </div>
+                      </div>
+                      <span className="card-badge text-[10px] px-2 py-0.5 rounded text-white font-medium bg-[#4C7FF8]/80">画布</span>
+                      <div className="card-info">
+                        <p className="text-[13px] font-bold text-white truncate leading-tight mb-1">{c.name || "未命名画布"}</p>
+                        <p className="text-[11px] text-white/60">更新于 {c.updated_at ? fmtDate(c.updated_at) : "—"}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : tab === "video" ? (
+              /* 视频成片：GET /exports 我的全部导出 */
+              exportsLoading ? (
+                <div className="flex items-center justify-center py-24 text-sm text-[var(--luxreal-muted-foreground)]">
+                  <Loader2 size={16} className="animate-spin mr-2" /> 加载成片…
+                </div>
+              ) : exports.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-3 py-24">
+                  <p className="text-sm text-[var(--luxreal-muted-foreground)]">还没有已完成的视频成片</p>
+                </div>
+              ) : (
+                <div className="mt-6 space-y-3">
+                  {exports.map((e) => (
+                    <div
+                      key={e.export_id}
+                      className="flex items-center gap-4 rounded-xl p-4"
+                      style={{ background: "var(--luxreal-panel-bg, #15151D)", border: "1px solid var(--luxreal-border)" }}
+                    >
+                      <div className="w-11 h-11 rounded-lg bg-[#4C7FF8]/10 border border-[#4C7FF8]/20 flex items-center justify-center flex-shrink-0">
+                        <Play size={18} className="text-[#4C7FF8]" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-white font-medium truncate">{e.project_title || "未命名项目"} · 成片</div>
+                        <div className="text-xs mt-0.5 flex items-center gap-2" style={{ color: "var(--luxreal-muted-foreground)" }}>
+                          <span>{e.resolution || "P720"}</span>
+                          <span>·</span>
+                          <span>{fmtDate(e.created_at)}</span>
+                          <span>·</span>
+                          <span>{e.file_size ? `${(e.file_size / 1024 / 1024).toFixed(1)} MB` : "—"}</span>
+                          <span className={`ml-1 ${e.status === "SUCCESS" ? "text-green-400" : e.status === "FAILED" ? "text-red-400" : "text-amber-gold"}`}>
+                            {e.status === "SUCCESS" ? "已完成" : e.status === "FAILED" ? "失败" : e.status === "PENDING" ? "排队中" : "生成中"}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-[#0B0B1A] bg-gradient-to-r from-amber-gold to-amber-dim hover:shadow-lg hover:shadow-amber-gold/20 transition-all flex-shrink-0 disabled:opacity-40"
+                        disabled={e.status !== "SUCCESS" || !e.output_url}
+                        onClick={() => e.output_url && window.open(e.output_url, "_blank", "noopener")}
+                      >
+                        <Download size={13} /> 下载
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )
             ) : loading ? (
               <div className="flex items-center justify-center py-24 text-sm text-[var(--luxreal-muted-foreground)]">
                 加载中…
               </div>
             ) : visibleItems.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-3 py-24">
-                <p className="text-sm text-[var(--luxreal-muted-foreground)]">
-                  {tab === "video" ? "还没有已完成的视频成片" : "还没有作品，创建你的第一部短剧吧"}
-                </p>
-                {tab === "project" && (
-                  <button className="btn-new-project" onClick={() => navigate("/")}>
-                    <Plus size={16} />
-                    <span>开始创作</span>
-                  </button>
-                )}
+                <p className="text-sm text-[var(--luxreal-muted-foreground)]">还没有作品，创建你的第一部短剧吧</p>
+                <button className="btn-new-project" onClick={() => navigate("/")}>
+                  <Plus size={16} />
+                  <span>开始创作</span>
+                </button>
               </div>
             ) : (
               <>

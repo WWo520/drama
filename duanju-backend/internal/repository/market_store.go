@@ -188,20 +188,46 @@ func (s *MarketStore) ListOrders(ctx context.Context, status string, page, pageS
 	return out, total, rows.Err()
 }
 
+// CreateOrder 发单（08 审查 Critical#5 修复：同事务冻结发布方积分，防凭空增发）。
 func (s *MarketStore) CreateOrder(ctx context.Context, spaceID, userID int64, title, desc string, reward int, deadline string) (string, error) {
 	orderUUID := uuid.NewString()
 	var deadlineAt any
 	if deadline != "" {
 		deadlineAt = deadline
 	}
-	_, err := s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+	if reward > 0 {
+		// 冻结发布方积分（余额守卫防负余额透支）
+		tag, err := tx.Exec(ctx, `
+			UPDATE point_accounts SET current_balance=current_balance-$2, frozen_balance=frozen_balance+$2, last_txn_at=NOW()
+			WHERE owner_type='USER' AND owner_id=$1 AND current_balance>=$2`, userID, reward)
+		if err != nil {
+			return "", err
+		}
+		if tag.RowsAffected() != 1 {
+			return "", errors.New("积分余额不足")
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO point_transactions (account_id, owner_type, owner_id, txn_type, direction, amount,
+				balance_after, operator_user_id, description, idempotency_key)
+			SELECT pa.id, 'USER', pa.owner_id, 'MARKET_FREEZE', 'DEBIT', $2, pa.current_balance, $1, '任务发单冻结', $3
+			FROM point_accounts pa WHERE pa.owner_type='USER' AND pa.owner_id=$1`,
+			userID, reward, "market-freeze-"+orderUUID); err != nil {
+			return "", err
+		}
+	}
+	_, err = tx.Exec(ctx, `
 		INSERT INTO task_orders (order_uuid, order_no, space_id, publisher_user_id, title, description, reward_points, deadline_at)
 		VALUES ($1, 'TO'||to_char(now(),'YYYYMMDDHH24MISS')||substr(gen_random_uuid()::text,1,6), $2, $3, $4, $5, $6, $7::timestamptz)`,
 		orderUUID, spaceID, userID, title, desc, reward, deadlineAt)
 	if err != nil {
 		return "", err
 	}
-	return orderUUID, nil
+	return orderUUID, tx.Commit(ctx)
 }
 
 func (s *MarketStore) CreateIntent(ctx context.Context, orderID, userID int64, cover string) error {
@@ -275,19 +301,39 @@ func (s *MarketStore) UpdateOrderStatus(ctx context.Context, orderUUID string, u
 		if pub != userID {
 			return errors.New("仅发布方可验收")
 		}
-		// 发放积分给接单人（03 E.7 结算）
-		if _, err := tx.Exec(ctx, `
-			UPDATE point_accounts SET current_balance=current_balance+$2, lifetime_earned_total=lifetime_earned_total+$2
-			WHERE owner_type='USER' AND owner_id=$1`, assignee, reward); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO point_transactions (account_id, owner_type, owner_id, txn_type, direction, amount,
-				balance_after, operator_user_id, description, idempotency_key)
-			SELECT pa.id, 'USER', pa.owner_id, 'ADMIN_COMP', 'CREDIT', $2, pa.current_balance, $1, '任务完成奖励', $3
-			FROM point_accounts pa WHERE pa.owner_type='USER' AND pa.owner_id=$1`,
-			assignee, reward, fmt.Sprintf("task-reward-%d", oid)); err != nil {
-			return err
+		if reward > 0 {
+			// 08 审查 Critical#5：对称结算——发布方冻结转实扣 + 接单人入账
+			tag, err := tx.Exec(ctx, `
+				UPDATE point_accounts SET frozen_balance=frozen_balance-$2, lifetime_spent_total=lifetime_spent_total+$2, last_txn_at=NOW()
+				WHERE owner_type='USER' AND owner_id=$1 AND frozen_balance>=$2`, pub, reward)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() != 1 {
+				return errors.New("发布方冻结余额不足（疑似历史未冻结订单，需人工处理）")
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO point_transactions (account_id, owner_type, owner_id, txn_type, direction, amount,
+					balance_after, operator_user_id, description, idempotency_key)
+				SELECT pa.id, 'USER', pa.owner_id, 'MARKET_REWARD_DEBIT', 'DEBIT', $2, pa.current_balance, $1, '任务悬赏支出', $3
+				FROM point_accounts pa WHERE pa.owner_type='USER' AND pa.owner_id=$1`,
+				pub, reward, fmt.Sprintf("task-reward-debit-%d", oid)); err != nil {
+				return err
+			}
+			// 发放积分给接单人（03 E.7 结算）
+			if _, err := tx.Exec(ctx, `
+				UPDATE point_accounts SET current_balance=current_balance+$2, lifetime_earned_total=lifetime_earned_total+$2
+				WHERE owner_type='USER' AND owner_id=$1`, assignee, reward); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO point_transactions (account_id, owner_type, owner_id, txn_type, direction, amount,
+					balance_after, operator_user_id, description, idempotency_key)
+				SELECT pa.id, 'USER', pa.owner_id, 'MARKET_REWARD_CREDIT', 'CREDIT', $2, pa.current_balance, $1, '任务完成奖励', $3
+				FROM point_accounts pa WHERE pa.owner_type='USER' AND pa.owner_id=$1`,
+				assignee, reward, fmt.Sprintf("task-reward-%d", oid)); err != nil {
+				return err
+			}
 		}
 	}
 	if _, err := tx.Exec(ctx, `

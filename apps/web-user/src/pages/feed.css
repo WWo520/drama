@@ -78,24 +78,36 @@ html {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   border-radius: var(--luxreal-radius-md);
   color: var(--luxreal-sidebar-foreground);
   cursor: pointer;
-  transition: all 0.2s ease;
-  gap: 3px;
+  transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+  gap: 4px;
   text-decoration: none;
-  font-size: 11px;
+  font-size: 13px;
   position: relative;
 }
 .luxreal-nav-item:hover {
   color: var(--luxreal-foreground);
-  background: rgba(255,255,255,0.05);
+  background: rgba(255,255,255,0.06);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
 }
 .luxreal-nav-item.active {
-  color: var(--luxreal-primary);
-  background: rgba(59,130,246,0.12);
+  color: #fff;
+  background: linear-gradient(135deg, #0F1013 0%, #3A66FF 100%);
+  border-radius: 8px 0 0 8px;
+  margin-right: -4px;
+  box-shadow: rgba(0, 73, 245, 0.08) -4px 5px 7px, 0 0 18px rgba(58, 102, 255, 0.3);
+  overflow: hidden;
+}
+.luxreal-nav-item.active::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.04) 45%, rgba(255, 255, 255, 0) 75%);
+  pointer-events: none;
 }
 
 /* Sidebar Avatar */
@@ -119,29 +131,55 @@ html {
     box-shadow: 0 2px 12px rgba(76, 127, 248, 0.4);
 }
 
-/* Sidebar Credits & Recharge */
+/* Sidebar Credits & Recharge（金色徽章 + 主蓝渐变对齐 G-04） */
 .sidebar-credits {
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 500;
     color: #F0F0F5;
     line-height: 1.2;
     margin: 4px 0 2px;
     flex-shrink: 0;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+.sidebar-credits-badge {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #F8C95C 0%, #E89B2D 55%, #C9761A 100%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(232, 155, 45, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.55);
+    flex-shrink: 0;
+}
+.sidebar-credits .sidebar-credits-icon {
+    color: #FFF8E7;
+    flex-shrink: 0;
 }
 .sidebar-recharge {
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 500;
     color: #fff;
-    background: linear-gradient(135deg, #A78BFA, #8B5CF6);
-    padding: 4px 12px;
+    background: linear-gradient(107.06deg, #1A7AF8 0%, #0049F5 100%);
+    padding: 7px 18px;
     border-radius: 9999px;
     cursor: pointer;
     text-decoration: none;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+    box-shadow: 0 2px 10px rgba(0, 73, 245, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 .sidebar-recharge:hover {
-    background: linear-gradient(135deg, #C4B5FD, #A78BFA);
+    background: linear-gradient(107.06deg, #3A8CF9 0%, #1A5CF8 100%);
     transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(0, 73, 245, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 /* Profile Panel */

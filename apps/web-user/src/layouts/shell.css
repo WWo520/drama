@@ -79,6 +79,7 @@
     inset: 0;
     background: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(4px);
+    animation: modal-fade 0.18s ease both;
 }
 .modal-content {
     position: relative;
@@ -87,6 +88,15 @@
     padding: 24px;
     background: #1E1E24;
     border: 1px solid #2A2A35;
+    animation: modal-pop 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@keyframes modal-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes modal-pop {
+    from { opacity: 0; transform: translateY(10px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
 }
 /* Dropdown */
 .duration-dropdown {
@@ -206,6 +216,34 @@
     --luxreal-primary: #4C7FF8;
     --luxreal-foreground: #F0F0F5;
 }
+/* ===== 侧边栏发光条（右侧微光装饰线 + 周围光束光晕） ===== */
+#sidebar-nav {
+    position: relative;
+}
+/* 光束：宽模糊光带（8px，blur 扩散，蓝→紫渐变） */
+#sidebar-nav::before {
+    content: '';
+    position: absolute;
+    right: -5px;
+    top: 8%;
+    height: 84%;
+    width: 10px;
+    background: linear-gradient(180deg, transparent, rgba(76, 127, 248, 0.22), rgba(139, 92, 246, 0.16), transparent);
+    filter: blur(5px);
+    pointer-events: none;
+}
+/* 亮芯：2px 渐变线 + 向外散射光晕 */
+#sidebar-nav::after {
+    content: '';
+    position: absolute;
+    right: -1px;
+    top: 12%;
+    height: 76%;
+    width: 2px;
+    background: linear-gradient(180deg, transparent, rgba(76, 127, 248, 0.45), rgba(139, 92, 246, 0.28), transparent);
+    box-shadow: 0 0 8px rgba(76, 127, 248, 0.35), 0 0 16px rgba(139, 92, 246, 0.2);
+    pointer-events: none;
+}
 /* Episode Sidebar - LuxReal Unified Style */
 .ep-sidebar {
     width: 240px;
@@ -286,11 +324,11 @@
 .ep-chevron {
     flex-shrink: 0;
     color: #6B7088;
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
 }
 .ep-number {
-    font-size: 11px;
+    font-size: 13px;
     color: #6B7088;
     text-transform: uppercase;
 }
@@ -325,9 +363,9 @@
     gap: 2px;
 }
 .ep-unit {
-    font-size: 12px;
+    font-size: 14px;
     line-height: 1.5;
-    padding: 6px 10px;
+    padding: 7px 10px;
     border-radius: 6px;
     color: #8B8B9A;
     cursor: pointer;
@@ -351,12 +389,12 @@
 }
 /* Add Episode Button */
 .ep-add-btn {
-    height: 36px;
+    height: 40px;
     margin: 0 12px 12px;
     border: 1px dashed #1A1F2E;
     border-radius: 8px;
     background: transparent;
-    font-size: 12px;
+    font-size: 14px;
     color: #6B7088;
     cursor: pointer;
     transition: all 0.15s;
@@ -442,6 +480,17 @@
     background: rgba(255,255,255,0.25);
     color: #fff;
 }
+/* 已完成态（17 - 工作台对齐 P2：绿色 ✓ 徽标） */
+.workflow-nav-num.done {
+    background: rgba(16,185,129,0.18);
+    color: #10B981;
+}
+.workflow-nav-item.done .workflow-nav-text {
+    color: #8B8B9A;
+}
+.workflow-nav-item.done:hover .workflow-nav-text {
+    color: #fff;
+}
 .workflow-nav-text {
     line-height: 1;
 }
@@ -495,10 +544,20 @@
     border-color: rgba(76, 127, 248, 0.6);
     color: #6B9BFF;
 }
-/* === 内容区单元卡片补充（设计稿内联样式提取） === */
+/* === 内容区单元卡片补充（设计稿内联样式提取 + 动效对齐 luxreal workbench 节奏） === */
 .unit-card {
     background: #1E1E24;
     border: 1px solid #2A2A35;
+    transition: border-color 0.2s ease, box-shadow 0.25s ease;
+    animation: unit-in 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both; /* 入场渐显上移，逐卡错峰（JS 设 animation-delay） */
+}
+.unit-card:hover {
+    border-color: #3A3A4A;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+@keyframes unit-in {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 .unit-status-done {
     background: rgba(16, 185, 129, 0.15);
@@ -512,6 +571,10 @@
     background: #16161C;
     border: 1px solid #2A2A35;
     color: #C0C0CC;
+}
+/* 剧本原文按段落/台词分行渲染（台词行 speaker 着色，见 Step1Page renderScriptText） */
+.unit-script-box p + p {
+    margin-top: 8px;
 }
 .settings-bar {
     background: #16161C;
@@ -554,33 +617,58 @@
     font-size: 13px;
     font-weight: 500;
 }
-/* === Sidebar Credits & Recharge === */
+/* === Sidebar Credits & Recharge（积分徽章：金色渐变底托 + 奶白硬币图标；数字 tabular 等宽保证亿级完整显示） === */
 .sidebar-credits {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
     color: #F0F0F5;
     line-height: 1.2;
     margin: 4px 0 6px;
     flex-shrink: 0;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+.sidebar-credits-badge {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #F8C95C 0%, #E89B2D 55%, #C9761A 100%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(232, 155, 45, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.55);
+    flex-shrink: 0;
+}
+.sidebar-credits .sidebar-credits-icon {
+    color: #FFF8E7;
+    flex-shrink: 0;
 }
 .sidebar-recharge {
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 500;
     color: #fff;
-    background: linear-gradient(135deg, #A78BFA, #8B5CF6);
-    padding: 4px 12px;
+    background: linear-gradient(107.06deg, #1A7AF8 0%, #0049F5 100%);
+    padding: 7px 18px;
     border-radius: 9999px;
     cursor: pointer;
     text-decoration: none;
     margin-bottom: 8px;
     flex-shrink: 0;
-    transition: all 0.15s;
+    transition: all 0.15s cubic-bezier(0.645, 0.045, 0.355, 1);
     white-space: nowrap;
+    box-shadow: 0 2px 10px rgba(0, 73, 245, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 .sidebar-recharge:hover {
-    opacity: 0.9;
+    background: linear-gradient(107.06deg, #3A8CF9 0%, #1A5CF8 100%);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
+    box-shadow: 0 4px 14px rgba(0, 73, 245, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 /* Sidebar spacer */
 .sidebar-spacer {
@@ -589,15 +677,15 @@
 }
 /* Sidebar avatar */
 .sidebar-avatar {
-    width: 36px;
-    height: 36px;
+    width: 45px;
+    height: 45px;
     border-radius: 50%;
     background: linear-gradient(135deg, #4C7FF8, #8B5CF6);
     display: flex;
     align-items: center;
     justify-content: center;
     color: white;
-    font-size: 13px;
+    font-size: 16px;
     font-weight: 500;
     position: relative;
     cursor: pointer;
@@ -731,30 +819,43 @@
 .profile-logout:hover {
     background: rgba(239,68,68,0.1);
 }
-/* Sidebar navigation item */
+/* Sidebar navigation item（LuxReal 对齐：激活态深蓝渐变 + 高光遮罩 + 微投影 G-01） */
 .luxreal-nav-item {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    width: 56px;
-    height: 56px;
-    border-radius: 10px;
+    width: 64px;
+    height: 64px;
+    border-radius: 12px;
     color: var(--luxreal-sidebar-foreground);
     cursor: pointer;
-    transition: all 0.2s ease;
-    gap: 3px;
+    transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+    gap: 4px;
     text-decoration: none;
-    font-size: 11px;
+    font-size: 13px;
     position: relative;
 }
 .luxreal-nav-item:hover {
     color: var(--luxreal-foreground);
-    background: rgba(255,255,255,0.05);
+    background: rgba(255,255,255,0.06);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
 }
 .luxreal-nav-item.active {
-    color: var(--luxreal-primary);
-    background: rgba(59,130,246,0.12);
+    color: #fff;
+    background: linear-gradient(135deg, #0F1013 0%, #3A66FF 100%);
+    border-radius: 8px 0 0 8px;
+    margin-right: -4px;
+    box-shadow: rgba(0, 73, 245, 0.08) -4px 5px 7px, 0 0 18px rgba(58, 102, 255, 0.3);
+    overflow: hidden;
+}
+/* 白色高光遮罩：顶部亮 → 底部透明，覆盖渐变形成玻璃质感 */
+.luxreal-nav-item.active::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.04) 45%, rgba(255, 255, 255, 0) 75%);
+    pointer-events: none;
 }
 .luxreal-nav-item.nav-recharge {
     color: #A78BFA;
@@ -857,6 +958,28 @@
     overflow: hidden;
     text-overflow: ellipsis;
     margin-bottom: 2px;
+}
+/* 昵称内联编辑：原地输入框（点击铅笔按钮后出现） */
+.pp-user-name-edit {
+    width: 100%;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.96);
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.22);
+    border-radius: 4px;
+    padding: 1px 6px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+.pp-user-name-edit:focus {
+    border-color: #F5B23C;
+}
+.pp-user-edit-tip {
+    font-size: 10px;
+    color: rgba(255,255,255,0.55);
+    margin-top: 2px;
 }
 .pp-user-id {
     font-size: 12px;

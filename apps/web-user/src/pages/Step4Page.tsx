@@ -26,6 +26,7 @@ import {
 import WorkbenchShell from "../layouts/WorkbenchShell";
 import ProjectLoadError from "../components/ProjectLoadError";
 import { useStepState } from "../hooks/useStepState";
+import { matchTaskTypes, useWsDrivenPoll } from "../hooks/useWsDrivenPoll";
 import "./step4.css";
 
 // 错误文案：ApiError 走错误码映射（05 C 章），避免弹出后端原始报文
@@ -266,7 +267,6 @@ export default function Step4Page() {
   const [speedOpen, setSpeedOpen] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
 
-  const exportPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepState = useStepState(projectId, proj?.status ?? null);
 
   const activeEp = episodes.find((e) => e.episode_id === activeEpisode) ?? null;
@@ -341,44 +341,47 @@ export default function Step4Page() {
     if (beats.length > 0) void loadShots(beats);
   }, [beats, loadShots]);
 
-  // 导出历史加载 + PENDING 轮询
+  // 导出历史加载（纯加载；刷新节奏由 useWsDrivenPoll 驱动）
   const loadExports = useCallback(async () => {
     try {
       const d = await exportApi.list(projectId);
       setExports(d.items ?? []);
-      const pending = (d.items ?? []).some((e) => e.status === "PENDING");
-      if (pending && !exportPollRef.current) {
-        exportPollRef.current = setInterval(async () => {
-          try {
-            const dd = await exportApi.list(projectId);
-            setExports(dd.items ?? []);
-            if (!(dd.items ?? []).some((e) => e.status === "PENDING") && exportPollRef.current) {
-              clearInterval(exportPollRef.current);
-              exportPollRef.current = null;
-              toast.success("合成导出已完成");
-              void projectsApi.detail(projectId).then(setProj).catch(() => undefined);
-            }
-          } catch {
-            /* 忽略轮询抖动 */
-          }
-        }, 3000);
-      } else if (!pending && exportPollRef.current) {
-        clearInterval(exportPollRef.current);
-        exportPollRef.current = null;
-      }
     } catch (e) {
       toast.error(errMsg(e, "加载导出历史失败"));
     }
   }, [projectId]);
 
+  // 有 PENDING 导出：WS 终态推送驱动刷新（导出任务），断线回退 3s 轮询（对齐 LuxReal 推送为主）
+  const exportsPending = (exports ?? []).some((e) => e.status === "PENDING");
+  const exportDoneRef = useRef(false);
+  const refreshExports = useCallback(async () => {
+    if (exportDoneRef.current) return;
+    try {
+      const dd = await exportApi.list(projectId);
+      setExports(dd.items ?? []);
+      if (!(dd.items ?? []).some((e) => e.status === "PENDING")) {
+        exportDoneRef.current = true;
+        toast.success("合成导出已完成");
+        void projectsApi.detail(projectId).then(setProj).catch(() => undefined);
+      }
+    } catch {
+      /* 忽略刷新抖动 */
+    }
+  }, [projectId]);
+
+  useWsDrivenPoll(refreshExports, {
+    active: exportsPending,
+    pollMs: 3000,
+    match: matchTaskTypes(["FINAL_VIDEO_COMPOSE", "ENGINEER_FILE_EXPORT"]),
+  });
+
+  // 新一轮导出（重新出现 PENDING）→ 重置终态守卫
+  useEffect(() => {
+    if (exportsPending) exportDoneRef.current = false;
+  }, [exportsPending]);
+
   useEffect(() => {
     void loadExports();
-    return () => {
-      if (exportPollRef.current) {
-        clearInterval(exportPollRef.current);
-        exportPollRef.current = null;
-      }
-    };
   }, [loadExports]);
 
   // ESC 关闭弹窗与下拉
@@ -558,6 +561,7 @@ export default function Step4Page() {
       currentStep={stepState.currentStep}
       canClick={stepState.canClick}
       goStep={stepState.goStep}
+      stepDone={stepState.stepDone}
       episodes={episodes}
       activeEpisodeId={activeEpisode}
       onSelectEpisode={setActiveEpisode}
@@ -596,10 +600,19 @@ export default function Step4Page() {
                 )}
               </>
             ) : (
-              /* 无成片：渐变占位 */
+              /* 无成片：渐变占位 + 引导 CTA（17 - 工作台对齐，对齐 LuxReal"去生成"） */
               <div className="video-bg absolute inset-0 flex flex-col items-center justify-center gap-3">
                 <Film size={36} className="text-white/20" />
                 <span className="text-xs text-white/40">{canExport ? "暂无已完成的镜头视频" : "完成 Step3 视频生成后可预览成片"}</span>
+                {!canExport && (
+                  <button
+                    className="h-9 px-5 rounded-xl flex items-center gap-2 text-xs text-white font-medium transition-all hover:opacity-90"
+                    style={{ background: "linear-gradient(135deg, #4C7FF8, #8B5CF6)" }}
+                    onClick={() => stepState.goStep(3)}
+                  >
+                    去生成
+                  </button>
+                )}
               </div>
             )}
 
@@ -757,24 +770,44 @@ export default function Step4Page() {
         {beats.length > 0 && (
           <div className="timeline-container">
             <div className="timeline-track">
-              {beats.map((b, i) => (
-                <div key={b.beat_id} className="flex items-center">
-                  {i > 0 && <div className="timeline-connector" />}
-                  <div className="timeline-unit">
-                    <div
-                      className={`timeline-unit-card ${curItem?.beatId === b.beat_id ? "active" : ""}`}
-                      onClick={() => jumpToBeat(i)}
-                    >
-                      <div className="timeline-unit-number">叙事单元{b.sort_order}</div>
-                      <div className="timeline-unit-title">{b.title}</div>
-                      <div className="timeline-unit-duration">
-                        <Clock size={12} />
-                        <span>{fmtTime(b.actual_duration_sec > 0 ? b.actual_duration_sec : b.preset_duration_sec)}</span>
+              {beats.map((b, i) => {
+                // 镜头完成度占位（17 - 工作台对齐 P2：占位而非静默过滤，对齐 LuxReal 镜头块状态徽标）
+                const bs = shotsMap[b.beat_id] ?? [];
+                const doneN = bs.filter((s) => s.video_generation_status === "SUCCESS").length;
+                const runningN = bs.filter((s) => s.video_generation_status === "RUNNING").length;
+                return (
+                  <div key={b.beat_id} className="flex items-center">
+                    {i > 0 && <div className="timeline-connector" />}
+                    <div className="timeline-unit">
+                      <div
+                        className={`timeline-unit-card ${curItem?.beatId === b.beat_id ? "active" : ""}`}
+                        onClick={() => jumpToBeat(i)}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="timeline-unit-number">叙事单元{b.sort_order}</div>
+                          {bs.length > 0 && (
+                            <span
+                              className="text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1"
+                              style={{
+                                background: doneN === bs.length ? "rgba(16,185,129,0.15)" : runningN > 0 ? "rgba(245,178,60,0.15)" : "rgba(107,112,136,0.15)",
+                                color: doneN === bs.length ? "#10B981" : runningN > 0 ? "#F5B23C" : "#8B8B9A",
+                              }}
+                            >
+                              {runningN > 0 && <Loader2 size={9} className="animate-spin" />}
+                              {doneN === bs.length ? "已完成" : `${doneN}/${bs.length}`}
+                            </span>
+                          )}
+                        </div>
+                        <div className="timeline-unit-title">{b.title}</div>
+                        <div className="timeline-unit-duration">
+                          <Clock size={12} />
+                          <span>{fmtTime(b.actual_duration_sec > 0 ? b.actual_duration_sec : b.preset_duration_sec)}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

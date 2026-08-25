@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, Compass, Copy,
+  AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, Coins, Compass, Copy,
   Download, Edit3, FileText, FileUp, Folder, FolderOpen, HelpCircle, Image,
   Megaphone, MoreHorizontal, Palette, Play, Settings, Sparkles, ThumbsUp, Trash2, Wand2, X,
 } from "lucide-react";
@@ -15,6 +15,7 @@ import { api, ApiError, errorMessage } from "@duanju/api-client";
 import AgentSkillModal from "../components/AgentSkillModal";
 import ProfilePanel from "../components/ProfilePanel";
 import { useAvatarUrl } from "../hooks/useAvatarUrl";
+import { cachedGet, invalidateCachedGet } from "../utils/cachedApi";
 import { useAuthStore } from "../stores/authStore";
 import "./home.css";
 
@@ -74,6 +75,34 @@ const IMAGE_MODEL_ROWS: Record<"character" | "scene" | "prop", { label: string; 
   ],
 };
 
+// ===== 模型配置对接（GET /models 渲染 + GET/PUT /me/preferences 持久化） =====
+interface ModelOption {
+  model_key: string;
+  name: string;
+  provider: string;
+  cost_points: number;
+  enabled: boolean;
+}
+
+// 前端显示值 → 后端枚举（user_preferences 列）
+const RES_TO_ENUM: Record<string, string> = { "480P": "P480", "720P": "P720", "1080P": "P1080" };
+const ENUM_TO_RES: Record<string, string> = { P480: "480P", P720: "720P", P1080: "1080P", P2K_2560x1440: "2K", P4K_UHD: "4K" };
+const RATIO_TO_ENUM: Record<string, string> = { "16:9": "R16_9", "1:1": "R1_1", "9:16": "R9_16" };
+const ENUM_TO_RATIO: Record<string, string> = { R16_9: "16:9", R1_1: "1:1", R9_16: "9:16", R4_3: "4:3", R3_4: "3:4" };
+
+// 视频模型硬编码回退（GET /models 不可用时）
+const FALLBACK_VIDEO_MODELS: ModelOption[] = [
+  { model_key: "seedance25", name: "Seedance 2.5", provider: "", cost_points: 0, enabled: true },
+  { model_key: "seedance20", name: "Seedance 2.0", provider: "", cost_points: 0, enabled: true },
+  { model_key: "seedance20fast", name: "Seedance 2.0 Fast", provider: "", cost_points: 0, enabled: true },
+  { model_key: "klingo3", name: "KlingO3", provider: "", cost_points: 0, enabled: true },
+];
+
+// 图片模型硬编码回退（展开 IMAGE_MODEL_ROWS）
+const FALLBACK_IMAGE_MODELS: ModelOption[] = Object.values(IMAGE_MODEL_ROWS)
+  .flatMap((rows) => rows)
+  .map((row, i) => ({ model_key: `${row.prefix}-${i + 1}`, name: `${row.label} ${i + 1}`, provider: "", cost_points: 0, enabled: true }));
+
 interface ProjectItem {
   project_id: string;
   title: string;
@@ -93,6 +122,9 @@ export default function HomePage() {
   const [ratio, setRatio] = useState("9:16");
   const [videoDuration, setVideoDuration] = useState("auto");
   const [imageModel, setImageModel] = useState<Record<string, string>>({ character: "luxbanana2", scene: "luxbanana2", prop: "luxbanana2" });
+  // 模型选项（GET /models 真源；失败回退硬编码）
+  const [t2vModels, setT2vModels] = useState<ModelOption[]>(FALLBACK_VIDEO_MODELS);
+  const [t2iModels, setT2iModels] = useState<ModelOption[]>(FALLBACK_IMAGE_MODELS);
   const [profileOpen, setProfileOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
@@ -120,46 +152,96 @@ export default function HomePage() {
     document.title = "AI创作 - EmptyBroken";
   }, []);
 
-  // 舞台灯光：左上/右上双光源，16s 循环扫描时间线（类名与 home.css flashlight 系契约对齐）
-  // 每个目标区域（品牌名 → 聊天框 → 我的项目 → 精选推荐）光斑自左向右滑动扫描；
-  // 光束角度每帧按 atan2 实时追光斑（手电筒追光感）；扫品牌名时左光束变长、右光束变短，
-  // 其余阶段等长；收光复位首尾帧一致，无缝循环。光斑锚定目标元素，随滚动/resize 跟随。
+  // 模型配置：GET /models 加载可用模型（T2V 视频 / T2I 图片），GET /me/preferences 恢复已保存选择
+  useEffect(() => {
+    (async () => {
+      try {
+        const [v, i, prefs] = await Promise.all([
+          cachedGet<{ items: ModelOption[] }>("/models?capability=T2V", 60000),
+          cachedGet<{ items: ModelOption[] }>("/models?capability=T2I", 60000),
+          cachedGet<Record<string, unknown>>("/me/preferences", 30000),
+        ]);
+        if (v.items?.length) setT2vModels(v.items);
+        if (i.items?.length) setT2iModels(i.items);
+        const mc = (prefs.model_config ?? {}) as Record<string, unknown>;
+        if (mc.video_model) setVideoModel(String(mc.video_model));
+        if (mc.image_model) {
+          const im = String(mc.image_model);
+          setImageModel({ character: im, scene: im, prop: im });
+        }
+        if (mc.resolution && ENUM_TO_RES[String(mc.resolution)]) setResolution(ENUM_TO_RES[String(mc.resolution)]);
+        if (mc.aspect_ratio && ENUM_TO_RATIO[String(mc.aspect_ratio)]) setRatio(ENUM_TO_RATIO[String(mc.aspect_ratio)]);
+        if (mc.video_duration) setVideoDuration(String(mc.video_duration));
+      } catch {
+        /* 模型/偏好加载失败：使用默认值与硬编码回退 */
+      }
+    })();
+  }, []);
+
+  // 保存模型配置 → PUT /me/preferences（持久化，下次打开自动恢复）
+  const saveModelConfig = async () => {
+    try {
+      await api.put("/me/preferences", {
+        model_config: {
+          video_model: videoModel,
+          image_model: imageModel.character,
+          resolution: RES_TO_ENUM[resolution] ?? resolution,
+          aspect_ratio: RATIO_TO_ENUM[ratio] ?? ratio,
+          video_duration: videoDuration,
+        },
+      });
+      toast.success("模型配置已保存");
+      invalidateCachedGet("/me/preferences"); // 写后失效，其他页面重进时读到新值
+      setModelPanelOpen(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "保存失败");
+    }
+  };
+
+  // 舞台灯光：左上/右上双光源，20s 循环扫描
+  // 阶段：品牌名逐字扫描 → 品牌名飞到输入框 → 飞到下方游走 → 飞回原位
+  // 自然光质感：暖白调、微抖动、每侧三束光、长度随距离丝滑变化
   useEffect(() => {
     const stage = document.querySelector<HTMLElement>(".home-stage");
-    const spotBrand = document.querySelector<HTMLElement>(".flashlight-spot.spot-brand");
-    const spotInput = document.querySelector<HTMLElement>(".flashlight-spot.spot-input");
-    const spotProjects = document.querySelector<HTMLElement>(".flashlight-spot.spot-projects");
-    const spotCarousel = document.querySelector<HTMLElement>(".flashlight-spot.spot-carousel");
     const beamLeft = document.querySelector<HTMLElement>(".flashlight.is-left");
     const beamRight = document.querySelector<HTMLElement>(".flashlight.is-right");
     const brandTitle = document.querySelector<HTMLElement>(".brand-title");
-    if (!stage || !spotBrand || !spotInput || !spotProjects || !spotCarousel || !beamLeft || !beamRight) return;
+    const spot = document.querySelector<HTMLElement>(".flashlight-spot");
+    if (!stage || !beamLeft || !beamRight) return;
 
-    // 目标区域（光斑锚定中心，stage 相对坐标）
-    const targets = [
-      { el: () => document.getElementById("brand-header"), spot: spotBrand },
-      { el: () => document.getElementById("script-upload"), spot: spotInput },
-      { el: () => document.getElementById("example-projects"), spot: spotProjects },
-      { el: () => document.getElementById("recommendation-banners"), spot: spotCarousel },
-    ];
-    const centers = new Map<HTMLElement, { x: number; y: number }>();
-    const rects = new Map<HTMLElement, { left: number; top: number; width: number; height: number }>();
-    let vw = window.innerWidth; // 右光源 x 坐标（右上角）
+    let vw = window.innerWidth;
     let letters: { el: HTMLElement; cx: number }[] = [];
     let words: HTMLElement[] = [];
+    let brandX = 0, brandY = 100, brandW = 300;
+    let inputX = 0, inputY = 200;
+    let projX = 0, projY = 400, projW = 600, projH = 200;
 
     const sync = () => {
       const sr = stage.getBoundingClientRect();
       vw = window.innerWidth;
-      for (const t of targets) {
-        const el = t.el();
-        if (!el) continue;
-        const r = el.getBoundingClientRect();
-        centers.set(t.spot, { x: r.left + r.width / 2 - sr.left, y: r.top + r.height / 2 - sr.top });
-        rects.set(t.spot, { left: r.left - sr.left, top: r.top - sr.top, width: r.width, height: r.height });
+
+      const brandEl = document.getElementById("brand-header");
+      if (brandEl) {
+        const r = brandEl.getBoundingClientRect();
+        brandX = r.left + r.width / 2 - sr.left;
+        brandY = r.top + r.height / 2 - sr.top;
+        brandW = r.width;
       }
-      // 逐字渐变分配：每个字符自带渐变裁切，按实测偏移分配 background-position，
-      // 保持整词渐变连续（父级 clip:text 无法穿透带 filter 的子元素——实测坑）
+      const inputEl = document.getElementById("script-upload");
+      if (inputEl) {
+        const r = inputEl.getBoundingClientRect();
+        inputX = r.left + r.width / 2 - sr.left;
+        inputY = r.top + r.height / 2 - sr.top;
+      }
+      const projEl = document.getElementById("example-projects");
+      if (projEl) {
+        const r = projEl.getBoundingClientRect();
+        projX = r.left + r.width / 2 - sr.left;
+        projY = r.top + r.height / 2 - sr.top;
+        projW = r.width;
+        projH = r.height;
+      }
+
       if (brandTitle) {
         brandTitle.style.setProperty("--title-w", `${brandTitle.offsetWidth}px`);
         const tr = brandTitle.getBoundingClientRect();
@@ -172,162 +254,291 @@ export default function HomePage() {
       words = Array.from(document.querySelectorAll<HTMLElement>(".brand-word"));
     };
     sync();
-    const raf1 = requestAnimationFrame(sync); // 首屏布局/字体稳定后再锚一次
-    // 字体加载完成后字符宽度会变化（webfont 替换回退字体），必须重新分配渐变位置，
-    // 否则后段字母错位露出透明区；ResizeObserver 兜底品牌名尺寸变化
+    const raf1 = requestAnimationFrame(sync);
     let alive = true;
     const resync = () => { if (alive) sync(); };
     document.fonts?.ready.then(resync).catch(() => {});
     const ro = brandTitle && typeof ResizeObserver !== "undefined" ? new ResizeObserver(resync) : null;
     if (brandTitle) ro?.observe(brandTitle);
     window.addEventListener("resize", sync);
-    window.addEventListener("scroll", sync, true); // 捕获内部内容容器滚动
+    window.addEventListener("scroll", sync, true);
 
-    // —— 16s 扫描时间线（rAF 驱动，只写 transform/opacity 等合成层属性） ——
-    const DURATION = 16000;
+    // —— 尘埃粒子：光束中漂浮的微尘，增强真实感 ——
+    // 每侧生成一批粒子，沿光束方向缓慢飘动，大小/速度/亮度随机
+    const DUST_COUNT = 18; // 每侧粒子数
+    const dustLayers = document.querySelector<HTMLElement>(".flashlight-layer");
+    interface DustParticle {
+      el: HTMLElement;
+      side: "left" | "right";
+      progress: number; // 0~1，沿光束方向的进度
+      speed: number; // 飘动速度
+      size: number; // 粒子大小
+      offset: number; // 横向偏移（-1~1，相对于光束宽度）
+      brightness: number; // 亮度系数
+      drift: number; // 横向漂移速度
+      phase: number; // 闪烁相位
+    }
+    const dustParticles: DustParticle[] = [];
+
+    if (dustLayers) {
+      for (let i = 0; i < DUST_COUNT; i++) {
+        for (const side of ["left", "right"] as const) {
+          const el = document.createElement("div");
+          el.className = "dust-particle";
+          dustLayers.appendChild(el);
+          dustParticles.push({
+            el,
+            side,
+            progress: Math.random(), // 随机初始位置
+            speed: 0.015 + Math.random() * 0.025, // 随机速度
+            size: 1.5 + Math.random() * 3, // 1.5~4.5px
+            offset: (Math.random() - 0.5) * 1.2, // 横向偏移
+            brightness: 0.3 + Math.random() * 0.7,
+            drift: (Math.random() - 0.5) * 0.003,
+            phase: Math.random() * Math.PI * 2,
+          });
+        }
+      }
+    }
+
+    // —— 20s 扫描时间线（节奏更舒缓，品牌名会飞行） ——
+    const DURATION = 20000;
     const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
-    const ease = (t: number) => t * t * (3 - 2 * t); // smoothstep：移动缓入缓出
+    const easeInOut = (t: number) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
     const ramp = (t: number, a: number, b: number) => clamp01((t - a) / (b - a));
-    const setSpotAt = (spot: HTMLElement, alpha: number, x: number, y: number) => {
-      spot.style.opacity = alpha.toFixed(3);
-      spot.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -50%)`;
-    };
     const start = performance.now();
     let raf2 = 0;
     const tick = (now: number) => {
       if (!alive) return;
-      const t = ((now - start) % DURATION) / 1000; // 0–16s 循环相位
+      const t = ((now - start) % DURATION) / 1000;
+      const timeSec = now / 1000; // 用于微抖动的连续时间
 
-      // —— 各区域滑动进度（smoothstep，自左向右） ——
-      const brandP = ease(clamp01((t - 0.3) / 3.4)); // 品牌名：0.3–3.7s
-      const inputP = ease(clamp01((t - 4.6) / 2.2)); // 输入框：4.6–6.8s
-      const projP = ease(clamp01((t - 7.0) / 2.2));  // 我的项目：7.0–9.2s
-      const carP = ease(clamp01((t - 9.4) / 2.2));   // 精选推荐：9.4–11.6s
+      // —— 光束焦点位置（弧线过渡，不生硬） ——
+      let fx = brandX, fy = brandY;
 
-      // —— 焦点光斑位置（光束追光目标）：逐阶段滑动 + 阶段间 0.4s 平滑过渡 ——
-      const brandR = rects.get(spotBrand);
-      const inputR = rects.get(spotInput);
-      const projR = rects.get(spotProjects);
-      const carR = rects.get(spotCarousel);
-      const brandC = centers.get(spotBrand);
-      let focusX = brandC?.x ?? vw / 2;
-      let focusY = brandC?.y ?? 100;
-      if (t < 4.0 && brandR && brandC) {
-        focusX = brandR.left + brandP * brandR.width;
-        focusY = brandC.y;
-      } else if (t < 4.6) {
-        // 品牌名末端 → 输入框起点
-        const k = ease(ramp(t, 4.0, 4.6));
-        const sx = brandR ? brandR.left + brandR.width : focusX;
-        const sy = brandC ? brandC.y : focusY;
-        const ex = inputR ? inputR.left : sx;
-        const ey = inputR ? inputR.top + inputR.height / 2 : sy;
-        focusX = sx + (ex - sx) * k;
-        focusY = sy + (ey - sy) * k;
-      } else if (t < 7.0 && inputR) {
-        focusX = inputR.left + inputP * inputR.width;
-        focusY = inputR.top + inputR.height / 2;
-      } else if (t < 7.4) {
-        // 输入框末端 → 项目起点
-        const k = ease(ramp(t, 7.0, 7.4));
-        const sx = inputR ? inputR.left + inputR.width : focusX;
-        const sy = inputR ? inputR.top + inputR.height / 2 : focusY;
-        const ex = projR ? projR.left : sx;
-        const ey = projR ? projR.top + projR.height / 2 : sy;
-        focusX = sx + (ex - sx) * k;
-        focusY = sy + (ey - sy) * k;
-      } else if (t < 9.4 && projR) {
-        focusX = projR.left + projP * projR.width;
-        focusY = projR.top + projR.height / 2;
-      } else if (t < 9.8) {
-        // 项目末端 → 精选推荐起点
-        const k = ease(ramp(t, 9.4, 9.8));
-        const sx = projR ? projR.left + projR.width : focusX;
-        const sy = projR ? projR.top + projR.height / 2 : focusY;
-        const ex = carR ? carR.left : sx;
-        const ey = carR ? carR.top + carR.height / 2 : sy;
-        focusX = sx + (ex - sx) * k;
-        focusY = sy + (ey - sy) * k;
-      } else if (t < 11.8 && carR) {
-        focusX = carR.left + carP * carR.width;
-        focusY = carR.top + carR.height / 2;
-      } else if (t < 13.6) {
-        // 收回：精选推荐末端 → 品牌名中心（下一轮起点）
-        const k = ease(ramp(t, 11.8, 13.6));
-        const sx = carR ? carR.left + carR.width : focusX;
-        const sy = carR ? carR.top + carR.height / 2 : focusY;
-        focusX = sx + ((brandC?.x ?? sx) - sx) * k;
-        focusY = sy + ((brandC?.y ?? sy) - sy) * k;
-      } else if (brandC) {
-        focusX = brandC.x;
-        focusY = brandC.y;
+      if (t < 5.5) {
+        // 阶段1：品牌名从左到右缓慢扫描
+        const p = easeInOut(clamp01(t / 5.5));
+        fx = brandX - brandW / 2 + p * brandW;
+        fy = brandY;
+      } else if (t < 7.2) {
+        // 过渡：品牌名 → 输入框（弧线扫过去）
+        const k = easeInOut(ramp(t, 5.5, 7.2));
+        const sx = brandX + brandW / 2;
+        const sy = brandY;
+        const arcY = Math.sin(k * Math.PI) * 50;
+        fx = sx + (inputX - sx) * k;
+        fy = sy + (inputY - sy) * k - arcY;
+      } else if (t < 10.5) {
+        // 阶段2：输入框，轻微呼吸
+        const breatheX = Math.sin((t - 7.2) * 1.3) * 8;
+        const breatheY = Math.sin((t - 7.2) * 1.1 + 0.5) * 5;
+        fx = inputX + breatheX;
+        fy = inputY + breatheY;
+      } else if (t < 11.5) {
+        // 过渡：输入框 → 下方
+        const k = easeInOut(ramp(t, 10.5, 11.5));
+        fx = inputX + (projX - inputX) * k;
+        fy = inputY + (projY - inputY) * k;
+      } else if (t < 16.0) {
+        // 阶段3：下方区域缓慢游走（多频正弦叠加，自然随机感）
+        // 焦点往下偏移 projH*0.15，更多照在卡片图片上
+        const phase = (t - 11.5) / 4.5;
+        fx = projX
+          + Math.sin(phase * Math.PI * 1.0) * projW * 0.3
+          + Math.sin(phase * Math.PI * 2.2 + 1.2) * projW * 0.07;
+        fy = projY + projH * 0.45
+          + Math.sin(phase * Math.PI * 0.75 + 0.6) * projH * 0.3
+          + Math.sin(phase * Math.PI * 1.8 + 1.8) * projH * 0.08;
+      } else if (t < 18.0) {
+        // 收回：弧线回到品牌名起点
+        const k = easeInOut(ramp(t, 16.0, 18.0));
+        const arcY = Math.sin(k * Math.PI) * 60;
+        fx = projX + (brandX - projX) * k;
+        fy = projY + (brandY - projY) * k - arcY;
+      } else {
+        fx = brandX;
+        fy = brandY;
       }
 
-      // —— 光束角度实时追光（左光源 72,40；右光源 vw,40）
-      // conic-gradient(from -90deg) = 锥心在 90deg（正下），需减 90° 使锥心指向 atan2 方向 ——
-      const angleL = (Math.atan2(focusY - 40, focusX - 72) * 180) / Math.PI - 90;
-      const angleR = (Math.atan2(focusY - 40, focusX - vw) * 180) / Math.PI - 90;
+      // —— 光束微抖动：模拟真实光线的不稳定（非常细微，不晃眼） ——
+      const flickerA = Math.sin(timeSec * 7.3) * 0.15 + Math.sin(timeSec * 3.1 + 1) * 0.1;
+      const flickerL = 1 + Math.sin(timeSec * 5.7 + 0.5) * 0.015 + Math.sin(timeSec * 11.3) * 0.008;
+      const flickerR = 1 + Math.sin(timeSec * 6.2 + 1.2) * 0.015 + Math.sin(timeSec * 9.8 + 0.3) * 0.008;
+      const flickerOp = 1 + Math.sin(timeSec * 4.5 + 0.8) * 0.03 + Math.sin(timeSec * 8.1) * 0.02;
+
+      // —— 辅助光束独立微运动：模拟多镜片散射的有机感 ——
+      // 内侧辅助光：角度轻微独立摆动 + 长度独立呼吸
+      const subInnerA_L = Math.sin(timeSec * 2.8 + 0.3) * 0.7 + Math.sin(timeSec * 5.2 + 1.1) * 0.35;
+      const subInnerA_R = Math.sin(timeSec * 2.6 + 0.9) * 0.7 + Math.sin(timeSec * 4.8 + 0.2) * 0.35;
+      const subInnerL_L = 1 + Math.sin(timeSec * 1.9 + 0.5) * 0.04 + Math.sin(timeSec * 4.1 + 0.8) * 0.02;
+      const subInnerL_R = 1 + Math.sin(timeSec * 2.1 + 1.2) * 0.04 + Math.sin(timeSec * 3.9 + 0.3) * 0.02;
+      // 外侧辅助光：摆动幅度稍大，频率稍慢，与内侧不同步
+      const subOuterA_L = Math.sin(timeSec * 1.6 + 0.7) * 1.0 + Math.sin(timeSec * 3.7 + 1.5) * 0.4;
+      const subOuterA_R = Math.sin(timeSec * 1.8 + 0.2) * 1.0 + Math.sin(timeSec * 3.5 + 0.9) * 0.4;
+      const subOuterL_L = 1 + Math.sin(timeSec * 1.2 + 0.8) * 0.055 + Math.sin(timeSec * 2.8 + 0.2) * 0.025;
+      const subOuterL_R = 1 + Math.sin(timeSec * 1.4 + 0.3) * 0.055 + Math.sin(timeSec * 2.6 + 0.7) * 0.025;
+
+      // —— 光束角度实时追光 + 微抖动 ——
+      const angleL = (Math.atan2(fy - 40, fx - 72) * 180) / Math.PI - 90 + flickerA;
+      const angleR = (Math.atan2(fy - 40, fx - vw) * 180) / Math.PI - 90 - flickerA;
       beamLeft.style.setProperty("--beam-a-l", angleL.toFixed(2) + "deg");
       beamRight.style.setProperty("--beam-a-r", angleR.toFixed(2) + "deg");
+      // 辅助光束独立角度偏移
+      beamLeft.style.setProperty("--sub-inner-a-l", subInnerA_L.toFixed(2) + "deg");
+      beamLeft.style.setProperty("--sub-outer-a-l", subOuterA_L.toFixed(2) + "deg");
+      beamRight.style.setProperty("--sub-inner-a-r", subInnerA_R.toFixed(2) + "deg");
+      beamRight.style.setProperty("--sub-outer-a-r", subOuterA_R.toFixed(2) + "deg");
 
-      // —— 光束长度：真实手电筒光束不会因目标近就变短，而是一直延伸
-      // 基础长度保证光束超出目标继续延伸，形成"光柱穿过目标"的真实感
-      // 只在动画节奏上做轻微调制（品牌名阶段左长右短，收尾阶段收回）
-      const vh2 = window.innerHeight;
-      const baseLen = 1.1; // 基础长度 = 200vh * 1.1 ≈ 220vh，足够延伸到页面底部
-      let modL = 1, modR = 1;
-      if (t < 4.0) { modL = 1 + 0.25 * brandP; modR = 1 - 0.15 * brandP; }
-      else if (t < 4.6) { const k = ramp(t, 4.0, 4.6); modL = 1.25 - 0.25 * k; modR = 0.85 + 0.15 * k; }
-      else if (t >= 11.8) { const k = ease(ramp(t, 11.8, 14.2)); modL = 1 - 0.75 * k; modR = 1 - 0.75 * k; }
-      const lenL = Math.max(0.2, baseLen * modL);
-      const lenR = Math.max(0.2, baseLen * modR);
-      beamLeft.style.setProperty("--beam-l", lenL.toFixed(3));
-      beamRight.style.setProperty("--beam-r", lenR.toFixed(3));
-      // 光束亮度：苏醒 → 全亮 → 收回（首尾一致 0.3）
-      const beamOp = t < 0.5 ? 0.3 + 0.6 * ramp(t, 0, 0.5) : t < 11.8 ? 0.9 : 0.9 - 0.6 * ease(ramp(t, 11.8, 13.4));
+      // —— 光束长度：根据距离动态计算 + 微抖动 ——
+      const distL = Math.sqrt((fx - 72) ** 2 + (fy - 40) ** 2);
+      const distR = Math.sqrt((fx - vw) ** 2 + (fy - 40) ** 2);
+      const vh = window.innerHeight;
+      let lenL = (distL / vh) * 0.9 * flickerL;
+      let lenR = (distR / vh) * 0.9 * flickerR;
+
+      // 品牌名扫描阶段：左光束明显变长，右光束明显变短
+      // 模拟手电筒照近物的效果：靠近光源的光束更长更亮
+      if (t < 5.5) {
+        const p = easeInOut(clamp01(t / 5.5));
+        // 左光束：从 1.0 增长到 1.35（明显变长）
+        lenL *= 1 + 0.35 * p;
+        // 右光束：从 1.0 缩短到 0.55（明显变短）
+        lenR *= Math.max(0.55, 1 - 0.45 * p);
+      } else if (t < 7.2) {
+        // 飞行1阶段：光束长度逐渐过渡到等长
+        const k = easeInOut(ramp(t, 5.5, 7.2));
+        lenL *= 1.35 - 0.35 * k;
+        lenR *= 0.55 + 0.45 * k;
+      }
+
+      // 收尾阶段缩短
+      if (t >= 16.0) {
+        const k = easeInOut(ramp(t, 16.0, 18.0));
+        lenL *= 1 - 0.85 * k;
+        lenR *= 1 - 0.85 * k;
+      }
+      const finalLenL = Math.max(0.12, lenL);
+      const finalLenR = Math.max(0.1, lenR);
+      beamLeft.style.setProperty("--beam-l", finalLenL.toFixed(3));
+      beamRight.style.setProperty("--beam-r", finalLenR.toFixed(3));
+      // 辅助光束独立长度系数
+      beamLeft.style.setProperty("--sub-inner-l-l", (finalLenL * subInnerL_L).toFixed(3));
+      beamLeft.style.setProperty("--sub-outer-l-l", (finalLenL * subOuterL_L).toFixed(3));
+      beamRight.style.setProperty("--sub-inner-l-r", (finalLenR * subInnerL_R).toFixed(3));
+      beamRight.style.setProperty("--sub-outer-l-r", (finalLenR * subOuterL_R).toFixed(3));
+
+      // —— 光束整体亮度 + 微抖动 ——
+      let baseOp = 0.38;
+      if (t < 0.5) baseOp = 0.1 + 0.28 * easeInOut(ramp(t, 0, 0.5));
+      else if (t >= 16.0) baseOp = 0.38 - 0.32 * easeInOut(ramp(t, 16.0, 17.8));
+      const beamOp = Math.max(0.05, baseOp * flickerOp);
       beamLeft.style.opacity = beamOp.toFixed(3);
       beamRight.style.opacity = beamOp.toFixed(3);
-      for (const b of [beamLeft, beamRight]) {
-        const fog = b.querySelector<HTMLElement>(".flashlight-fog");
-        if (fog) fog.style.opacity = (beamOp * 0.95).toFixed(3);
-      }
 
-      // —— 光斑在各区域内自左向右滑动（0.4s 淡入/淡出交叉衔接） ——
-      const fade = (t0: number, t1: number) => Math.min(ramp(t, t0, t0 + 0.4), 1 - ramp(t, t1, t1 + 0.4));
-      if (brandR && brandC) {
-        setSpotAt(spotBrand, 0.95 * fade(0.15, 3.7), brandR.left + brandP * brandR.width, brandC.y);
-      } else {
-        spotBrand.style.opacity = "0";
-      }
-      if (inputR) {
-        setSpotAt(spotInput, 0.9 * fade(4.3, 6.7), inputR.left + inputP * inputR.width, inputR.top + inputR.height / 2);
-      } else {
-        spotInput.style.opacity = "0";
-      }
-      if (projR) {
-        setSpotAt(spotProjects, 0.9 * fade(6.7, 9.1), projR.left + projP * projR.width, projR.top + projR.height / 2);
-      } else {
-        spotProjects.style.opacity = "0";
-      }
-      if (carR) {
-        setSpotAt(spotCarousel, 0.9 * fade(9.1, 11.5), carR.left + carP * carR.width, carR.top + carR.height / 2);
-      } else {
-        spotCarousel.style.opacity = "0";
-      }
-
-      // —— 品牌名扫描：光斑滑过字母逐个点亮并保持 ——
-      if (brandR && t < 4.0) {
-        const x = brandR.left + brandP * brandR.width;
+      // —— 品牌名逐字母点亮（跟随扫描位置） ——
+      if (t < 5.5) {
+        const x = brandX - brandW / 2 + easeInOut(clamp01(t / 5.5)) * brandW;
         for (const l of letters) if (!l.el.classList.contains("lit") && x >= l.cx) l.el.classList.add("lit");
       }
-      // 副标题逐词点亮（字母扫完后，0.22s/词）
-      if (t >= 3.3 && t < 14.4) words.forEach((w, i) => { if (t >= 3.3 + i * 0.22) w.classList.add("lit"); });
+      // 副标题逐词点亮
+      if (t >= 4.5 && t < 17.8) words.forEach((w, i) => { if (t >= 4.5 + i * 0.3) w.classList.add("lit"); });
 
-      // —— 阶段 C 收尾：字母复位变暗（CSS transition 平滑），准备下一轮 ——
-      if (t >= 14.4 && t < 14.7) {
+      // —— 收尾复位 ——
+      if (t >= 18.0 && t < 18.3) {
         letters.forEach((l) => l.el.classList.remove("lit"));
         words.forEach((w) => w.classList.remove("lit"));
       }
+
+      // —— 聚焦光斑：跟随光束焦点，模拟光线打在物体表面 ——
+      if (spot) {
+        // 光斑大小随距离变化：越远越大（越散）
+        const distAvg = (distL + distR) / 2;
+        const spotSize = 180 + (distAvg / vh) * 80;
+        spot.style.left = fx.toFixed(1) + "px";
+        spot.style.top = fy.toFixed(1) + "px";
+        spot.style.width = spotSize.toFixed(0) + "px";
+        spot.style.height = spotSize.toFixed(0) + "px";
+        // 光斑微抖动
+        const spotFlicker = 1 + Math.sin(timeSec * 5.5) * 0.05 + Math.sin(timeSec * 9.2) * 0.03;
+        spot.style.opacity = (0.65 * spotFlicker * (t >= 16.0 ? 1 - easeInOut(ramp(t, 16.0, 17.8)) : 1)).toFixed(3);
+      }
+
+      // —— 卡片照亮：光束照到精选推荐卡片时，卡片发光 ——
+      const cards = document.querySelectorAll<HTMLElement>(".carousel-card");
+      if (cards.length > 0) {
+        // 找到离焦点最近的卡片
+        let nearestIdx = -1;
+        let nearestDist = Infinity;
+        cards.forEach((card, i) => {
+          const r = card.getBoundingClientRect();
+          const sr = stage.getBoundingClientRect();
+          const cx = r.left + r.width / 2 - sr.left;
+          const cy = r.top + r.height / 2 - sr.top;
+          const d = Math.sqrt((fx - cx) ** 2 + (fy - cy) ** 2);
+          if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
+        });
+        // 只有在下方区域阶段 + 距离足够近才点亮
+        const inProjPhase = t >= 10.5 && t < 16.5;
+        const litRadius = 160;
+        cards.forEach((card, i) => {
+          if (inProjPhase && i === nearestIdx && nearestDist < litRadius) {
+            card.classList.add("is-lit");
+          } else {
+            card.classList.remove("is-lit");
+          }
+        });
+      }
+
+      // —— 尘埃粒子更新：沿光束方向飘动 ——
+      if (dustParticles.length > 0) {
+        const beamLenL = parseFloat(beamLeft.style.getPropertyValue("--beam-l") || "1");
+        const beamLenR = parseFloat(beamRight.style.getPropertyValue("--beam-r") || "1");
+        const angleL = parseFloat(beamLeft.style.getPropertyValue("--beam-a-l") || "7");
+        const angleR = parseFloat(beamRight.style.getPropertyValue("--beam-a-r") || "-7");
+        const beamLength = vh * 0.9; // 基础光束长度（与 CSS 一致）
+        const beamWidth = beamLength * 0.12; // 光束宽度的一半（用于横向偏移）
+
+        for (const p of dustParticles) {
+          // 更新进度：沿光束向前飘动
+          p.progress += p.speed * 0.016 * 60; // 基于 60fps 归一化
+          p.offset += p.drift;
+          // 越界后重置到起点
+          if (p.progress > 1) {
+            p.progress = 0;
+            p.offset = (Math.random() - 0.5) * 1.2;
+          }
+          // 横向漂移限制
+          if (p.offset > 0.9) p.offset = 0.9;
+          if (p.offset < -0.9) p.offset = -0.9;
+
+          const isLeft = p.side === "left";
+          const angle = isLeft ? angleL : angleR;
+          const beamLen = isLeft ? beamLenL : beamLenR;
+          const srcX = isLeft ? 72 : vw;
+          const srcY = 40;
+
+          // 粒子在光束中的位置：沿光束方向 * 进度
+          const distAlong = beamLength * beamLen * p.progress;
+          const distSide = beamWidth * p.offset * (1 - p.progress * 0.3); // 越远越宽
+          const rad = (angle + 90) * Math.PI / 180; // 转成标准弧度
+
+          const px = srcX + Math.cos(rad) * distAlong + Math.cos(rad + Math.PI / 2) * distSide;
+          const py = srcY + Math.sin(rad) * distAlong + Math.sin(rad + Math.PI / 2) * distSide;
+
+          // 透明度：两端淡，中间亮；加上闪烁
+          const fadeIn = Math.min(1, p.progress * 4);
+          const fadeOut = Math.min(1, (1 - p.progress) * 2.5);
+          const twinkle = 0.6 + 0.4 * Math.sin(timeSec * 3 + p.phase);
+          const opacity = fadeIn * fadeOut * p.brightness * twinkle * 0.7;
+
+          p.el.style.transform = `translate(${px.toFixed(1)}px, ${py.toFixed(1)}px)`;
+          p.el.style.width = p.size.toFixed(1) + "px";
+          p.el.style.height = p.size.toFixed(1) + "px";
+          p.el.style.opacity = opacity.toFixed(3);
+        }
+      }
+
       raf2 = requestAnimationFrame(tick);
     };
     raf2 = requestAnimationFrame(tick);
@@ -336,6 +547,9 @@ export default function HomePage() {
       alive = false;
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
+      // 清理尘埃粒子 DOM
+      for (const p of dustParticles) p.el.remove();
+      dustParticles.length = 0;
       ro?.disconnect();
       window.removeEventListener("resize", sync);
       window.removeEventListener("scroll", sync, true);
@@ -685,11 +899,12 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
         toast.error("解析文本超过 5 万字上限");
         return;
       }
-      // 3. 回填输入框 + 文件卡片态（格式互斥：文件存在期间禁止手动编辑）
+      // 3. 文件卡片态（格式互斥：文件存在期间禁止手动编辑）
+      // U1：上传后输入框不再回填小说全文预览（script 仍持有文本供创建项目）
       setScript(text);
       setUploadedFile({ name: file.name, size: file.size });
       setUploadState("FILE_READY");
-      toast.success(`剧本「${file.name}」已解析并填入输入框`);
+      toast.success(`剧本「${file.name}」已解析完成，可直接进入工作台`);
     } catch (err) {
       setUploadState("PARSE_FAILED");
       setParseError(err instanceof ApiError ? errorMessage(err.code, err.message) : "文档解析失败，请重试或改用粘贴文本");
@@ -758,26 +973,28 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
       </div>
 
       {/* 双手电筒舞台灯光：左上/右上光束缓慢对称扫向中央，循环照亮品牌名 ⇄ 输入卡（样式见 home.css）
-          三层光束系统：外层辉光（可见光柱散射）+ 主光束（锥形聚光）+ 内层核心（白热灯丝） */}
+          三层光束系统：外层辉光（可见光柱散射）+ 主光束 + 两侧辅助光，更有层次感 */}
       <div className="flashlight-layer" aria-hidden>
         <div className="flashlight is-left">
-          <div className="flashlight-fog" />
+          <div className="flashlight-beam-ambient" />
           <div className="flashlight-beam-glow" />
+          <div className="flashlight-beam-sub flashlight-beam-sub-outer" />
           <div className="flashlight-beam" />
+          <div className="flashlight-beam-sub flashlight-beam-sub-inner" />
           <div className="flashlight-beam-core" />
           <div className="flashlight-src" />
         </div>
         <div className="flashlight is-right">
-          <div className="flashlight-fog" />
+          <div className="flashlight-beam-ambient" />
           <div className="flashlight-beam-glow" />
+          <div className="flashlight-beam-sub flashlight-beam-sub-outer" />
           <div className="flashlight-beam" />
+          <div className="flashlight-beam-sub flashlight-beam-sub-inner" />
           <div className="flashlight-beam-core" />
           <div className="flashlight-src" />
         </div>
-        <div className="flashlight-spot spot-brand" />
-        <div className="flashlight-spot spot-input" />
-        <div className="flashlight-spot spot-projects" />
-        <div className="flashlight-spot spot-carousel" />
+        {/* 聚焦光斑：光束末端打在物体上的亮光斑 */}
+        <div className="flashlight-spot" />
       </div>
 
       {/* 主行:侧边栏 + 内容 */}
@@ -797,20 +1014,20 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
           {/* 中心导航 */}
           <nav className="flex flex-col items-center gap-2 flex-shrink-0">
             <Link to="/" className="luxreal-nav-item active" title="创作">
-              <Sparkles size={22} />
+              <Sparkles size={24} />
               <span>创作</span>
             </Link>
             <Link to="/feed" className="luxreal-nav-item" title="发现">
-              <Compass size={22} />
+              <Compass size={24} />
               <span>发现</span>
             </Link>
             <Link to="/projects" className="luxreal-nav-item" title="作品">
-              <Folder size={22} />
+              <Folder size={24} />
               <span>作品</span>
             </Link>
           </nav>
 
-          <div className="flex-1" style={{ minHeight: 20 }} />
+          <div className="flex-1" style={{ minHeight: 40 }} />
 
           {/* 头像(点击展开面板，LuxReal 对齐版 pp-panel) */}
           <div className="pp-anchor" style={{ marginBottom: 4 }}>
@@ -835,8 +1052,13 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
             <ProfilePanel open={profileOpen} onClose={() => setProfileOpen(false)} />
           </div>
 
-          {/* 积分（真实余额） */}
-          <span className="sidebar-credits">{points === null ? "…" : points.toLocaleString()}</span>
+          {/* 积分（真实余额，金色徽章 Coins 图标 + 数字） */}
+          <span className="sidebar-credits">
+            <span className="sidebar-credits-badge">
+              <Coins size={16} className="sidebar-credits-icon" />
+            </span>
+            {points === null ? "…" : points.toLocaleString()}
+          </span>
           {/* 充值 */}
           <Link to="/points" className="sidebar-recharge" title="充值">
             充值
@@ -888,14 +1110,14 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
                     id="tab-canvas"
                     className={`creation-tab ${tab === "canvas" ? "active" : ""}`}
                     onClick={() => {
-                      setTab("canvas");
-                      navigate("/canvas");
+                      // 自由画布开发中：不跳转，仅提示（U3）
+                      toast.info("自由画布开发中，敬请期待");
                     }}
                   >
                     <Palette size={16} />
                     <span>自由画布</span>
                     <span className="luxreal-badge luxreal-badge-beta" style={{ padding: "1px 7px", fontSize: 10 }}>
-                      Beta
+                      开发中
                     </span>
                   </button>
                 </div>
@@ -1010,7 +1232,7 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
                             id="script-textarea"
                             className="chat-textarea"
                             rows={1}
-                            value={script}
+                            value={uploadedFile ? "" : script}
                             disabled={uploadState === "FILE_READY" || uploadState === "UPLOADING" || uploadState === "PARSING"}
                             onChange={(e) => {
                               setScript(e.target.value);
@@ -1021,7 +1243,11 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
                                 setParseError("");
                               }
                             }}
-                            placeholder="通过左侧按钮上传剧本文件，或在此粘贴剧本文字（不超过5万字）"
+                            placeholder={
+                              uploadedFile
+                                ? `已上传「${uploadedFile.name}」，剧本内容已就绪（${script.length} 字）；如需手动编辑请先移除文件`
+                                : "通过左侧按钮上传剧本文件，或在此粘贴剧本文字（不超过5万字）"
+                            }
                             maxLength={MAX_SCRIPT_CHARS}
                           />
                         </div>
@@ -1100,22 +1326,19 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
                           <div className="mb-6">
                             <p className="text-[12px] text-[var(--luxreal-muted-foreground)] mb-3">视频生成模型</p>
                             <div className="flex flex-wrap gap-2">
-                              {[
-                                { key: "seedance25", label: "Seedance 2.5", vip: true },
-                                { key: "seedance20", label: "Seedance 2.0" },
-                                { key: "seedance20fast", label: "Seedance 2.0 Fast" },
-                                { key: "klingo3", label: "KlingO3" },
-                              ].map((m) => (
+                              {t2vModels.map((m) => (
                                 <button
-                                  key={m.key}
-                                  className={`video-model-btn ${videoModel === m.key ? "active" : ""}`}
-                                  data-video-model={m.key}
-                                  onClick={() => setVideoModel(m.key)}
+                                  key={m.model_key}
+                                  className={`video-model-btn ${videoModel === m.model_key ? "active" : ""}`}
+                                  data-video-model={m.model_key}
+                                  disabled={!m.enabled}
+                                  onClick={() => setVideoModel(m.model_key)}
+                                  style={!m.enabled ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
                                 >
-                                  <span>{m.label}</span>
-                                  {m.vip && (
+                                  <span>{m.name || m.model_key}</span>
+                                  {m.cost_points > 0 && (
                                     <span className="luxreal-badge luxreal-badge-vip ml-1.5" style={{ fontSize: 10, padding: "1px 6px" }}>
-                                      VIP
+                                      {m.cost_points} 积分
                                     </span>
                                   )}
                                 </button>
@@ -1176,25 +1399,22 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
                             <p className="text-[12px] text-[var(--luxreal-muted-foreground)] mb-3">
                               {modelTab === "character" ? "角色" : modelTab === "scene" ? "场景" : "道具"}图形生成模型
                             </p>
-                            <div className="space-y-3">
-                              {IMAGE_MODEL_ROWS[modelTab].map((row) => (
-                                <div key={row.prefix} className="model-gallery-row">
-                                  <span className="model-gallery-label">{row.label}</span>
-                                  <div className="model-gallery-thumbs">
-                                    {row.grads.map((g, gi) => {
-                                      const modelKey = `${row.prefix}-${gi + 1}`;
-                                      return (
-                                        <div
-                                          key={modelKey}
-                                          className={`model-thumb ${imageModel[modelTab] === modelKey ? "selected" : ""}`}
-                                          onClick={() => setImageModel((prev) => ({ ...prev, [modelTab]: modelKey }))}
-                                        >
-                                          <div className={`thumb-preview thumb-grad-${g}`} />
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
+                            <div className="flex flex-wrap gap-2">
+                              {t2iModels.map((m) => (
+                                <button
+                                  key={m.model_key}
+                                  className={`video-model-btn ${imageModel[modelTab] === m.model_key ? "active" : ""}`}
+                                  disabled={!m.enabled}
+                                  onClick={() => setImageModel((prev) => ({ ...prev, [modelTab]: m.model_key }))}
+                                  style={!m.enabled ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
+                                >
+                                  <span>{m.name || m.model_key}</span>
+                                  {m.cost_points > 0 && (
+                                    <span className="luxreal-badge luxreal-badge-vip ml-1.5" style={{ fontSize: 10, padding: "1px 6px" }}>
+                                      {m.cost_points} 积分
+                                    </span>
+                                  )}
+                                </button>
                               ))}
                             </div>
                           </div>
@@ -1204,7 +1424,7 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
 
                     <div className="luxreal-modal-footer">
                       <button className="btn-ghost" onClick={() => setModelPanelOpen(false)}>取消</button>
-                      <button className="btn-gradient-primary" onClick={() => setModelPanelOpen(false)}>
+                      <button className="btn-gradient-primary" onClick={() => void saveModelConfig()}>
                         <span>确认配置</span>
                       </button>
                     </div>

@@ -179,7 +179,7 @@ func (s *MarketService) CreateOrder(c *gin.Context) {
 	var req struct {
 		Title    string `json:"title" binding:"required,min=1,max=200"`
 		Desc     string `json:"description"`
-		Reward   int    `json:"reward_points" binding:"min=0"`
+		Reward   int    `json:"reward_points" binding:"required,min=1,max=1000000"` // 08 审查 Critical#5：必填+上限（原 min=0 无上限）
 		Deadline string `json:"deadline_at"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {

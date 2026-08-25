@@ -1,6 +1,6 @@
 // AdminMembershipPanel：平台配置 → 会员套餐 Tab。
 // 数据源：套餐 GET /admin/packages（全字段 to_jsonb）+ 编辑 PUT /admin/packages（upsert，与计费财务页共用同一写接口）；
-//        积分包 GET /admin/point-packages（后端仅提供查询，编辑接口规划中，只读展示）。
+//        积分包 GET /admin/point-packages + 编辑 PUT /admin/point-packages（upsert）。
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@duanju/api-client";
 import { Plus, RefreshCw, Coins, Crown } from "lucide-react";
@@ -68,8 +68,14 @@ export default function AdminMembershipPanel() {
   // 套餐编辑弹窗（PUT /admin/packages upsert：package_code 已存在则更新）
   const [editOpen, setEditOpen] = useState(false);
   const [editPkg, setEditPkg] = useState<PackageRow | null>(null);
- const [form, setForm] = useState({ code: "", name: "", price: "0.00", points: "0", status: "ON" });
+  const [form, setForm] = useState({ code: "", name: "", price: "0.00", points: "0", status: "ON" });
   const [saving, setSaving] = useState(false);
+
+  // 积分包编辑弹窗（PUT /admin/point-packages upsert：pkg_code 已存在则更新）
+  const [ppEditOpen, setPpEditOpen] = useState(false);
+  const [ppEdit, setPpEdit] = useState<PointPackageRow | null>(null);
+  const [ppForm, setPpForm] = useState({ code: "", name: "", points: "0", bonus: "0", price: "0.00", status: "ON" });
+  const [savingPp, setSavingPp] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,6 +134,50 @@ export default function AdminMembershipPanel() {
       toast(errMessage(e), "error");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ---------- 积分包编辑 ----------
+
+  const openPpEdit = (pkg: PointPackageRow | null) => {
+    setPpEdit(pkg);
+    setPpForm({
+      code: pkg?.pkg_code ?? "",
+      name: pkg?.name ?? "",
+      points: String(pkg?.points ?? 0),
+      bonus: String(pkg?.bonus_points ?? 0),
+      price: pkg?.price_yuan ?? "0.00",
+      status: pkg?.status ?? "ON",
+    });
+    setPpEditOpen(true);
+  };
+
+  const savePp = async () => {
+    if (!ppEdit && !ppForm.code.trim()) {
+      toast("新增积分包需填写唯一编码", "error");
+      return;
+    }
+    if (!ppForm.name.trim()) {
+      toast("积分包名称不能为空", "error");
+      return;
+    }
+    setSavingPp(true);
+    try {
+      await api.put("/admin/point-packages", {
+        package_code: ppEdit?.pkg_code ?? ppForm.code.trim(),
+        name: ppForm.name.trim(),
+        points: Number(ppForm.points) || 0,
+        bonus_points: Number(ppForm.bonus) || 0,
+        price_yuan: ppForm.price || "0.00",
+        status: ppForm.status,
+      });
+      toast("积分包已保存", "success");
+      setPpEditOpen(false);
+      void load();
+    } catch (e) {
+      toast(errMessage(e), "error");
+    } finally {
+      setSavingPp(false);
     }
   };
 
@@ -199,12 +249,20 @@ export default function AdminMembershipPanel() {
         </table>
       </div>
 
-      {/* 积分包（只读） */}
+      {/* 积分包（可编辑） */}
       <div className="bg-bg-card border border-[#2A2A3E] rounded-xl overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-[#2A2A3E]">
-          <Coins className="w-4 h-4 text-amber-gold" />
-          <h4 className="text-sm font-medium text-white">积分包</h4>
-          <span className="text-xs text-text-muted">后端当前仅提供查询接口，编辑规划中</span>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[#2A2A3E]">
+          <div className="flex items-center gap-2">
+            <Coins className="w-4 h-4 text-amber-gold" />
+            <h4 className="text-sm font-medium text-white">积分包</h4>
+            <span className="text-xs text-text-muted">用户端充值页档位实时读取（PUT /admin/point-packages upsert）</span>
+          </div>
+          <button
+            onClick={() => openPpEdit(null)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-gold to-amber-dim rounded-md text-xs text-[#0B0B1A] font-semibold hover:shadow-lg hover:shadow-amber-gold/20 transition-all"
+          >
+            <Plus className="w-3.5 h-3.5" /> 新增积分包
+          </button>
         </div>
         <table className="w-full">
           <thead className="bg-[#12122A]/60 border-b border-[#2A2A3E]">
@@ -217,6 +275,7 @@ export default function AdminMembershipPanel() {
               <th className={TH}>有效期(天)</th>
               <th className={TH}>限时</th>
               <th className={TH}>状态</th>
+              <th className={TH}>操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#2A2A3E]/60">
@@ -230,11 +289,16 @@ export default function AdminMembershipPanel() {
                 <td className={TD}>{p.effective_days ?? 365}</td>
                 <td className={TD}>{p.is_limited_offer ? "✓" : "—"}</td>
                 <td className={TD}><StatusTag status={p.status} /></td>
+                <td className={TD}>
+                  <button onClick={() => openPpEdit(p)} className="text-amber-gold hover:text-amber-300 text-sm transition-colors">
+                    编辑
+                  </button>
+                </td>
               </tr>
             ))}
             {pointPkgs.length === 0 && !loading && (
               <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-text-muted text-sm">暂无积分包数据</td>
+                <td colSpan={9} className="px-3 py-8 text-center text-text-muted text-sm">暂无积分包数据</td>
               </tr>
             )}
           </tbody>
@@ -296,6 +360,70 @@ export default function AdminMembershipPanel() {
               <option value="OFF">停用（OFF）</option>
               <option value="ACTIVE">启用（ACTIVE）</option>
             </select>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 积分包编辑/新增弹窗 */}
+      <Modal
+        title={ppEdit ? "编辑积分包" : "新增积分包"}
+        subtitle={ppEdit ? `编码 ${ppEdit.pkg_code}（保存按编码更新）` : "保存后创建新档位；编码需唯一"}
+        open={ppEditOpen}
+        onClose={() => setPpEditOpen(false)}
+        footer={
+          <>
+            <button onClick={() => setPpEditOpen(false)} className="px-4 py-2 rounded-lg text-sm text-text-secondary bg-bg-card border border-[#2A2A3E] hover:border-[#3A3A4E] transition-colors">
+              取消
+            </button>
+            <button
+              onClick={() => void savePp()}
+              disabled={savingPp}
+              className="px-4 py-2 rounded-lg text-sm font-semibold bg-gradient-to-r from-amber-gold to-amber-dim text-[#0B0B1A] hover:shadow-lg hover:shadow-amber-gold/20 transition-all disabled:opacity-50"
+            >
+              {savingPp ? "保存中…" : "保存积分包"}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          {!ppEdit && (
+            <div>
+              <label className="block text-sm text-text-secondary mb-1.5">积分包编码（创建后不可改）</label>
+              <input
+                type="text"
+                className="input-field"
+                placeholder="如 POINTS_PKG_MEDIUM"
+                value={ppForm.code}
+                onChange={(e) => setPpForm((f) => ({ ...f, code: e.target.value.trim() }))}
+              />
+            </div>
+          )}
+          <div>
+            <label className="block text-sm text-text-secondary mb-1.5">名称</label>
+            <input type="text" className="input-field" value={ppForm.name} onChange={(e) => setPpForm((f) => ({ ...f, name: e.target.value }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-text-secondary mb-1.5">积分</label>
+              <input type="number" className="input-field" value={ppForm.points} onChange={(e) => setPpForm((f) => ({ ...f, points: e.target.value }))} />
+            </div>
+            <div>
+              <label className="block text-sm text-text-secondary mb-1.5">加赠积分</label>
+              <input type="number" className="input-field" value={ppForm.bonus} onChange={(e) => setPpForm((f) => ({ ...f, bonus: e.target.value }))} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-text-secondary mb-1.5">价格(¥)</label>
+              <input type="number" step="0.01" className="input-field" value={ppForm.price} onChange={(e) => setPpForm((f) => ({ ...f, price: e.target.value }))} />
+            </div>
+            <div>
+              <label className="block text-sm text-text-secondary mb-1.5">状态</label>
+              <select className="input-field" value={ppForm.status} onChange={(e) => setPpForm((f) => ({ ...f, status: e.target.value }))}>
+                <option value="ON">启用（ON）</option>
+                <option value="OFF">停用（OFF）</option>
+              </select>
+            </div>
           </div>
         </div>
       </Modal>

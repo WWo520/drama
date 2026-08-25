@@ -240,6 +240,10 @@
 
       /* Brand title（逐字扫描：每个字母 span 自带渐变裁切，见 .brand-letter；
          父级不再带 filter，避免 background-clip:text 与滤镜合成层互相干扰导致文字消失——实测坑） */
+      #brand-header {
+        position: relative;
+        z-index: 5; /* 高于灯光层(z-index:3)，避免被暖白光 screen 混合洗白 */
+      }
       .brand-title {
         font-size: 56px;
         font-weight: 800;
@@ -324,7 +328,8 @@
         background: rgba(255,255,255,0.07);
         border: 1px solid transparent;
         border-radius: 38px;
-        padding: 7px 14px;
+        height: 36px;
+        padding: 0 14px;
         font-size: 13px;
         color: rgba(255,255,255,0.85);
         cursor: pointer;
@@ -333,6 +338,7 @@
         flex-shrink: 0;
         position: relative;
         overflow: hidden;
+        box-sizing: border-box;
       }
       .toolbar-pill::before {
         content: '';
@@ -377,7 +383,8 @@
         color: white;
         border: 1px solid rgba(255,255,255,0.15);
         border-radius: 38px;
-        padding: 8px 20px;
+        height: 36px;
+        padding: 0 20px;
         font-size: 13px;
         font-weight: 600;
         cursor: pointer;
@@ -385,6 +392,7 @@
         white-space: nowrap;
         flex-shrink: 0;
         position: relative;
+        box-sizing: border-box;
         box-shadow: 0 2px 8px rgba(76,127,248,0.2), inset 0 1px 0 rgba(255,255,255,0.2);
       }
       .btn-enter::before {
@@ -680,8 +688,8 @@
       .creation-tab {
         position: relative;
         border-radius: 999px;
-        padding: 10px 24px;
-        font-size: 15px;
+        padding: 15px 36px;
+        font-size: 22px;
         font-weight: 600;
         cursor: pointer;
         border: 1px solid transparent;
@@ -718,7 +726,7 @@
         background: transparent;
         border: none;
         color: var(--luxreal-foreground);
-        font-size: 14px;
+        font-size: 20px;
         line-height: 1.6;
         resize: none;
         outline: none;
@@ -782,7 +790,7 @@
         background: transparent;
         border: none;
         color: var(--luxreal-muted-foreground);
-        font-size: 13px;
+        font-size: 20px;
         padding: 12px 16px 10px;
         cursor: pointer;
         transition: all 0.2s ease;
@@ -829,13 +837,13 @@
         flex-shrink: 0;
       }
       .skill-title {
-        font-size: 14px;
+        font-size: 20px;
         font-weight: 600;
         color: var(--luxreal-foreground);
         margin-bottom: 2px;
       }
       .skill-subtitle {
-        font-size: 12px;
+        font-size: 18px;
         color: var(--luxreal-muted-foreground);
       }
       .skill-edit-btn {
@@ -1003,30 +1011,38 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        width: 56px;
-        height: 52px;
+        width: 64px;
+        height: 64px;
         border-radius: 8px;
         color: var(--luxreal-sidebar-foreground);
         cursor: pointer;
-        transition: all 0.2s ease;
-        gap: 3px;
+        transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+        gap: 4px;
         text-decoration: none;
-        font-size: 11px;
+        font-size: 13px;
         position: relative;
         border: 1px solid transparent;
       }
       .luxreal-nav-item:hover {
         color: var(--luxreal-foreground);
-        background: rgba(255,255,255,0.04);
-        border-color: var(--border-subtle);
+        background: rgba(255,255,255,0.06);
+        border-color: rgba(255,255,255,0.08);
       }
       .luxreal-nav-item.active {
-        color: var(--luxreal-primary);
-        background: rgba(76,127,248,0.1);
-        border-color: rgba(76,127,248,0.15);
+        color: #fff;
+        background: linear-gradient(135deg, #0F1013 0%, #3A66FF 100%);
+        border-color: transparent;
         border-radius: 8px 0 0 8px;
-        margin-right: -1px;
-        box-shadow: inset 2px 0 0 var(--luxreal-primary);
+        margin-right: -4px;
+        box-shadow: rgba(0, 73, 245, 0.08) -4px 5px 7px, 0 0 18px rgba(58, 102, 255, 0.3);
+        overflow: hidden;
+      }
+      .luxreal-nav-item.active::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.04) 45%, rgba(255, 255, 255, 0) 75%);
+        pointer-events: none;
       }
       .luxreal-nav-item.nav-recharge {
         color: #A78BFA;
@@ -1359,223 +1375,219 @@
       }
       .flashlight.is-left { left: 72px; } /* 光源：内容区左上角 */
       .flashlight.is-right { right: 0; }  /* 光源：视口右上角 */
-      /* 光源光球（手电筒灯头）- 增强版：多层径向渐变模拟灯头发光 */
+      /* 光源光球（手电筒灯头）- 自然光质感
+         暖白偏金，柔和不刺眼 */
       .flashlight-src {
         position: absolute;
         top: 0;
         left: 0;
-        width: 180px;
-        height: 180px;
+        width: 100px;
+        height: 100px;
         border-radius: 50%;
         transform: translate(-50%, -50%);
         background: radial-gradient(circle,
-          rgba(255,255,255,1) 0%,
-          rgba(255,255,255,0.95) 6%,
-          rgba(210,225,255,0.85) 14%,
-          rgba(160,190,255,0.6) 26%,
-          rgba(120,155,255,0.35) 42%,
-          rgba(100,140,255,0.18) 58%,
-          rgba(80,120,255,0.06) 74%,
-          transparent 88%);
-        filter: blur(2px);
+          rgba(255,248,235,0.7) 0%,
+          rgba(245,235,215,0.5) 12%,
+          rgba(230,215,190,0.3) 28%,
+          rgba(215,195,165,0.15) 48%,
+          rgba(200,180,150,0.06) 68%,
+          rgba(185,165,135,0.02) 82%,
+          transparent 90%);
+        filter: blur(1px);
       }
-      /* 雾化层（丁达尔效应 / 空气散射）- 宽角度淡蓝雾，给光柱体积感
-         减慢沿程衰减：从灯头到 75% 处保持可见，末端才淡出 */
-      .flashlight-fog {
+      /* 雾化层（保留元素但隐藏，性能优化） */
+      .flashlight-fog { display: none; }
+
+      /* ===== 四束光 + 环境漫射系统 =====
+         自然光质感：暖白偏金色调，亮度克制，柔和不刺眼
+         每侧 4 层光 + 一层宽域环境漫射，模拟丁达尔效应的空气感
+         基础长度 100vh，JS 根据目标距离动态缩放 scaleY
+         照射区域宽（约覆盖页面 80%），边缘柔和，有中心亮两侧暗的立体感
+         梯形光束（上窄下宽），模拟真实光线的扩散效应 */
+
+      /* 环境漫射层：超宽超柔和的底光
+         模拟空气中光线散射的丁达尔效应，给整个区域铺一层暖光
+         梯形：顶部窄、底部宽，更符合真实光线扩散 */
+      .flashlight-beam-ambient {
         position: absolute;
         top: 0;
-        left: 0;
-        width: 250vh;
-        height: 250vh;
-        transform-origin: 0 0;
-        filter: blur(36px);
-        background: conic-gradient(
-          from -90deg at 0 0,
-          transparent 18deg,
-          rgba(70,110,255,0.1) 42deg,
-          rgba(110,160,255,0.2) 68deg,
-          rgba(140,180,255,0.25) 90deg,
-          rgba(110,160,255,0.2) 112deg,
-          rgba(70,110,255,0.1) 138deg,
-          transparent 162deg
-        );
-        -webkit-mask-image: linear-gradient(to bottom,
-          rgba(0,0,0,0.5) 0%,
-          rgba(0,0,0,0.85) 4%,
-          rgba(0,0,0,1) 12%,
-          rgba(0,0,0,1) 55%,
-          rgba(0,0,0,0.8) 75%,
-          rgba(0,0,0,0.5) 88%,
+        left: calc(-100vh * 0.55);
+        width: calc(100vh * 1.1);
+        height: 100vh;
+        transform-origin: 50% 0;
+        filter: blur(40px);
+        background: linear-gradient(to bottom,
+          rgba(220,205,180,0.01) 0%,
+          rgba(230,218,198,0.03) 12%,
+          rgba(240,230,212,0.055) 30%,
+          rgba(243,235,220,0.06) 50%,
+          rgba(235,226,208,0.04) 70%,
+          rgba(225,212,190,0.02) 85%,
+          rgba(215,200,175,0.008) 95%,
           transparent 100%);
-        mask-image: linear-gradient(to bottom,
-          rgba(0,0,0,0.5) 0%,
-          rgba(0,0,0,0.85) 4%,
-          rgba(0,0,0,1) 12%,
-          rgba(0,0,0,1) 55%,
-          rgba(0,0,0,0.8) 75%,
-          rgba(0,0,0,0.5) 88%,
-          transparent 100%);
-        opacity: 0.85;
+        -webkit-clip-path: polygon(48% 0, 10% 100%, 90% 100%, 52% 0);
+        clip-path: polygon(48% 0, 10% 100%, 90% 100%, 52% 0);
+        opacity: 0.45;
       }
-      /* ===== 三层光束系统（模拟真实手电筒光柱：外层辉光 + 主光束 + 白热核心） =====
-         每层共享同一 transform 角度和长度（JS 设 --beam-a-l/r、--beam-l/r）
-         外层辉光：宽角度散射光（模拟空气中可见光柱），大模糊冷色
-         主光束：锥形聚光，中心高亮边缘衰减，清晰光柱轮廓
-         内层核心：极窄白热光束，真实手电筒灯丝感 */
-      
-      /* 外层辉光：可见光柱的散射光（模拟黑暗中的手电筒光柱） */
+
+      /* 外层辉光：宽锥形软边缘 —— 光柱体积感
+         梯形扩散，大模糊，暖白淡金色，大范围柔和照明 */
       .flashlight-beam-glow {
         position: absolute;
         top: 0;
-        left: 0;
-        width: 250vh;
-        height: 250vh;
-        transform-origin: 0 0;
-        filter: blur(20px);
-        background: conic-gradient(
-          from -90deg at 0 0,
-          transparent 40deg,
-          rgba(80,130,255,0.32) 58deg,
-          rgba(130,180,255,0.52) 76deg,
-          rgba(170,210,255,0.58) 90deg,
-          rgba(130,180,255,0.52) 104deg,
-          rgba(80,130,255,0.32) 122deg,
-          transparent 140deg
-        );
-        -webkit-mask-image: linear-gradient(to bottom,
-          rgba(0,0,0,0.3) 0%,
-          rgba(0,0,0,0.8) 3%,
-          rgba(0,0,0,1) 8%,
-          rgba(0,0,0,1) 50%,
-          rgba(0,0,0,0.92) 70%,
-          rgba(0,0,0,0.7) 85%,
-          rgba(0,0,0,0.4) 93%,
+        left: calc(-100vh * 0.35);
+        width: calc(100vh * 0.7);
+        height: 100vh;
+        transform-origin: 50% 0;
+        filter: blur(24px);
+        background: linear-gradient(to bottom,
+          rgba(210,195,170,0.02) 0%,
+          rgba(225,212,190,0.06) 10%,
+          rgba(238,228,208,0.11) 28%,
+          rgba(242,235,220,0.13) 48%,
+          rgba(235,226,208,0.1) 68%,
+          rgba(225,212,190,0.05) 84%,
+          rgba(215,200,175,0.015) 95%,
           transparent 100%);
-        mask-image: linear-gradient(to bottom,
-          rgba(0,0,0,0.3) 0%,
-          rgba(0,0,0,0.8) 3%,
-          rgba(0,0,0,1) 8%,
-          rgba(0,0,0,1) 50%,
-          rgba(0,0,0,0.92) 70%,
-          rgba(0,0,0,0.7) 85%,
-          rgba(0,0,0,0.4) 93%,
-          transparent 100%);
-        opacity: 0.92;
+        -webkit-clip-path: polygon(47% 0, 12% 100%, 88% 100%, 53% 0);
+        clip-path: polygon(47% 0, 12% 100%, 88% 100%, 53% 0);
+        opacity: 0.32;
       }
-      /* 主光束：锥形聚光 —— 光柱主体，最亮最显眼的部分
-         使用正方形元素 + conic-gradient，旋转时光束长度不变
-         250vh 正方形确保从任何角度都能覆盖整个视口 */
+
+      /* 主光束：锥形光柱主体
+         梯形扩散，中等模糊，暖白色，自然柔和
+         中心亮、两侧暗：通过内层核心光 + 外层主体光叠加实现 */
       .flashlight-beam {
         position: absolute;
         top: 0;
-        left: 0;
-        width: 250vh;
-        height: 250vh;
-        transform-origin: 0 0;
+        left: calc(-100vh * 0.18);
+        width: calc(100vh * 0.36);
+        height: 100vh;
+        transform-origin: 50% 0;
         filter: blur(6px);
-        background: conic-gradient(
-          from -90deg at 0 0,
-          transparent 52deg,
-          rgba(100,150,255,0.6) 66deg,
-          rgba(170,210,255,0.88) 78deg,
-          rgba(255,255,255,1) 90deg,
-          rgba(170,210,255,0.88) 102deg,
-          rgba(100,150,255,0.6) 114deg,
-          transparent 128deg
-        );
-        -webkit-mask-image: linear-gradient(to bottom,
-          rgba(0,0,0,0.2) 0%,
-          rgba(0,0,0,0.7) 2%,
-          rgba(0,0,0,1) 5%,
-          rgba(0,0,0,1) 35%,
-          rgba(0,0,0,0.95) 55%,
-          rgba(0,0,0,0.82) 70%,
-          rgba(0,0,0,0.55) 85%,
-          rgba(0,0,0,0.25) 93%,
+        background: linear-gradient(to bottom,
+          rgba(240,230,210,0.03) 0%,
+          rgba(245,240,225,0.11) 10%,
+          rgba(250,246,235,0.19) 28%,
+          rgba(252,250,242,0.22) 48%,
+          rgba(248,244,235,0.17) 68%,
+          rgba(240,232,220,0.09) 84%,
+          rgba(230,220,205,0.03) 95%,
           transparent 100%);
-        mask-image: linear-gradient(to bottom,
-          rgba(0,0,0,0.2) 0%,
-          rgba(0,0,0,0.7) 2%,
-          rgba(0,0,0,1) 5%,
-          rgba(0,0,0,1) 35%,
-          rgba(0,0,0,0.95) 55%,
-          rgba(0,0,0,0.82) 70%,
-          rgba(0,0,0,0.55) 85%,
-          rgba(0,0,0,0.25) 93%,
-          transparent 100%);
-        opacity: 1;
+        -webkit-clip-path: polygon(46% 0, 16% 100%, 84% 100%, 54% 0);
+        clip-path: polygon(46% 0, 16% 100%, 84% 100%, 54% 0);
+        opacity: 0.35;
       }
-      /* 内层核心：极窄白热光束 —— 手电筒直射核心，给光柱锋利感和炽热感 */
+
+      /* 内层核心光：窄而亮，制造"中心亮两侧暗"的立体感
+         真实光束中心最亮，向边缘逐渐衰减 */
       .flashlight-beam-core {
         position: absolute;
         top: 0;
-        left: 0;
-        width: 250vh;
-        height: 250vh;
-        transform-origin: 0 0;
-        filter: blur(2px);
-        background: conic-gradient(
-          from -90deg at 0 0,
-          transparent 81deg,
-          rgba(235,245,255,0.6) 86deg,
-          rgba(255,255,255,1) 90deg,
-          rgba(235,245,255,0.6) 94deg,
-          transparent 99deg
-        );
-        -webkit-mask-image: linear-gradient(to bottom,
-          rgba(0,0,0,0.2) 0%,
-          rgba(0,0,0,0.7) 2%,
-          rgba(0,0,0,1) 5%,
-          rgba(0,0,0,1) 45%,
-          rgba(0,0,0,0.92) 65%,
-          rgba(0,0,0,0.7) 80%,
-          rgba(0,0,0,0.35) 90%,
-          transparent 97%);
-        mask-image: linear-gradient(to bottom,
-          rgba(0,0,0,0.2) 0%,
-          rgba(0,0,0,0.7) 2%,
-          rgba(0,0,0,1) 5%,
-          rgba(0,0,0,1) 45%,
-          rgba(0,0,0,0.92) 65%,
-          rgba(0,0,0,0.7) 80%,
-          rgba(0,0,0,0.35) 90%,
-          transparent 97%);
-        opacity: 0.95;
+        left: calc(-100vh * 0.08);
+        width: calc(100vh * 0.16);
+        height: 100vh;
+        transform-origin: 50% 0;
+        filter: blur(3px);
+        background: linear-gradient(to bottom,
+          rgba(250,246,235,0.05) 0%,
+          rgba(252,250,242,0.16) 10%,
+          rgba(255,252,245,0.26) 28%,
+          rgba(255,253,247,0.3) 48%,
+          rgba(252,248,238,0.22) 68%,
+          rgba(245,238,225,0.1) 84%,
+          rgba(235,225,208,0.03) 95%,
+          transparent 100%);
+        -webkit-clip-path: polygon(46% 0, 20% 100%, 80% 100%, 54% 0);
+        clip-path: polygon(46% 0, 20% 100%, 80% 100%, 54% 0);
+        opacity: 0.28;
       }
+
+      /* 辅助光束：两侧各一束，增加层次感和体积感
+         角度偏移 ±5°，亮度为主光的 50%，稍窄稍短，更柔和 */
+      .flashlight-beam-sub {
+        position: absolute;
+        top: 0;
+        left: calc(-100vh * 0.13);
+        width: calc(100vh * 0.26);
+        height: 100vh;
+        transform-origin: 50% 0;
+        filter: blur(7px);
+        background: linear-gradient(to bottom,
+          rgba(235,225,205,0.02) 0%,
+          rgba(242,235,220,0.07) 12%,
+          rgba(248,244,232,0.13) 30%,
+          rgba(250,247,238,0.15) 50%,
+          rgba(245,240,228,0.1) 72%,
+          rgba(238,230,215,0.05) 86%,
+          rgba(230,220,205,0.015) 96%,
+          transparent 100%);
+        -webkit-clip-path: polygon(46% 0, 18% 100%, 82% 100%, 54% 0);
+        clip-path: polygon(46% 0, 18% 100%, 82% 100%, 54% 0);
+        opacity: 0.22;
+      }
+
+      /* 主光束旋转 + 缩放 */
       .flashlight.is-left .flashlight-beam { transform: rotate(var(--beam-a-l, 7deg)) scaleY(var(--beam-l, 1)); }
       .flashlight.is-right .flashlight-beam { transform: rotate(var(--beam-a-r, -7deg)) scaleY(var(--beam-r, 1)); }
       .flashlight.is-left .flashlight-beam-glow { transform: rotate(var(--beam-a-l, 7deg)) scaleY(var(--beam-l, 1)); }
       .flashlight.is-right .flashlight-beam-glow { transform: rotate(var(--beam-a-r, -7deg)) scaleY(var(--beam-r, 1)); }
+      .flashlight.is-left .flashlight-beam-ambient { transform: rotate(var(--beam-a-l, 7deg)) scaleY(calc(var(--beam-l, 1) * 0.95)); }
+      .flashlight.is-right .flashlight-beam-ambient { transform: rotate(var(--beam-a-r, -7deg)) scaleY(calc(var(--beam-r, 1) * 0.95)); }
       .flashlight.is-left .flashlight-beam-core { transform: rotate(var(--beam-a-l, 7deg)) scaleY(var(--beam-l, 1)); }
       .flashlight.is-right .flashlight-beam-core { transform: rotate(var(--beam-a-r, -7deg)) scaleY(var(--beam-r, 1)); }
-      .flashlight.is-left .flashlight-fog { transform: rotate(var(--beam-a-l, 7deg)) scaleY(var(--beam-l, 1)); }
-      .flashlight.is-right .flashlight-fog { transform: rotate(var(--beam-a-r, -7deg)) scaleY(var(--beam-r, 1)); }
 
-      /* 光斑：光束照射在目标表面形成的高亮区
-         多层径向渐变：中心最亮 → 柔和过渡 → 边缘淡出，与光束自然衔接 */
+      /* 辅助光束：角度偏移 ±5° + 独立微运动，模拟多镜片散射的有机感
+         内侧辅助光：摆动较小，长度变化较小
+         外侧辅助光：摆动稍大，长度变化稍大
+         左右两侧相位不同，完全独立运动 */
+      .flashlight.is-left .flashlight-beam-sub-inner {
+        transform: rotate(calc(var(--beam-a-l, 7deg) - 5deg + var(--sub-inner-a-l, 0deg))) scaleY(calc(var(--sub-inner-l-l, var(--beam-l, 1)) * 0.9));
+      }
+      .flashlight.is-left .flashlight-beam-sub-outer {
+        transform: rotate(calc(var(--beam-a-l, 7deg) + 5deg + var(--sub-outer-a-l, 0deg))) scaleY(calc(var(--sub-outer-l-l, var(--beam-l, 1)) * 0.85));
+      }
+      .flashlight.is-right .flashlight-beam-sub-inner {
+        transform: rotate(calc(var(--beam-a-r, -7deg) + 5deg + var(--sub-inner-a-r, 0deg))) scaleY(calc(var(--sub-inner-l-r, var(--beam-r, 1)) * 0.9));
+      }
+      .flashlight.is-right .flashlight-beam-sub-outer {
+        transform: rotate(calc(var(--beam-a-r, -7deg) - 5deg + var(--sub-outer-a-r, 0deg))) scaleY(calc(var(--sub-outer-l-r, var(--beam-r, 1)) * 0.85));
+      }
+
+      /* 聚焦光斑：光束末端打在物体表面的亮光斑
+         模拟聚光灯照在物体上的明亮圆形区域
+         JS 控制 left/top 定位到焦点位置 */
       .flashlight-spot {
+        position: absolute;
+        width: 320px;
+        height: 320px;
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        background: radial-gradient(circle,
+          rgba(255,250,235,0.28) 0%,
+          rgba(250,242,220,0.18) 20%,
+          rgba(240,230,205,0.1) 42%,
+          rgba(225,212,185,0.04) 65%,
+          rgba(210,195,170,0.015) 82%,
+          transparent 95%);
+        filter: blur(10px);
+        pointer-events: none;
+        opacity: 0.65;
+        transition: opacity 0.4s ease;
+      }
+
+      /* 尘埃粒子：光束中漂浮的微尘，增强真实感
+         小圆点，暖白色，轻微发光，沿光束方向飘动 */
+      .dust-particle {
         position: absolute;
         top: 0;
         left: 0;
-        width: 280px;
-        height: 280px;
         border-radius: 50%;
-        filter: blur(8px);
-        background: radial-gradient(circle,
-          rgba(255,255,255,1) 0%,
-          rgba(230,242,255,0.9) 10%,
-          rgba(195,220,255,0.78) 22%,
-          rgba(150,185,255,0.58) 38%,
-          rgba(115,155,255,0.38) 55%,
-          rgba(95,135,255,0.2) 70%,
-          rgba(85,125,255,0.08) 85%,
-          transparent 100%);
-        opacity: 0;
+        background: rgba(255,248,230,0.85);
+        box-shadow: 0 0 4px rgba(255,245,220,0.6);
+        pointer-events: none;
         will-change: transform, opacity;
       }
-      .flashlight-spot.spot-brand { width: 200px; height: 200px; }
-      .flashlight-spot.spot-projects { width: 300px; height: 300px; }
-      .flashlight-spot.spot-carousel { width: 320px; height: 320px; }
 
       /* ===== CAROUSEL STYLES ===== */
       .carousel-wrapper {
@@ -1603,6 +1615,26 @@
         transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
         box-shadow: 0 4px 20px rgba(0,0,0,0.3);
         background: rgba(255,255,255,0.02);
+      }
+      /* 光束照亮效果：被光束照到的卡片发光 + 提亮 */
+      .carousel-card.is-lit {
+        border-color: rgba(250,235,200,0.5);
+        box-shadow:
+          0 0 30px rgba(250,220,160,0.25),
+          0 8px 32px rgba(0,0,0,0.35),
+          inset 0 0 20px rgba(255,245,220,0.08);
+      }
+      .carousel-card.is-lit .carousel-cover::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse at 50% 40%,
+          rgba(255,250,230,0.25) 0%,
+          rgba(250,240,215,0.12) 35%,
+          rgba(240,225,195,0.04) 65%,
+          transparent 100%);
+        pointer-events: none;
+        z-index: 2;
       }
       .carousel-card::before {
         content: '';

@@ -76,6 +76,151 @@ func (s *BillingStore) MarkTaskSettled(ctx context.Context, taskID int64) (bool,
 	return tag.RowsAffected() == 1, nil
 }
 
+// FreezeAtomic 单事务冻结（08 审查 Major#10）：任务幂等检查 + 账户 FOR UPDATE + 余额守卫 + 快照固化 + 冻结流水，全部同事务。
+func (s *BillingStore) FreezeAtomic(ctx context.Context, ownerType string, ownerID, taskID int64, amount int, meta *billing.TxnMeta) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	// ① 任务幂等：已冻结直接跳过（FOR UPDATE 锁任务行，防并发双冻结 TOCTOU）
+	var frozen int
+	if err := tx.QueryRow(ctx, `SELECT frozen_points FROM generation_tasks WHERE id=$1 FOR UPDATE`, taskID).Scan(&frozen); err != nil {
+		return false, fmt.Errorf("任务不存在 %d", taskID)
+	}
+	if frozen > 0 {
+		return true, tx.Commit(ctx)
+	}
+	// ② 锁账户 + 余额守卫
+	var acc billing.Account
+	if err := tx.QueryRow(ctx, `
+		SELECT id, owner_type::text, owner_id, current_balance, frozen_balance
+		FROM point_accounts WHERE owner_type=$1 AND owner_id=$2 FOR UPDATE`,
+		ownerType, ownerID).Scan(&acc.ID, &acc.OwnerType, &acc.OwnerID, &acc.CurrentBalance, &acc.FrozenBalance); err != nil {
+		return false, fmt.Errorf("积分账户不存在 owner=%s/%d", ownerType, ownerID)
+	}
+	if acc.CurrentBalance < amount {
+		return false, fmt.Errorf("%w: 需 %d 积分，当前 %d", billing.ErrInsufficient, amount, acc.CurrentBalance)
+	}
+	// ③ 冻结
+	if _, err := tx.Exec(ctx, `
+		UPDATE point_accounts SET current_balance=current_balance-$2, frozen_balance=frozen_balance+$2,
+		       last_txn_at=NOW() WHERE id=$1 AND current_balance>=$2`, acc.ID, amount); err != nil {
+		return false, err
+	}
+	acc.CurrentBalance -= amount
+	acc.FrozenBalance += amount
+	// ④ 固化任务计费快照
+	if _, err := tx.Exec(ctx, `
+		UPDATE generation_tasks SET charged_account_id=$2, charged_owner_type=$3, charged_owner_id=$4,
+		       frozen_points=$5, thawed_points=0, is_success_refunded=FALSE
+		WHERE id=$1`, taskID, acc.ID, ownerType, ownerID, amount); err != nil {
+		return false, err
+	}
+	// ⑤ 冻结流水
+	if err := s.writeTxn(ctx, tx, &acc, "BATCH_GEN_FREEZE", "FROZEN", amount, taskID, meta,
+		fmt.Sprintf("freeze-%d", taskID)); err != nil {
+		return false, err
+	}
+	return false, tx.Commit(ctx)
+}
+
+// SettleAtomic 单事务结算（08 审查 Major#11）：MarkTaskSettled CAS 与扣费/解冻同事务；actualCost<冻结额时解冻差额。
+func (s *BillingStore) SettleAtomic(ctx context.Context, taskID int64, deliverable bool, actualCost int, meta *billing.TxnMeta) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	// ① CAS 标记已结算（同事务，失败即整体回滚，资金不动）
+	tag, err := tx.Exec(ctx, `
+		UPDATE generation_tasks SET is_success_refunded=TRUE, thawed_points=frozen_points
+		WHERE id=$1 AND is_success_refunded=FALSE`, taskID)
+	if err != nil {
+		return false, err
+	}
+	if tag.RowsAffected() == 0 {
+		_ = tx.Rollback(ctx)
+		return true, nil // 已结算，幂等
+	}
+	// ② 读冻结快照
+	var accountID, ownerID, frozenPoints int64
+	var ownerType string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(charged_account_id,0), COALESCE(charged_owner_type::text,'USER'),
+		       COALESCE(charged_owner_id,0), frozen_points
+		FROM generation_tasks WHERE id=$1`, taskID).Scan(&accountID, &ownerType, &ownerID, &frozenPoints); err != nil {
+		return false, err
+	}
+	// 不计费任务（无冻结）：仅标记结算
+	if accountID == 0 || frozenPoints == 0 {
+		return false, tx.Commit(ctx)
+	}
+	// ③ 锁账户
+	var acc billing.Account
+	if err := tx.QueryRow(ctx, `
+		SELECT id, owner_type::text, owner_id, current_balance, frozen_balance
+		FROM point_accounts WHERE id=$1 FOR UPDATE`, accountID).
+		Scan(&acc.ID, &acc.OwnerType, &acc.OwnerID, &acc.CurrentBalance, &acc.FrozenBalance); err != nil {
+		return false, fmt.Errorf("积分账户不存在 id=%d", accountID)
+	}
+	if deliverable {
+		cost := int(frozenPoints)
+		if actualCost > 0 && actualCost < cost {
+			cost = actualCost
+		}
+		// ④a 冻结转实扣
+		if _, err := tx.Exec(ctx, `
+			UPDATE point_accounts SET frozen_balance=frozen_balance-$2, lifetime_spent_total=lifetime_spent_total+$2,
+			       total_generation_count=total_generation_count+1, last_txn_at=NOW()
+			WHERE id=$1 AND frozen_balance>=$2`, acc.ID, cost); err != nil {
+			return false, err
+		}
+		acc.FrozenBalance -= cost
+		// 差额解冻（actualCost<冻结额）
+		if remainder := int(frozenPoints) - cost; remainder > 0 {
+			if _, err := tx.Exec(ctx, `
+				UPDATE point_accounts SET frozen_balance=frozen_balance-$2, current_balance=current_balance+$2,
+				       last_txn_at=NOW() WHERE id=$1 AND frozen_balance>=$2`, acc.ID, remainder); err != nil {
+				return false, err
+			}
+			acc.FrozenBalance -= remainder
+			acc.CurrentBalance += remainder
+			if err := s.writeTxn(ctx, tx, &acc, "UNFREEZE_PARTIAL_FAIL", "UNFREEZE", remainder, taskID, meta,
+				fmt.Sprintf("unfreeze-remainder-%d", taskID)); err != nil {
+				return false, err
+			}
+		}
+		if err := s.writeTxn(ctx, tx, &acc, "UNFREEZE_SUCCESS_DEDUCT", "DEBIT", cost, taskID, meta,
+			fmt.Sprintf("deduct-%d", taskID)); err != nil {
+			return false, err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO billing_records (billing_account_id, billed_owner_type, billed_owner_id, operator_user_id,
+				user_id, space_id, task_id, cost_points, point_txn_id)
+			SELECT $1, $2, $3, $4, $4, $5, $6, $7, id FROM point_transactions WHERE idempotency_key=$8
+			ON CONFLICT (task_id) DO NOTHING`,
+			acc.ID, acc.OwnerType, acc.OwnerID, meta.OperatorUserID, meta.SpaceID, taskID, cost,
+			fmt.Sprintf("deduct-%d", taskID)); err != nil {
+			return false, err
+		}
+	} else {
+		// ④b 失败/取消：全额解冻（永不倒扣）
+		if _, err := tx.Exec(ctx, `
+			UPDATE point_accounts SET frozen_balance=frozen_balance-$2, current_balance=current_balance+$2,
+			       last_txn_at=NOW() WHERE id=$1 AND frozen_balance>=$2`, acc.ID, frozenPoints); err != nil {
+			return false, err
+		}
+		acc.FrozenBalance -= int(frozenPoints)
+		acc.CurrentBalance += int(frozenPoints)
+		if err := s.writeTxn(ctx, tx, &acc, "UNFREEZE_PARTIAL_FAIL", "UNFREEZE", int(frozenPoints), taskID, meta,
+			fmt.Sprintf("unfreeze-%d", taskID)); err != nil {
+			return false, err
+		}
+	}
+	return false, tx.Commit(ctx)
+}
+
 // writeTxn 通用流水写入（balance_after 快照 + idempotency_key UNIQUE 防重）。
 func (s *BillingStore) writeTxn(ctx context.Context, tx pgx.Tx, a *billing.Account, txnType, direction string, amount int, taskID int64, meta *billing.TxnMeta, idemKey string) error {
 	_, err := tx.Exec(ctx, `

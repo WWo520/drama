@@ -20,14 +20,17 @@ const STATUS_TO_STEP: Record<string, number> = {
   CANCELLED: 1,
 };
 
-// 可点击规则（Step n 需要后端达到的状态）
-const STEP_UNLOCK: Record<number, string[]> = {
-  1: ["*"], // Step1 永远可回
-  2: ["PARTIAL_ASSETS", "ALL_ASSETS_READY", "VIDEO_GENERATING", "PARTIAL_VIDEOS",
-      "ALL_VIDEOS_READY", "EXPORTING", "COMPLETED", "ARCHIVED"],
-  3: ["ALL_ASSETS_READY", "VIDEO_GENERATING", "PARTIAL_VIDEOS",
-      "ALL_VIDEOS_READY", "EXPORTING", "COMPLETED", "ARCHIVED"],
-  4: ["ALL_VIDEOS_READY", "EXPORTING", "COMPLETED", "ARCHIVED"],
+// 可点击规则（17 - 工作台对齐，对齐 LuxReal）：四步全阶段平行可达，
+// 未就绪由各页面内优雅降级处理（空态引导 / 占位 + CTA），不再做步骤级硬门控。
+
+// 各步骤的完成状态集合（17 - 工作台对齐 P2：步骤条"已完成 ✓ / 进行中 / 未开始"三态）
+const STEP_DONE: Record<number, string[]> = {
+  1: ["PARTIAL_ASSETS", "ALL_ASSETS_READY", "VIDEO_GENERATING", "PARTIAL_VIDEOS",
+      "ALL_VIDEOS_READY", "EXPORTING", "COMPLETED", "ARCHIVED"], // 拆分成功即完成
+  2: ["ALL_ASSETS_READY", "VIDEO_GENERATING", "PARTIAL_VIDEOS",
+      "ALL_VIDEOS_READY", "EXPORTING", "COMPLETED", "ARCHIVED"], // 资产全部就绪
+  3: ["ALL_VIDEOS_READY", "EXPORTING", "COMPLETED", "ARCHIVED"], // 视频全部完成
+  4: ["COMPLETED", "ARCHIVED"], // 成片完成
 };
 
 export interface StepState {
@@ -37,7 +40,9 @@ export interface StepState {
   currentStep: number;
   /** 各 Step 是否可点击 */
   canClick: (step: number) => boolean;
-  /** 切换到某 Step（更新路由，不跳未解锁 Step） */
+  /** 各 Step 是否已完成（步骤条 ✓ 态） */
+  stepDone: (step: number) => boolean;
+  /** 切换到某 Step（更新路由；项目未加载完成时不跳转） */
   goStep: (step: number) => void;
 }
 
@@ -51,11 +56,14 @@ export function useStepState(projectId: string, status: ProjectStatusValue | nul
   // 路由参数优先（A.5：用户手动点 StepBar 优先），兜底后端映射
   const currentStep = Number.isInteger(routeStep) && routeStep >= 1 && routeStep <= 4 ? routeStep : backendStep;
 
+  // 四步平行可达：Step1 永远可点；其余 Step 只需项目状态加载完成（防加载期闪烁）
   const canClick = (s: number) => {
     if (s === 1) return true;
-    if (!status) return false;
-    return (STEP_UNLOCK[s] ?? []).includes(status);
+    return status !== null;
   };
+
+  // 步骤完成判定（步骤条 ✓ 态；未加载完成视为未完成）
+  const stepDone = (s: number) => !!status && (STEP_DONE[s] ?? []).includes(status);
 
   const goStep = (s: number) => {
     if (!canClick(s)) return;
@@ -69,5 +77,5 @@ export function useStepState(projectId: string, status: ProjectStatusValue | nul
     }
   }, [backendStep, status, projectId, step, nav]);
 
-  return { backendStep, currentStep, canClick, goStep };
+  return { backendStep, currentStep, canClick, stepDone, goStep };
 }

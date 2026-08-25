@@ -6,9 +6,29 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"unicode"
 )
+
+// FlexInt 容忍 LLM 输出小数时长（如 duration_sec: 2.5）：四舍五入取整。
+// GLM 等模型对短镜头常给半秒值，严格 int 反序列化会整轮作废（重试耗尽仍失败）。
+type FlexInt int
+
+func (f *FlexInt) UnmarshalJSON(b []byte) error {
+	s := strings.TrimSpace(string(b))
+	if s == "null" || s == "" {
+		*f = 0
+		return nil
+	}
+	fl, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return fmt.Errorf("非数字时长 %q: %w", s, err)
+	}
+	*f = FlexInt(int(math.Round(fl)))
+	return nil
+}
 
 // SplitResult LLM 拆分输出的四层结构 + 集级资产（03 A.2：集 → 叙事单元 → 镜头块 → 单镜头 + 角色/场景/道具抽取）。
 // 枚举值对齐 02 A3（景别/运镜/视角）——校验器强制。
@@ -22,11 +42,11 @@ type SplitResult struct {
 
 // CharacterSplit 角色抽取（Step1 产出，供 Step2 角色卡片；集级粒度）。
 type CharacterSplit struct {
-	Code            string `json:"code"`
-	Name            string `json:"name"`
-	Tags            string `json:"tags,omitempty"`
+	Code             string `json:"code"`
+	Name             string `json:"name"`
+	Tags             string `json:"tags,omitempty"`
 	DescriptionNotes string `json:"description_notes,omitempty"`
-	OriginEpisodeID int    `json:"origin_episode_id"` // 1-based 集序号
+	OriginEpisodeID  int    `json:"origin_episode_id"` // 1-based 集序号
 }
 
 // SceneSplit 场景抽取（Step1 产出，供 Step2 场景卡片；集级粒度）。
@@ -47,40 +67,115 @@ type PropSplit struct {
 }
 
 type EpisodeSplit struct {
-	Title           string          `json:"title"`
-	NarrativeUnits  []NarrativeUnit `json:"narrative_units"`
+	Title          string          `json:"title"`
+	NarrativeUnits []NarrativeUnit `json:"narrative_units"`
 }
 
 type NarrativeUnit struct {
-	Title             string        `json:"title"`
-	DurationSec       int           `json:"duration_sec"`
-	ScriptOriginalText string       `json:"script_original_text"`
-	ShotGroups        []ShotGroup   `json:"shot_groups"`
+	Title              string      `json:"title"`
+	DurationSec        FlexInt     `json:"duration_sec"`
+	ScriptOriginalText string      `json:"script_original_text"`
+	ShotGroups         []ShotGroup `json:"shot_groups"`
 }
 
 type ShotGroup struct {
-	Title      string `json:"title"`
-	DurationSec int   `json:"duration_sec"`
-	Shots      []Shot `json:"shots"`
+	Title       string  `json:"title"`
+	DurationSec FlexInt `json:"duration_sec"`
+	Shots       []Shot  `json:"shots"`
 }
 
 type Shot struct {
-	DurationSec          int    `json:"duration_sec"`
-	ShotSize             string `json:"shot_size"`
-	CameraMovement       string `json:"camera_movement"`
-	CameraAngle          string `json:"camera_angle"`
-	SubjectDescription   string `json:"subject_description"`
-	BackgroundDescription string `json:"background_description"`
-	LocalLightDescription string `json:"local_light_description"`
-	DialogueText         string `json:"dialogue_text"`
-	AmbientSound         string `json:"ambient_sound"`
-	PromptRefined        string `json:"prompt_refined,omitempty"`
+	DurationSec           FlexInt `json:"duration_sec"`
+	ShotSize              string  `json:"shot_size"`
+	CameraMovement        string  `json:"camera_movement"`
+	CameraAngle           string  `json:"camera_angle"`
+	SubjectDescription    string  `json:"subject_description"`
+	BackgroundDescription string  `json:"background_description"`
+	LocalLightDescription string  `json:"local_light_description"`
+	DialogueText          string  `json:"dialogue_text"`
+	AmbientSound          string  `json:"ambient_sound"`
+	PromptRefined         string  `json:"prompt_refined,omitempty"`
+	ReferenceImageURL     string  `json:"reference_image_url,omitempty"` // 镜头级参考图（对齐 LuxReal「镜头N的参考图」）
+}
+
+// 镜头枚举 → 中文（对齐 LuxReal：分镜提示词为中文；用于润色 seed 与 LLM 失败回退）。
+var shotSizeCnMap = map[string]string{
+	"ECU": "极特写", "CU": "特写", "MCU": "中近景", "MS": "中景", "FS": "全景",
+	"LS": "远景", "ELS": "大远景", "TWO_SHOT": "双人景", "OTS": "过肩景",
+}
+
+var cameraMoveCnMap = map[string]string{
+	"STATIC": "固定", "SLOW_PUSH_IN": "缓慢推近", "SLOW_PULL_OUT": "缓慢拉远",
+	"FAST_PUSH_IN": "快速推近", "DOLLY_IN": "推轨前移", "DOLLY_OUT": "拉轨后移",
+	"PAN_LEFT": "左摇", "PAN_RIGHT": "右摇", "TRACK_LEFT": "左移", "TRACK_RIGHT": "右移",
+	"TILT_UP": "上摇", "TILT_DOWN": "下摇", "CRANE_UP": "升臂", "CRANE_DOWN": "降臂",
+	"HANDHELD_SHAKY": "手持微晃", "WIPE_CLIP": "转场擦切", "ZOOM_IN_OPTICAL": "光学变焦推近",
+	"SLOW_360_ORBIT": "缓慢环绕",
+}
+
+var cameraAngleCnMap = map[string]string{
+	"EYE_LEVEL_FRONT": "平视", "SIDE": "侧面", "BACK": "背面",
+	"SLIGHT_LOW_ANGLE": "微仰拍", "LOW_ANGLE": "仰拍", "SLIGHT_HIGH": "微俯拍",
+	"HIGH_BIRDVIEW": "高机位俯拍", "OTS_LEFT": "过肩左", "OTS_RIGHT": "过肩右", "DUTCH_ANGLE": "斜角",
+}
+
+func shotSizeCn(v string) string {
+	if c, ok := shotSizeCnMap[v]; ok {
+		return c
+	}
+	return v
+}
+
+func cameraMoveCn(v string) string {
+	if c, ok := cameraMoveCnMap[v]; ok {
+		return c
+	}
+	return v
+}
+
+func cameraAngleCn(v string) string {
+	if c, ok := cameraAngleCnMap[v]; ok {
+		return c
+	}
+	return v
+}
+
+// luxShotPrompt 生成 LuxReal 风格单镜头提示词（结构化【】逐行；无值兜底「无」）。
+// 用于 LLM 润色失败时的确定性回退，保证 PromptRefined 始终为 LuxReal 格式。
+func luxShotPrompt(s *Shot) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "镜头 | %d秒\n", int(s.DurationSec))
+	fmt.Fprintf(&b, "【景别】%s\n", shotSizeCn(s.ShotSize))
+	fmt.Fprintf(&b, "【运镜】%s\n", cameraMoveCn(s.CameraMovement))
+	fmt.Fprintf(&b, "【视角】%s\n", cameraAngleCn(s.CameraAngle))
+	if strings.TrimSpace(s.SubjectDescription) != "" {
+		fmt.Fprintf(&b, "【主体描述】%s\n", s.SubjectDescription)
+	}
+	if strings.TrimSpace(s.BackgroundDescription) != "" {
+		fmt.Fprintf(&b, "【背景】%s\n", s.BackgroundDescription)
+	}
+	light := strings.TrimSpace(s.LocalLightDescription)
+	if light == "" {
+		light = "无"
+	}
+	fmt.Fprintf(&b, "【光影】%s\n", light)
+	if d := strings.TrimSpace(s.DialogueText); d != "" {
+		fmt.Fprintf(&b, "【台词】%s\n", d)
+	} else {
+		fmt.Fprintf(&b, "【台词】无\n")
+	}
+	if a := strings.TrimSpace(s.AmbientSound); a != "" {
+		fmt.Fprintf(&b, "【音效】<%s>\n", a)
+	} else {
+		fmt.Fprintf(&b, "【音效】无\n")
+	}
+	return b.String()
 }
 
 // 合法枚举集合（02 A3 唯一真源；validator 用）。
 var (
-	validShotSizes      = setOf("ECU", "CU", "MCU", "MS", "FS", "LS", "ELS", "TWO_SHOT", "OTS")
-	validCameraMoves    = setOf("STATIC", "SLOW_PUSH_IN", "SLOW_PULL_OUT", "FAST_PUSH_IN", "DOLLY_IN", "DOLLY_OUT",
+	validShotSizes   = setOf("ECU", "CU", "MCU", "MS", "FS", "LS", "ELS", "TWO_SHOT", "OTS")
+	validCameraMoves = setOf("STATIC", "SLOW_PUSH_IN", "SLOW_PULL_OUT", "FAST_PUSH_IN", "DOLLY_IN", "DOLLY_OUT",
 		"PAN_LEFT", "PAN_RIGHT", "TRACK_LEFT", "TRACK_RIGHT", "TILT_UP", "TILT_DOWN", "CRANE_UP", "CRANE_DOWN",
 		"HANDHELD_SHAKY", "WIPE_CLIP", "ZOOM_IN_OPTICAL", "SLOW_360_ORBIT")
 	validCameraAngles = setOf("EYE_LEVEL_FRONT", "SIDE", "BACK", "SLIGHT_LOW_ANGLE", "LOW_ANGLE", "SLIGHT_HIGH",
@@ -418,10 +513,10 @@ func SplitOversizedUnits(r *SplitResult) *SplitResult {
 			// 镜头块按时长比例归属子单元；单块超过首个子单元预算时归入最大预算子单元
 			totalDur := 0
 			for _, g := range u.ShotGroups {
-				totalDur += g.DurationSec
+				totalDur += int(g.DurationSec)
 			}
 			if totalDur <= 0 {
-				totalDur = u.DurationSec
+				totalDur = int(u.DurationSec)
 			}
 			budgets := make([]int, len(chunks))
 			assigned := make([][]ShotGroup, len(chunks))
@@ -468,7 +563,7 @@ func SplitOversizedUnits(r *SplitResult) *SplitResult {
 				}
 				d := 0
 				for _, g := range assigned[i] {
-					d += g.DurationSec
+					d += int(g.DurationSec)
 				}
 				if d <= 0 {
 					d = budgets[i]
@@ -476,7 +571,7 @@ func SplitOversizedUnits(r *SplitResult) *SplitResult {
 				if d > 30 {
 					d = 30
 				}
-				sub.DurationSec = d
+				sub.DurationSec = FlexInt(d)
 				out = append(out, sub)
 			}
 		}
@@ -488,7 +583,7 @@ func SplitOversizedUnits(r *SplitResult) *SplitResult {
 func groupDur(gs []ShotGroup) int {
 	d := 0
 	for _, g := range gs {
-		d += g.DurationSec
+		d += int(g.DurationSec)
 	}
 	return d
 }

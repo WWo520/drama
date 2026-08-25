@@ -1,15 +1,17 @@
 // S1-F03 Step1 剧本拆分页 —— 按 luxreal-clone 设计稿 workbench-script.html 融合（批次 2 工作台基准页）
 // 布局：WorkbenchShell（AppShell + 剧集侧栏 + WorkflowPill 顶栏），内容区 65% 宽
-// 接口：GET /projects/:id、POST /projects/:id/split-script、GET /projects/:id/episodes、GET /episodes/:id/beats
+// 接口：GET /projects/:id、POST /projects/:id/split-script（force 重拆 + episode_duration_min + split_skill_code）、
+// GET /projects/:id/episodes、GET /episodes/:id/beats、GET /skills?kind=SCRIPT_SPLIT（拆分技能库）
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  ArrowRight, ChevronDown, ChevronUp, GripVertical, Loader2, Pencil, Plus, ScrollText, Settings, Trash2, Wand2,
+  AlertTriangle, ArrowRight, ChevronDown, ChevronUp, GripVertical, Loader2, Pencil, Plus, RefreshCw, ScrollText, Settings, Trash2, Wand2,
 } from "lucide-react";
 
 import {
   ApiError,
+  api,
   errorMessage,
   projectsApi,
   splitApi,
@@ -17,12 +19,14 @@ import {
   type BeatSummary,
   type EpisodeLite,
   type ProjectDetail,
+  type SplitSkill,
 } from "@duanju/api-client";
 
 import WorkbenchShell from "../layouts/WorkbenchShell";
 import AgentSkillModal from "../components/AgentSkillModal";
 import ProjectLoadError from "../components/ProjectLoadError";
 import { useStepState } from "../hooks/useStepState";
+import { matchTaskTypes, useWsDrivenPoll } from "../hooks/useWsDrivenPoll";
 import "../layouts/shell.css";
 
 // 单元状态 → 徽标（后端无专用枚举，按通用规则映射）
@@ -34,6 +38,28 @@ function beatStatusBadge(status: string): { label: string; cls: string; running?
 }
 
 const DURATION_OPTIONS = ["自动", "5秒", "10秒", "15秒", "20秒", "自定义"];
+
+// 台词说话人着色（按首次出现顺序分配，对齐 luxreal 设计稿剧本原文区台词配色）
+const SPEAKER_COLORS = ["#4C7FF8", "#8B5CF6", "#10B981", "#F59E0B", "#EC4899", "#22D3EE"];
+
+// renderScriptText 剧本原文分行渲染：台词行（“角色：内容”）speaker 着色，其余按段落展示。
+function renderScriptText(text: string) {
+  const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const colorMap = new Map<string, string>();
+  return lines.map((line, i) => {
+    const m = line.match(/^([^\s:：,，!！?？]{1,10})[:：]\s*(.+)$/);
+    if (m) {
+      if (!colorMap.has(m[1])) colorMap.set(m[1], SPEAKER_COLORS[colorMap.size % SPEAKER_COLORS.length]);
+      return (
+        <p key={i} className="flex items-start gap-2">
+          <span className="font-medium flex-shrink-0" style={{ color: colorMap.get(m[1]) }}>{m[1]}：</span>
+          <span>{m[2]}</span>
+        </p>
+      );
+    }
+    return <p key={i}>{line}</p>;
+  });
+}
 
 // 错误文案：ApiError 走错误码映射（05 C 章），避免弹出后端原始报文
 function errMsg(e: unknown, fallback: string): string {
@@ -49,7 +75,6 @@ export default function Step1Page() {
   const [beats, setBeats] = useState<BeatSummary[]>([]);
   const [scriptInput, setScriptInput] = useState("");
   const [splitting, setSplitting] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [loadError, setLoadError] = useState(false);
 
   // 弹窗/下拉状态
@@ -57,6 +82,13 @@ export default function Step1Page() {
   const [agentSkillOpen, setAgentSkillOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<BeatSummary | null>(null);
   const [addUnitOpen, setAddUnitOpen] = useState(false);
+  // F4: 叙事单元编辑弹窗
+  const [editTarget, setEditTarget] = useState<BeatSummary | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editScript, setEditScript] = useState("");
+  const [editDuration, setEditDuration] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [durationDrop, setDurationDrop] = useState<{ beatId: string; left: number; top: number } | null>(null);
   const [durationMap, setDurationMap] = useState<Record<string, string>>({});
   // 拆分设置（自动拆分弹窗，视觉态；后端暂未接收参数）
@@ -64,6 +96,9 @@ export default function Step1Page() {
   const [splitByDialogue, setSplitByDialogue] = useState(true);
   const [splitPrompt, setSplitPrompt] = useState(false);
   const [epDuration, setEpDuration] = useState(2);
+  // 拆分技能（全局 agent_skills 库；默认选中 sort_order 最小的标准拆分）
+  const [splitSkills, setSplitSkills] = useState<SplitSkill[]>([]);
+  const [splitSkillCode, setSplitSkillCode] = useState("");
 
   const stepState = useStepState(projectId, proj?.status ?? null);
   const meta = proj ? ProjectStatusMeta[proj.status] : null;
@@ -97,38 +132,100 @@ export default function Step1Page() {
     }
   }, [activeEpisode]);
 
-  // 拆分中轮询（SCRIPT_SPLITTING → 终态后停止）
-  useEffect(() => {
-    if (!proj) return;
-    if (proj.status === "SCRIPT_SPLITTING") {
-      pollRef.current = setInterval(async () => {
-        try {
-          const p = await projectsApi.detail(projectId);
-          setProj(p);
-          if (p.status !== "SCRIPT_SPLITTING") {
-            if (pollRef.current) clearInterval(pollRef.current);
-            if (p.status === "SCRIPT_SPLIT_FAILED") {
-              toast.error("剧本拆解失败，请修改剧本后重试");
-            } else {
-              toast.success("剧本拆解完成");
-              const eps = await splitApi.episodes(projectId);
-              setEpisodes(eps.items ?? []);
-              if (eps.items.length > 0) setActiveEpisode(eps.items[0].episode_id);
-            }
-          }
-        } catch {
-          /* 轮询失败忽略 */
-        }
-      }, 5000);
-      return () => {
-        if (pollRef.current) clearInterval(pollRef.current);
-      };
+  // F4: 打开编辑弹窗
+  const openEditUnit = (b: BeatSummary) => {
+    setEditTarget(b);
+    setEditTitle(b.title);
+    setEditScript(b.script_text || "");
+    setEditDuration(b.preset_duration_sec > 0 ? String(b.preset_duration_sec) : "");
+  };
+
+  // F4: 保存编辑（PATCH /narrative-units/:nu_id）
+  const saveEditUnit = async () => {
+    if (!editTarget) return;
+    if (!editTitle.trim()) {
+      toast.error("标题不能为空");
+      return;
     }
-  }, [proj?.status, projectId]);
+    setSavingEdit(true);
+    try {
+      await api.patch(`/narrative-units/${editTarget.beat_id}`, {
+        title: editTitle.trim(),
+        content: editScript.trim(),
+        script_original_text: editScript.trim(),
+        ...(editDuration ? { preset_duration_sec: Number(editDuration) } : {}),
+      });
+      toast.success("叙事单元已更新");
+      setEditTarget(null);
+      void loadBeats();
+    } catch (e) {
+      toast.error(errMsg(e, "更新失败"));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  // F4: 确认删除（DELETE /narrative-units/:nu_id）
+  const confirmDeleteUnit = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/narrative-units/${deleteTarget.beat_id}`);
+      toast.success(`已删除「${deleteTarget.title}」`);
+      setDeleteTarget(null);
+      void loadBeats();
+    } catch (e) {
+      toast.error(errMsg(e, "删除失败"));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // 拆分中状态刷新：WS 终态推送驱动（SCRIPT_SPLIT 任务），断线回退 5s 轮询（对齐 LuxReal 推送为主）
+  const splitDoneRef = useRef(false);
+  const refreshSplit = useCallback(async () => {
+    if (splitDoneRef.current) return;
+    try {
+      const p = await projectsApi.detail(projectId);
+      setProj(p);
+      if (p.status !== "SCRIPT_SPLITTING") {
+        splitDoneRef.current = true;
+        if (p.status === "SCRIPT_SPLIT_FAILED") {
+          toast.error("剧本拆解失败，请修改剧本后重试");
+        } else {
+          toast.success("剧本拆解完成");
+          const eps = await splitApi.episodes(projectId);
+          setEpisodes(eps.items ?? []);
+          if (eps.items.length > 0) setActiveEpisode(eps.items[0].episode_id);
+        }
+      }
+    } catch {
+      /* 刷新失败忽略 */
+    }
+  }, [projectId]);
+
+  useWsDrivenPoll(refreshSplit, {
+    active: proj?.status === "SCRIPT_SPLITTING",
+    pollMs: 5000,
+    match: matchTaskTypes(["SCRIPT_SPLIT"]),
+  });
+
+  // 再次触发拆分时重置终态守卫
+  useEffect(() => {
+    if (proj?.status === "SCRIPT_SPLITTING") splitDoneRef.current = false;
+  }, [proj?.status]);
 
   // 初始加载 + 单元列表联动
   useEffect(() => {
     void loadProject();
+    // 拆分技能库（失败静默：弹窗回落无技能可选，后端默认标准拆分）
+    splitApi.splitSkills()
+      .then((d) => {
+        const items = d.items ?? [];
+        setSplitSkills(items);
+        if (items.length > 0) setSplitSkillCode(items[0].skill_code);
+      })
+      .catch(() => { /* 技能库不可用不阻断拆分 */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -144,17 +241,19 @@ export default function Step1Page() {
     return () => document.removeEventListener("click", onDocClick);
   }, [durationDrop]);
 
-  // 触发拆分
-  const handleSplit = async () => {
+  // 触发拆分（force=true 为重新拆分：覆盖已有剧集/单元/镜头结果）
+  const handleSplit = async (force: boolean) => {
     if (!scriptInput.trim()) {
       toast.error("请先输入剧本原文");
       return;
     }
     try {
       setSplitting(true);
-      await splitApi.triggerSplit(projectId, false, scriptInput);
-      toast.success("拆分任务已提交，AI 处理中…");
+      await splitApi.triggerSplit(projectId, force, scriptInput, epDuration, splitSkillCode || undefined);
+      toast.success(force ? "重新拆分任务已提交，旧结果将被覆盖…" : "拆分任务已提交，AI 处理中…");
       setSplitModalOpen(false);
+      setBeats([]);           // 清空旧单元展示（重拆后 UUID 全变）
+      setDurationMap({});
       setProj({ ...(proj as ProjectDetail), status: "SCRIPT_SPLITTING" });
     } catch (e) {
       toast.error(errMsg(e, "触发拆分失败"));
@@ -166,6 +265,8 @@ export default function Step1Page() {
   const splittingNow = proj?.status === "SCRIPT_SPLITTING";
   const isDraft = proj?.status === "DRAFT";
   const splitFailed = proj?.status === "SCRIPT_SPLIT_FAILED";
+  // 可重新拆分阶段：拆分成功后的资产阶段（后端状态机限定；视频阶段后不可重拆）
+  const canResplit = proj?.status === "PARTIAL_ASSETS" || proj?.status === "ALL_ASSETS_READY";
 
   // 项目加载失败（404/无权限/后端异常）整页降级，避免无限“加载中…”
   if (loadError) return <ProjectLoadError />;
@@ -187,6 +288,7 @@ export default function Step1Page() {
       currentStep={stepState.currentStep}
       canClick={stepState.canClick}
       goStep={stepState.goStep}
+      stepDone={stepState.stepDone}
       episodes={episodes}
       activeEpisodeId={activeEpisode}
       onSelectEpisode={setActiveEpisode}
@@ -248,24 +350,35 @@ export default function Step1Page() {
             </div>
           </div>
 
-          {/* 剧本原文（DRAFT/拆分失败可编辑；尚未拆出剧集/单元时也展示输入区） */}
-          {(isDraft || splitFailed || (episodes.length === 0 && beats.length === 0)) && proj && !splittingNow && (
-            <div className="rounded-2xl overflow-hidden" style={{ background: "#1E1E24", border: "1px solid #2A2A35" }}>
+          {/* 剧本原文（DRAFT/拆分失败/可重拆阶段可编辑；尚未拆出剧集/单元时也展示输入区） */}
+          {(isDraft || splitFailed || canResplit || (episodes.length === 0 && beats.length === 0)) && proj && !splittingNow && (
+            <div className="rounded-2xl overflow-hidden unit-card" style={{ animationDelay: "0ms" }}>
               <div className="flex items-center justify-between px-5 py-3.5">
                 <div className="flex items-center gap-2">
                   <ScrollText size={16} style={{ color: "#4C7FF8" }} />
                   <span className="text-white font-medium text-sm">剧本原文</span>
                   <span className="text-xs" style={{ color: "#6B7088" }}>{scriptInput.length} 字</span>
                 </div>
-                <button
-                  onClick={() => void handleSplit()}
-                  disabled={splitting}
-                  className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors hover:bg-[#4C7FF8]/20 disabled:opacity-50"
-                  style={{ color: "#4C7FF8", background: "rgba(76, 127, 248, 0.1)" }}
-                >
-                  <Wand2 size={14} />
-                  {splitting ? "提交中…" : "开始 AI 拆解"}
-                </button>
+                {canResplit && !splittingNow ? (
+                  <button
+                    onClick={() => setSplitModalOpen(true)}
+                    className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors hover:bg-[#4C7FF8]/20"
+                    style={{ color: "#4C7FF8", background: "rgba(76, 127, 248, 0.1)" }}
+                  >
+                    <RefreshCw size={13} />
+                    重新拆分
+                  </button>
+                ) : !splittingNow ? (
+                  <button
+                    onClick={() => void handleSplit(false)}
+                    disabled={splitting}
+                    className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors hover:bg-[#4C7FF8]/20 disabled:opacity-50"
+                    style={{ color: "#4C7FF8", background: "rgba(76, 127, 248, 0.1)" }}
+                  >
+                    <Wand2 size={14} />
+                    {splitting ? "提交中…" : "开始 AI 拆解"}
+                  </button>
+                ) : null}
               </div>
               <div className="px-5 pb-4">
                 <textarea
@@ -277,21 +390,6 @@ export default function Step1Page() {
                   style={{ minHeight: 160 }}
                 />
               </div>
-            </div>
-          )}
-
-          {/* AI Split Button（已有拆分结果时的重拆入口） */}
-          {!isDraft && beats.length > 0 && !splittingNow && (
-            <div className="flex justify-end">
-              <button
-                id="autoSplitBtn"
-                className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors hover:bg-[#4C7FF8]/20"
-                style={{ color: "#4C7FF8", background: "rgba(76, 127, 248, 0.1)" }}
-                onClick={() => setSplitModalOpen(true)}
-              >
-                <Wand2 size={14} />
-                自动拆分
-              </button>
             </div>
           )}
 
@@ -312,12 +410,12 @@ export default function Step1Page() {
             </div>
           )}
 
-          {/* 叙事单元卡片列表 */}
-          {!splittingNow && beats.map((b) => {
+          {/* 叙事单元卡片列表（入场错峰动画：animation-delay 按序递增） */}
+          {!splittingNow && beats.map((b, i) => {
             const badge = beatStatusBadge(b.status);
             const dur = durationMap[b.beat_id] ?? (b.preset_duration_sec > 0 ? `${b.preset_duration_sec}秒` : "自动");
             return (
-              <div key={b.beat_id} id={`unit-card-${b.beat_id}`} className="unit-card rounded-2xl overflow-hidden transition-all">
+              <div key={b.beat_id} id={`unit-card-${b.beat_id}`} className="unit-card rounded-2xl overflow-hidden transition-all" style={{ animationDelay: `${i * 70}ms` }}>
                 <div className="flex items-center justify-between px-5 py-3.5">
                   <div className="flex items-center min-w-0">
                     <GripVertical size={16} className="mr-2 cursor-grab flex-shrink-0" style={{ color: "#4A4A5A" }} />
@@ -362,13 +460,13 @@ export default function Step1Page() {
                     <span className="text-xs" style={{ color: "#6B7088" }}>剧本原文</span>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px]" style={{ color: "#4A4A5A" }}>{b.shot_group_count} 个镜头块</span>
-                      <button className="w-6 h-6 rounded flex items-center justify-center transition-colors hover:bg-white/5" style={{ color: "#6B7088" }} onClick={() => toast.info("单元编辑将在后续版本开放")}>
+                      <button className="w-6 h-6 rounded flex items-center justify-center transition-colors hover:bg-white/5" style={{ color: "#6B7088" }} onClick={() => openEditUnit(b)}>
                         <Pencil size={14} />
                       </button>
                     </div>
                   </div>
-                  <div className="unit-script-box rounded-lg p-3 text-sm leading-relaxed max-h-[280px] overflow-y-auto scrollbar-thin whitespace-pre-wrap">
-                    {b.script_text || "（无剧本原文）"}
+                  <div className="unit-script-box rounded-lg p-3 text-sm leading-relaxed max-h-[280px] overflow-y-auto scrollbar-thin">
+                    {b.script_text ? renderScriptText(b.script_text) : "（无剧本原文）"}
                   </div>
                 </div>
               </div>
@@ -445,35 +543,103 @@ export default function Step1Page() {
                 className="px-4 py-2 text-sm rounded-lg text-white transition-colors hover:opacity-90"
                 style={{ background: "#EF4444" }}
                 onClick={() => {
-                  toast.info("手动删除叙事单元将在后续版本开放");
-                  setDeleteTarget(null);
+                  void confirmDeleteUnit();
                 }}
+                disabled={deleting}
               >
-                删除
+                {deleting ? "删除中…" : "删除"}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Auto Split Modal */}
+      {/* F4: 叙事单元编辑弹窗（PATCH /narrative-units/:nu_id） */}
+      {editTarget && (
+        <div className="modal-overlay">
+          <div className="modal-backdrop" onClick={() => setEditTarget(null)} />
+          <div className="modal-content" style={{ width: 560 }}>
+            <h3 className="text-white text-lg font-medium mb-1">编辑叙事单元</h3>
+            <p className="text-xs mb-4" style={{ color: "#8B8B9A" }}>修改后自动保存版本快照，可在「历史版本」中回滚</p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs mb-1.5" style={{ color: "#8B8B9A" }}>单元标题</label>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  maxLength={256}
+                  className="w-full bg-white/5 border border-[#2A2A35] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#4C7FF8]/50 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs mb-1.5" style={{ color: "#8B8B9A" }}>剧本原文</label>
+                <textarea
+                  value={editScript}
+                  onChange={(e) => setEditScript(e.target.value)}
+                  rows={6}
+                  className="w-full bg-white/5 border border-[#2A2A35] rounded-lg px-3 py-2 text-sm text-white leading-relaxed resize-y focus:outline-none focus:border-[#4C7FF8]/50 transition-colors"
+                />
+              </div>
+              <div className="w-40">
+                <label className="block text-xs mb-1.5" style={{ color: "#8B8B9A" }}>时长预设（秒）</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={600}
+                  value={editDuration}
+                  onChange={(e) => setEditDuration(e.target.value)}
+                  placeholder="自动"
+                  className="w-full bg-white/5 border border-[#2A2A35] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#4C7FF8]/50 transition-colors"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 justify-end mt-6">
+              <button className="px-4 py-2 text-sm rounded-lg transition-colors hover:bg-white/5" style={{ color: "#8B8B9A" }} onClick={() => setEditTarget(null)}>取消</button>
+              <button
+                className="px-4 py-2 text-sm rounded-lg text-white transition-colors"
+                style={{ background: "linear-gradient(135deg, #4C7FF8, #3B6CE0)" }}
+                onClick={() => void saveEditUnit()}
+                disabled={savingEdit}
+              >
+                {savingEdit ? "保存中…" : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auto Split Modal（重新拆分设置：覆盖警示 + 拆分参数生效透传） */}
       {splitModalOpen && (
         <div className="modal-overlay">
           <div className="modal-backdrop" onClick={() => setSplitModalOpen(false)} />
           <div className="modal-content" style={{ width: 420 }}>
-            <h3 className="text-white text-lg font-medium mb-1">AI 自动拆分设置</h3>
-            <p className="text-sm mb-5" style={{ color: "#8B8B9A" }}>配置剧本自动拆分的规则和参数</p>
+            <h3 className="text-white text-lg font-medium mb-1">{canResplit ? "AI 重新拆分" : "AI 自动拆分设置"}</h3>
+            <p className="text-sm mb-4" style={{ color: "#8B8B9A" }}>{canResplit ? "调整拆分参数后重新拆解剧本" : "配置剧本自动拆分的规则和参数"}</p>
+
+            {canResplit && (
+              <div className="flex items-start gap-2 rounded-lg px-3 py-2.5 mb-4 text-xs leading-relaxed" style={{ background: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.25)", color: "#F59E0B" }}>
+                <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+                <span>重新拆分会清空现有剧集、叙事单元与镜头结果并重新生成，此操作不可恢复。</span>
+              </div>
+            )}
 
             <div className="mb-4">
-              <label className="text-sm text-white mb-2 block">拆分粒度</label>
+              <label className="text-sm text-white mb-2 block">拆分技能（全局技能库，管理端维护）</label>
               <div className="wb-select-wrapper">
-                <select className="wb-select" defaultValue="标准">
-                  <option>细粒度</option>
-                  <option>标准</option>
-                  <option>粗粒度</option>
+                <select className="wb-select" value={splitSkillCode} onChange={(e) => setSplitSkillCode(e.target.value)}>
+                  {splitSkills.map((s) => (
+                    <option key={s.skill_code} value={s.skill_code}>{s.name}</option>
+                  ))}
                 </select>
                 <ChevronDown size={16} />
               </div>
+              {(() => {
+                const cur = splitSkills.find((s) => s.skill_code === splitSkillCode);
+                return cur?.description ? (
+                  <p className="text-xs mt-2 leading-relaxed" style={{ color: "#6B7088" }}>{cur.description}</p>
+                ) : null;
+              })()}
             </div>
 
             <div className="space-y-3 mb-5">
@@ -498,7 +664,7 @@ export default function Step1Page() {
             </div>
 
             <div className="mb-6">
-              <label className="text-sm text-white mb-2 block">单集默认时长</label>
+              <label className="text-sm text-white mb-2 block">单集目标时长（影响分集粒度）</label>
               <div className="segmented">
                 {[1, 2, 3].map((n) => (
                   <button key={n} className={epDuration === n ? "active" : ""} onClick={() => setEpDuration(n)}>{n}分钟</button>
@@ -512,9 +678,9 @@ export default function Step1Page() {
                 className="px-4 py-2 text-sm rounded-lg text-white transition-all hover:opacity-90 disabled:opacity-50"
                 style={{ background: "linear-gradient(135deg, #4C7FF8, #8B5CF6)" }}
                 disabled={splitting}
-                onClick={() => void handleSplit()}
+                onClick={() => void handleSplit(true)}
               >
-                {splitting ? "提交中…" : "开始拆分"}
+                {splitting ? "提交中…" : canResplit ? "确认重新拆分" : "开始拆分"}
               </button>
             </div>
           </div>

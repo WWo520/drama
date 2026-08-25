@@ -59,4 +59,17 @@ func (r *Reaper) reapOnce(ctx context.Context) {
 			log.Printf("reaper: 重投 %d 个到点重试任务", len(due))
 		}
 	}
+
+	// ③ 卡死修复（08 审查 Major#14）：QUEUED 超过 2 分钟未被消费 → 补发 Outbox + 重投 Redis
+	stuck, err := r.store.RequeueStuckQueued(ctx, now.Add(-2*time.Minute))
+	if err != nil {
+		log.Printf("reaper: 卡死 QUEUED 修复失败: %v", err)
+	} else {
+		for _, t := range stuck {
+			_ = r.queue.Requeue(ctx, t.ID, time.Now(), t.Priority)
+		}
+		if len(stuck) > 0 {
+			log.Printf("reaper: 修复 %d 个卡死 QUEUED 任务", len(stuck))
+		}
+	}
 }

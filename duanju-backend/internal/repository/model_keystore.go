@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -53,24 +54,36 @@ func (s *ModelKeyStore) AvailableKeys(ctx context.Context, capability model.Capa
 	}
 	defer rows.Close()
 	out := make([]*model.KeyCredential, 0)
+	sawKey := false // 是否存在启用的 Key 行（区分"无配置"与"配置了但全部损坏"）
 	for rows.Next() {
 		var k model.KeyCredential
 		var encrypted string
 		if err := rows.Scan(&k.ID, &k.ProviderName, &k.ModelKey, &encrypted, &k.BaseURL, &k.Concurrency, &k.Priority, &k.Enabled); err != nil {
 			return nil, err
 		}
-		// 解密 API Key（解密失败跳过该 Key，不阻塞整体）
-		if plain, derr := decryptKey(encrypted, s.encKey); derr == nil {
-			k.APIKey = plain
+		sawKey = true
+		// 解密 API Key：失败则跳过该 Key 并记录（曾因解密失败静默带空 APIKey 发请求，导致厂商 401）
+		plain, derr := decryptKey(encrypted, s.encKey)
+		if derr != nil {
+			log.Printf("model: key %d (%s/%s) 解密失败已跳过（检查 MODEL_KEY_ENC_SECRET 是否与加密时一致）: %v",
+				k.ID, k.ProviderName, k.ModelKey, derr)
+			continue
 		}
+		k.APIKey = plain
 		out = append(out, &k)
 	}
-	if len(out) == 0 && s.fallbackMock {
-		// 降级：无 DB 配置时返回 mock 凭据（worker 注册 mock provider 时使用）
-		return []*model.KeyCredential{{
-			ID: 1, ProviderName: "mock-llm", ModelKey: "luxchat-mock",
-			APIKey: "mock-key-1", BaseURL: "mock://llm", Concurrency: 8, Priority: 0, Enabled: true,
-		}}, nil
+	if len(out) == 0 {
+		if sawKey {
+			// 有配置但全部解密失败：明确报错，禁止降级 mock（否则真实任务静默产出假结果）
+			return nil, errors.New("model: 已启用的 Key 均解密失败，请检查 MODEL_KEY_ENC_SECRET 配置")
+		}
+		if s.fallbackMock {
+			// 降级：无 DB 配置时返回 mock 凭据（worker 注册 mock provider 时使用）
+			return []*model.KeyCredential{{
+				ID: 1, ProviderName: "mock-llm", ModelKey: "luxchat-mock",
+				APIKey: "mock-key-1", BaseURL: "mock://llm", Concurrency: 8, Priority: 0, Enabled: true,
+			}}, nil
+		}
 	}
 	return out, rows.Err()
 }

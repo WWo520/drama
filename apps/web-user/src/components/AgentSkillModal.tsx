@@ -1,12 +1,16 @@
 // Agent 技能配置弹窗（对齐设计稿 create-video.html #modal-agent-config）
 // 左侧导航 + 技能列表/详情双视图；Home/Step1 共用（CSS 位于 home.css，Step1 已引）
-import { useState } from "react";
+// 剧本拆分技能模板从全局技能库拉取（GET /skills?kind=SCRIPT_SPLIT，管理端维护）
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ArrowLeft, ChevronDown, Clapperboard, ListVideo, Settings, Sparkles, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, Clapperboard, ListVideo, ScrollText, Settings, Sparkles, X } from "lucide-react";
+import { splitApi } from "@duanju/api-client";
 import "./AgentSkillModal.css";
 
-// Agent 技能数据（对齐设计稿 skillData：模板 + 开关）
-const AGENT_SKILLS: Record<"basic" | "storyboard" | "planning" | "polish", {
+type SkillKey = "basic" | "split" | "storyboard" | "planning" | "polish";
+
+// Agent 技能数据（对齐设计稿 skillData：模板 + 开关；split 项模板打开弹窗时从接口拉取）
+const AGENT_SKILLS: Record<SkillKey, {
   title: string; subtitle: string; navDesc: string;
   Icon: typeof Settings;
   templates: { value: string; prompt: string }[];
@@ -16,6 +20,14 @@ const AGENT_SKILLS: Record<"basic" | "storyboard" | "planning" | "polish", {
     title: "基础参数配置", subtitle: "全局技能参数设置，影响所有技能的基础行为", navDesc: "全局技能参数设置", Icon: Settings,
     templates: [{ value: "默认配置", prompt: "全局技能基础配置参数，包括默认时长、输出比例、生成质量等基础设置。所有技能将以此为基础运行。" }],
     toggles: [{ label: "自动保存草稿", on: true }, { label: "启用智能推荐", on: true }, { label: "显示技能执行日志", on: false }],
+  },
+  split: {
+    title: "剧本拆分技能", subtitle: "编剧结构师角色 · 将剧本拆解为剧集与叙事单元", navDesc: "编剧结构师角色", Icon: ScrollText,
+    templates: [], // 打开弹窗时从 GET /skills?kind=SCRIPT_SPLIT 拉取（全局技能库）
+    toggles: [
+      { label: "优先多集连载", on: true }, { label: "结尾悬念钩子", on: true },
+      { label: "摘录真实原文", on: true }, { label: "保留对白轮次", on: false },
+    ],
   },
   storyboard: {
     title: "镜头提示词生成技能", subtitle: "分镜编剧角色 · 将剧本按照时长拆分为多个镜头", navDesc: "分镜编剧角色", Icon: Clapperboard,
@@ -52,17 +64,36 @@ const AGENT_SKILLS: Record<"basic" | "storyboard" | "planning" | "polish", {
     ],
   },
 };
-const SKILL_KEYS = ["basic", "storyboard", "planning", "polish"] as const;
+const SKILL_KEYS: SkillKey[] = ["basic", "split", "storyboard", "planning", "polish"];
 
 export default function AgentSkillModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [agentNav, setAgentNav] = useState<"basic" | "storyboard" | "planning" | "polish">("basic");
+  const [skills, setSkills] = useState(AGENT_SKILLS);
+  const [agentNav, setAgentNav] = useState<SkillKey>("basic");
   const [view, setView] = useState<"list" | "detail">("list");
   const [detail, setDetail] = useState<string | null>(null);
-  const [skillTemplate, setSkillTemplate] = useState<Record<string, string>>({ basic: "默认配置", storyboard: "通用叙事拆解", planning: "标准调度策略", polish: "标准润色" });
+  const [skillTemplate, setSkillTemplate] = useState<Record<string, string>>({ basic: "默认配置", split: "", storyboard: "通用叙事拆解", planning: "标准调度策略", polish: "标准润色" });
   const [tplMenuOpen, setTplMenuOpen] = useState(false);
   const [skillToggles, setSkillToggles] = useState<Record<string, boolean[]>>(() =>
     Object.fromEntries(SKILL_KEYS.map((k) => [k, AGENT_SKILLS[k].toggles.map((t) => t.on)]))
   );
+
+  // 打开时拉取全局剧本拆分技能库（失败保持空模板占位）
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    splitApi.splitSkills()
+      .then((d) => {
+        const items = d.items ?? [];
+        if (!alive || items.length === 0) return;
+        setSkills((prev) => ({
+          ...prev,
+          split: { ...prev.split, templates: items.map((s) => ({ value: s.name, prompt: s.template_content || s.description })) },
+        }));
+        setSkillTemplate((prev) => (prev.split ? prev : { ...prev, split: items[0].name }));
+      })
+      .catch(() => { /* 技能库拉取失败：保持空模板 */ });
+    return () => { alive = false; };
+  }, [open]);
 
   return (
     <div
@@ -84,23 +115,18 @@ export default function AgentSkillModal({ open, onClose }: { open: boolean; onCl
           {/* 左侧导航 */}
           <div className="agent-modal-sidebar">
             {SKILL_KEYS.map((k) => {
-              const sk = AGENT_SKILLS[k];
+              const sk = skills[k];
               const NavIcon = sk.Icon;
               return (
                 <button
                   key={k}
                   className={`agent-nav-item ${agentNav === k ? "active" : ""}`}
                   onClick={() => {
+                    // 点击左侧导航直接进入该技能的具体配置内容（详情视图），可经“返回列表”回到技能列表
                     setAgentNav(k);
-                    setView("list");
-                    // 定位并高亮对应技能项（对齐设计稿交互）
-                    requestAnimationFrame(() => {
-                      const li = document.querySelector(`[data-skill-list-item="${k}"]`);
-                      if (!li) return;
-                      li.classList.add("highlight");
-                      li.scrollIntoView({ behavior: "smooth", block: "center" });
-                      setTimeout(() => li.classList.remove("highlight"), 1500);
-                    });
+                    setDetail(k);
+                    setView("detail");
+                    setTplMenuOpen(false);
                   }}
                 >
                   <div className="agent-nav-icon">
@@ -125,7 +151,7 @@ export default function AgentSkillModal({ open, onClose }: { open: boolean; onCl
               </div>
               <div className="agent-skill-list">
                 {SKILL_KEYS.map((k) => {
-                  const sk = AGENT_SKILLS[k];
+                  const sk = skills[k];
                   const SkillIcon = sk.Icon;
                   return (
                     <div key={k} className="agent-skill-list-item" data-skill-list-item={k}>
@@ -143,6 +169,7 @@ export default function AgentSkillModal({ open, onClose }: { open: boolean; onCl
                         <button
                           className="skill-modify-link"
                           onClick={() => {
+                            setAgentNav(k);
                             setDetail(k);
                             setView("detail");
                             setTplMenuOpen(false);
@@ -159,9 +186,9 @@ export default function AgentSkillModal({ open, onClose }: { open: boolean; onCl
 
             {/* 详情视图 */}
             {view === "detail" && detail && (() => {
-              const dk = detail as keyof typeof AGENT_SKILLS;
-              const sk = AGENT_SKILLS[dk];
-              const curTpl = skillTemplate[dk] ?? sk.templates[0].value;
+              const dk = detail as SkillKey;
+              const sk = skills[dk];
+              const curTpl = skillTemplate[dk] ?? sk.templates[0]?.value ?? "";
               const curPrompt = sk.templates.find((t) => t.value === curTpl)?.prompt ?? "";
               return (
                 <div className="agent-skill-view">
@@ -175,6 +202,10 @@ export default function AgentSkillModal({ open, onClose }: { open: boolean; onCl
                   <div className="agent-detail-section">
                     <div className="flex items-center gap-2">
                       <span className="text-[13px] text-[var(--luxreal-muted-foreground)]">当前模板:</span>
+                      {sk.templates.length === 0 ? (
+                        <span className="text-[13px] text-[var(--luxreal-muted-foreground)]">暂无可用模板（技能库加载失败或未配置）</span>
+                      ) : (
+                      <>
                       <div className="skill-template-dropdown">
                         <button className="skill-template-selector" onClick={() => setTplMenuOpen((v) => !v)}>
                           <span className="skill-template-value">{curTpl}</span>
@@ -196,6 +227,8 @@ export default function AgentSkillModal({ open, onClose }: { open: boolean; onCl
                         </div>
                       </div>
                       <button className="skill-manage-btn" onClick={() => toast.info("模板管理功能将在后续版本提供")}>管理</button>
+                      </>
+                      )}
                     </div>
                   </div>
 

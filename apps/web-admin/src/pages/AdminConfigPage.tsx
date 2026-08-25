@@ -24,6 +24,8 @@ import AdminMembershipPanel from "./AdminMembershipPanel";
 import AdminModelsTab from "./AdminModelsTab";
 import AdminNotifyPanel from "./AdminNotifyPanel";
 import AdminSecurityPanel from "./AdminSecurityPanel";
+import AdminPaymentPanel from "./AdminPaymentPanel";
+import AdminLegalPanel from "./AdminLegalPanel";
 import "./AdminConfigPage.css";
 
 interface ConfigItem {
@@ -132,16 +134,6 @@ const AI_LIMIT_FIELDS: { key: keyof FormState; label: string }[] = [
   { key: "ai_cost_tts", label: "单次消耗积分(配音)" },
   { key: "ai_cost_cover", label: "单次消耗积分(封面)" },
 ];
-
-// 规划中面板：后端未提供该域配置接口时的占位说明（区别于“有接口未做 UI”）
-function PlannedPanel({ label, note }: { label: string; note: string }) {
-  return (
-    <div className="bg-bg-card border border-[#2A2A3E] rounded-xl p-16 flex flex-col items-center justify-center text-center">
-      <div className="text-sm text-white font-medium mb-1">{label}</div>
-      <p className="text-xs text-text-muted">{note}</p>
-    </div>
-  );
-}
 
 export default function AdminConfigPage() {
   const [tab, setTab] = useState<TabKey>("basic");
@@ -481,15 +473,8 @@ export default function AdminConfigPage() {
           {tab === "notify" && <AdminNotifyPanel />}
           {tab === "security" && <AdminSecurityPanel />}
           {tab === "appearance" && <AdminAppearancePanel />}
-          {tab === "payment" && (
-            <PlannedPanel
-              label="支付配置"
-              note="后端未提供支付配置接口（支付宝正式验签已接入，渠道参数走环境变量；面板规划中）"
-            />
-          )}
-          {tab === "legal" && (
-            <PlannedPanel label="协议管理" note="后端未提供协议管理接口（协议内容维护规划中，设计稿亦未提供面板）" />
-          )}
+          {tab === "payment" && <AdminPaymentPanel />}
+          {tab === "legal" && <AdminLegalPanel />}
           {loaded && tab === "basic" && (
             <p className="text-xs text-text-muted pl-1">已加载后端持久化配置，保存后全局生效</p>
           )}

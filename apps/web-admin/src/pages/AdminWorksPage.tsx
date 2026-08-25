@@ -17,6 +17,7 @@ import {
   MoreVertical,
   Play,
   Plus,
+  RotateCcw,
   Star,
   Trash2,
   X,
@@ -26,7 +27,7 @@ import { toast, errMessage, fmtNum, exportCSV } from "../lib";
 import Modal from "../components/Modal";
 import "./AdminWorksPage.css";
 
-type WorkStatus = "" | "PUBLISHED" | "PENDING" | "REJECTED" | "REVOKED" | "UNPUBLISHED";
+type WorkStatus = "" | "PUBLISHED" | "PENDING" | "REJECTED" | "REVOKED" | "UNPUBLISHED" | "DELETED";
 
 interface BackendWork {
   work_id: string;
@@ -386,6 +387,47 @@ export default function AdminWorksPage() {
     }
   };
 
+  // 恢复（回收站 → 正常列表，POST /recycle-bin/:work_id/restore）
+  const restoreWork = async (row: WorkRow) => {
+    if (!row.real) {
+      toast("示例数据不可操作", "error");
+      return;
+    }
+    try {
+      await api.post(`/recycle-bin/${row.work_id}/restore`);
+      setRows((prev) => prev.filter((r) => r.work_id !== row.work_id));
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(row.work_id);
+        return next;
+      });
+      setStats((prev) => ({ ...prev, all: prev.all + 1 }));
+      toast(`已恢复《${row.title}》`, "success");
+    } catch (e) {
+      toast(errMessage(e), "error");
+    }
+  };
+
+  // 永久删除（DELETE /recycle-bin/:work_id，不可恢复）
+  const deleteForever = async (row: WorkRow) => {
+    if (!row.real) {
+      toast("示例数据不可操作", "error");
+      return;
+    }
+    try {
+      await api.delete(`/recycle-bin/${row.work_id}`);
+      setRows((prev) => prev.filter((r) => r.work_id !== row.work_id));
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(row.work_id);
+        return next;
+      });
+      toast(`已永久删除《${row.title}》`, "success");
+    } catch (e) {
+      toast(errMessage(e), "error");
+    }
+  };
+
   // 预览：有 media_url 直接新窗口打开（审核页同款行为）
   const preview = (row: WorkRow) => {
     if (row.mediaUrl) {
@@ -541,6 +583,7 @@ export default function AdminWorksPage() {
               <option value="REJECTED">已驳回</option>
               <option value="REVOKED">已下架</option>
               <option value="UNPUBLISHED">草稿</option>
+              <option value="DELETED">回收站</option>
             </select>
           </div>
           <div className="flex items-center gap-2">
@@ -693,6 +736,17 @@ export default function AdminWorksPage() {
                       <td className="px-4 py-3 text-sm text-text-secondary">{r.publishedAt}</td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex justify-end gap-1">
+                          {appliedStatus === "DELETED" ? (
+                            <>
+                              <button className="action-btn text-green-400" title="恢复" onClick={() => restoreWork(r)}>
+                                <RotateCcw className="w-3.5 h-3.5" />
+                              </button>
+                              <button className="action-btn text-red-400" title="永久删除" onClick={() => deleteForever(r)}>
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
                           <button className="action-btn text-text-secondary" title="预览" onClick={() => preview(r)}>
                             <Eye className="w-3.5 h-3.5" />
                           </button>
@@ -733,6 +787,8 @@ export default function AdminWorksPage() {
                           <button className="action-btn text-text-muted" title="更多" onClick={() => toast("更多操作规划中", "info")}>
                             <MoreVertical className="w-3.5 h-3.5" />
                           </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>

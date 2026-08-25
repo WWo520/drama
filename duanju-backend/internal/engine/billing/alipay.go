@@ -3,10 +3,15 @@ package billing
 
 import (
 	"context"
+	"crypto"
 	"crypto/hmac"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"sort"
 	"strings"
@@ -80,8 +85,10 @@ type Order struct {
 
 // AlipayService 支付服务。
 type AlipayService struct {
-	store  OrderStore
-	cfg    AlipayConfig
+	store OrderStore
+	cfg   AlipayConfig
+	// OnPaid 首次到账回调（可选；WS 推送 POINTS_BALANCE_CHANGED，前端据此停止订单状态轮询）
+	OnPaid func(ctx context.Context, userID int64, points int)
 }
 
 func NewAlipayService(store OrderStore, cfg AlipayConfig) *AlipayService {
@@ -170,6 +177,7 @@ func (s *AlipayService) CreateSubscriptionOrder(ctx context.Context, userID int6
 		ExpireAt:   time.Now().Add(30 * time.Minute).Format(time.RFC3339),
 	}, nil
 }
+
 // 返回 "success" 或 "fail"。
 func (s *AlipayService) HandleCallback(ctx context.Context, params map[string]string) string {
 	// 步1：验签（mock=HMAC；生产=RSA2）
@@ -177,7 +185,7 @@ func (s *AlipayService) HandleCallback(ctx context.Context, params map[string]st
 		_ = s.store.LogCallback(ctx, params, 1, "fail", "验签失败")
 		return "fail"
 	}
-	// 步2：核心字段校验（sign_type/app_id/out_trade_no/金额字符串精确比较）
+	// 步 2：核心字段校验（sign_type/app_id/out_trade_no/金额字符串精确比较）
 	if params["app_id"] != s.cfg.AppID {
 		_ = s.store.LogCallback(ctx, params, 2, "fail", "app_id 不匹配")
 		return "fail"
@@ -185,6 +193,11 @@ func (s *AlipayService) HandleCallback(ctx context.Context, params map[string]st
 	orderNo := params["out_trade_no"]
 	if orderNo == "" {
 		_ = s.store.LogCallback(ctx, params, 2, "fail", "out_trade_no 为空")
+		return "fail"
+	}
+	// 08 审查 Major#12：仅支付成功/交易完成才入账
+	if ts := params["trade_status"]; ts != "TRADE_SUCCESS" && ts != "TRADE_FINISHED" {
+		_ = s.store.LogCallback(ctx, params, 2, "fail", "非成功状态:"+ts)
 		return "fail"
 	}
 	// 金额：从订单读取并按字符串精确比较
@@ -207,6 +220,10 @@ func (s *AlipayService) HandleCallback(ctx context.Context, params map[string]st
 		_ = s.store.LogCallback(ctx, params, 3, "success", "幂等跳过")
 		return "success"
 	}
+	// 首次到账回调（WS 推送积分变化；失败不影响回调结果）
+	if s.OnPaid != nil {
+		s.OnPaid(ctx, order.UserID, order.Points)
+	}
 	// 步7：返回 success
 	_ = s.store.LogCallback(ctx, params, 7, "success", "")
 	return "success"
@@ -217,7 +234,8 @@ func (s *AlipayService) QueryMembership(ctx context.Context, userID int64, planC
 	return s.store.QueryMembership(ctx, userID, planCode, status, renew, endAt)
 }
 
-// VerifyHMAC mock 验签：预共享密钥 HMAC-SHA256。
+// verifySignature 回调验签：UseMock=true 走开发 HMAC；生产走支付宝 RSA2 公钥验签。
+// fail-closed：生产未配置公钥 / 验签异常一律拒绝（08 审查 Critical#1 修复）。
 func (s *AlipayService) verifySignature(params map[string]string) bool {
 	sign := params["sign"]
 	if sign == "" {
@@ -239,11 +257,43 @@ func (s *AlipayService) verifySignature(params map[string]string) bool {
 		sb.WriteString(k + "=" + params[k])
 	}
 	payload := sb.String()
+	if !s.cfg.UseMock {
+		return verifyRSA2(s.cfg.PublicKey, payload, sign)
+	}
 	mac := hmac.New(sha256.New, []byte(s.cfg.MockSecret))
 	mac.Write([]byte(payload))
 	expected := hex.EncodeToString(mac.Sum(nil))
 	got := strings.ToLower(strings.TrimSpace(sign))
 	return subtle.ConstantTimeCompare([]byte(expected), []byte(got)) == 1
+}
+
+// verifyRSA2 支付宝 RSA2（SHA256withRSA）验签：公钥支持 PEM 全文或裸 base64 两种配置形态。
+func verifyRSA2(publicKey, payload, signB64 string) bool {
+	if publicKey == "" {
+		return false
+	}
+	pemText := publicKey
+	if !strings.Contains(pemText, "BEGIN") {
+		pemText = "-----BEGIN PUBLIC KEY-----\n" + pemText + "\n-----END PUBLIC KEY-----"
+	}
+	block, _ := pem.Decode([]byte(pemText))
+	if block == nil {
+		return false
+	}
+	pubAny, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return false
+	}
+	pub, ok := pubAny.(*rsa.PublicKey)
+	if !ok {
+		return false
+	}
+	sig, err := base64.StdEncoding.DecodeString(strings.TrimSpace(signB64))
+	if err != nil {
+		return false
+	}
+	digest := sha256.Sum256([]byte(payload))
+	return rsa.VerifyPKCS1v15(pub, crypto.SHA256, digest[:], sig) == nil
 }
 
 // BuildMockCallback 生成 mock 支付宝回调参数（供 E2E 测试/内部触发）。
@@ -255,6 +305,7 @@ func (s *AlipayService) BuildMockCallback(orderNo, amountYuan, tradeNo string) m
 		"total_amount": amountYuan,
 		"sign_type":    "RSA2",
 		"timestamp":    time.Now().Format("2006-01-02 15:04:05"),
+		"trade_status": "TRADE_SUCCESS", // 08 审查 Major#12：回调校验必须包含
 	}
 	// 计算 HMAC 签名（与 verifySignature 一致：排除 sign/sign_type）
 	keys := make([]string, 0, len(params))

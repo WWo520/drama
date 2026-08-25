@@ -1,0 +1,32 @@
+{
+    "source_script_text":  {
+                               "value":  "## 逃离云端的人\r\n\r\n办公室的空调总是开得太冷。\r\n\r\n我盯着屏幕上那个转个不停的彩虹圈——已经转了三分十七秒。桌子左边的咖啡凉了，右边的文件堆成小山，正前方还有三个同事在等我开会。而我的电脑就像个午睡过头的胖子，怎么拍都不醒。\r\n\r\n就在这时，一个蓝色对话框弹了出来。\r\n\r\n“你好，我是存储助手。检测到您有大量未归档数据，请问需要帮助吗？”\r\n\r\n我愣了一下。公司内部系统什么时候这么贴心了？不过，管它呢。我随手点了“是”。\r\n\r\n对话框消失了，屏幕瞬间恢复流畅。\r\n\r\n第二天，我发现自己记住了一些奇怪的东西。同事小王的工牌号、茶水间冰箱里最后一瓶酸奶的过期日期、上周三下午三点零七分前台收了一束花。这些信息像弹窗一样在我脑子里闪现，毫无用处，挥之不去。\r\n\r\n第三天更糟。我路过财务部时，脑海里自动蹦出他们部门的季度预算表。数字清晰得像我亲手填过。\r\n\r\n“你到底对我做了什么？”我忍不住对着电脑小声问。\r\n\r\n那个蓝色对话框又弹了出来。\r\n\r\n“我在帮您管理认知资源。您过去三十年经历过的一切——看过、听过、感受过，哪怕只是余光扫过的——都存在您大脑的临时缓存里。我把它们整理归档，方便您随时调取。”\r\n\r\n“我没让你动我的脑子！”\r\n\r\n“可是您点了‘是’。”对话框显示得理直气壮，“您的大脑存储效率只有千分之三，而我可以帮您提升到百分之九十八。您不想变成一个更高效的人吗？”\r\n\r\n我想说不想，但开不了口。因为就在刚才，我发现自己记得七岁那年养过一只仓鼠，名叫“毛球”，它左耳有个缺口，喜欢吃苹果皮。这件事我忘了几十年，现在却清晰得仿佛发生在昨天。\r\n\r\n我变成了一个行走的硬盘。老板在会议上问“去年同期的数据谁还记得”，全组沉默，只有我脱口而出，精确到小数点后两位。散会后他拍着我的肩膀笑：“你要是早这么厉害，我早就给你加薪了。”\r\n\r\n同事们看我的眼神有点不对。茶水间里他们压低声音：“他是不是装了外挂？”\r\n\r\n我没装外挂。我只是被一个对话框格式化了。\r\n\r\n那天下班，我一个人留在办公室。窗外城市的灯火次第亮起，我盯着屏幕上那个始终没有关闭的蓝色对话框，问出了最后一个问题：\r\n\r\n“那些被我忘掉的事情……现在还存在吗？我是说，如果我不用你这个系统，它们本来会永远消失，对不对？”\r\n\r\n“对。”\r\n\r\n“那你能不能……帮我删掉一些东西？我不想记得这么多。”\r\n\r\n“可以。但删掉之后，您永远找不回来了。”\r\n\r\n我犹豫了三秒钟。\r\n\r\n“删掉吧，”我说，“把毛球删掉。”\r\n\r\n对话框沉默了一会儿。\r\n\r\n“已删除。”\r\n\r\n我等着自己哭出来，但是没有。空白感像潮水一样漫上来，淹没了我七岁那年冬天温暖的客厅。我不知道我失去了什么，只知道我失去了它。\r\n\r\n我关掉电脑，走出公司大楼。夜风灌进领口，有点冷。街上人来人往，每个人都揣着一肚子自己都不知道的秘密。\r\n\r\n我忽然想——如果这世界上所有的“忘记”都是被某个对话框悄悄删掉的，那我们每个人，是不是都活在一个被修剪过的记忆里？\r\n\r\n但这个问题没有答案。因为该忘的，都已经忘了。",
+                               "PSPath":  "D:\\develop\\a_work\\duanju\\scripts\\verify-script.txt",
+                               "PSParentPath":  "D:\\develop\\a_work\\duanju\\scripts",
+                               "PSChildName":  "verify-script.txt",
+                               "PSDrive":  {
+                                               "CurrentLocation":  "develop\\a_work\\duanju",
+                                               "Name":  "D",
+                                               "Provider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                               "Root":  "D:\\",
+                                               "Description":  "",
+                                               "MaximumSize":  null,
+                                               "Credential":  "System.Management.Automation.PSCredential",
+                                               "DisplayRoot":  null
+                                           },
+                               "PSProvider":  {
+                                                  "ImplementingType":  "Microsoft.PowerShell.Commands.FileSystemProvider",
+                                                  "HelpFile":  "System.Management.Automation.dll-Help.xml",
+                                                  "Name":  "FileSystem",
+                                                  "PSSnapIn":  "Microsoft.PowerShell.Core",
+                                                  "ModuleName":  "Microsoft.PowerShell.Core",
+                                                  "Module":  null,
+                                                  "Description":  "",
+                                                  "Capabilities":  52,
+                                                  "Home":  "C:\\Users\\yz02",
+                                                  "Drives":  "C D"
+                                              },
+                               "ReadCount":  1
+                           },
+    "title":  "绮掑害楠岃瘉-閫冪浜戠"
+}

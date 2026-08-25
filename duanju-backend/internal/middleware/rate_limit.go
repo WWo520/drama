@@ -19,6 +19,11 @@ import (
 func RateLimit(rdb *redis.Client, pool *pgxpool.Pool, env string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit := 120
+		// 开发环境放宽：前端 StrictMode 双挂载 + Vite HMR 重挂载 + 多标签页并发行，
+		// 120/min 会被页面加载突发打满（429 连锁），开发期放宽到 600/min
+		if env != "production" {
+			limit = 600
+		}
 		// CtxUserID 存的是 int64，必须用 GetInt64 读取（GetString 取不到会误判匿名）
 		uid := c.GetInt64(CtxUserID)
 		subject := c.ClientIP()

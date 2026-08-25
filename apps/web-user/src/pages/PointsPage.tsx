@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  Check, ChevronDown, Compass, CreditCard, Folder, Gem, MessageCircle,
+  Check, ChevronDown, Coins, Compass, CreditCard, Folder, Gem, MessageCircle,
   Minus, Sparkles, X,
 } from "lucide-react";
 
@@ -92,16 +92,6 @@ const PLANS: PlanDef[] = [
   },
 ];
 
-// FAQ（原样摘自设计稿）
-const FAQS = [
-  { q: "订阅套餐和积分包有什么区别？", a: "订阅套餐按月/年自动续费，每月固定获得积分，适合长期创作者，性价比更高，还可解锁更多高级功能。积分包是一次性购买，积分永久有效，适合偶尔使用或补充积分的用户。" },
-  { q: "积分会过期吗？", a: "订阅套餐的月度积分当月有效，次月重置。单独购买的积分包积分永久有效，不会过期。消耗时系统会优先使用即将过期的积分。" },
-  { q: "可以随时升级或降级套餐吗？", a: "支持随时升级套餐，升级后立即生效并按比例补差价。降级将在下个计费周期生效，当前周期仍享受原有权益。" },
-  { q: "支持哪些支付方式？可以开发票吗？", a: "目前支持微信支付和支付宝支付，企业用户还可以使用对公转账。所有支付均可开具电子发票，在个人中心-订单记录中申请即可。" },
-  { q: "不满意可以退款吗？", a: "未使用的积分包支持 7 天内无理由退款。订阅套餐支持按使用比例退款。如有退款需求，请联系客服处理。" },
-  { q: "企业团队有什么优惠方案？", a: "高级版及以上套餐支持多人协作功能，旗舰版支持定制化部署和 SLA 服务保障。如有 20 人以上团队采购需求，请联系我们的商务团队获取专属报价和服务方案。" },
-];
-
 // 积分包徽章映射（后端 3 档真源 × 设计稿徽章样式）
 const PACK_BADGE: Record<string, { cls: string; text: string } | null> = {
   POINTS_PKG_SMALL: null,
@@ -138,8 +128,7 @@ export default function PointsPage() {
 
   // 页面状态
   const [billing, setBilling] = useState<"monthly" | "yearly">("monthly");
-  const [view, setView] = useState<"subscription" | "packs">("subscription");
-  const [faqOpen, setFaqOpen] = useState<number | null>(null);
+  const [view, setView] = useState<"subscription" | "packs">("packs");
   const [profileOpen, setProfileOpen] = useState(false);
   const [points, setPoints] = useState<number | null>(null);
 
@@ -225,10 +214,12 @@ export default function PointsPage() {
     void loadPoints();
   }, [loadPoints]);
 
-  // WS 实时到账：POINTS_BALANCE_CHANGED → 刷新余额并结束轮询
+  // WS 实时到账：POINTS_BALANCE_CHANGED → 刷新余额；source=order_paid（支付到账）才结束轮询并提示
   useEffect(() => {
-    const handler = () => {
+    const handler = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail as { source?: string } | undefined;
       void loadPoints();
+      if (detail?.source !== "order_paid") return; // 任务结算等其他积分变动仅刷新余额
       if (pollRef.current) clearInterval(pollRef.current);
       setOrder(null);
       toast.success("充值到账，余额已更新");
@@ -239,6 +230,43 @@ export default function PointsPage() {
 
   // 轮询兜底清理
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  // 积分明细弹窗（GET /points/transactions）
+  const [txnOpen, setTxnOpen] = useState(false);
+  const [txns, setTxns] = useState<{ txn_type: string; direction: string; amount: number; balance_after: number; description: string; created_at: string }[]>([]);
+  const [txnsLoading, setTxnsLoading] = useState(false);
+
+  const openTxns = async () => {
+    setTxnOpen(true);
+    setTxnsLoading(true);
+    try {
+      const d = await api.get<{ items: { txn_type: string; direction: string; amount: number; balance_after: number; description: string; created_at: string }[] }>("/points/transactions", { params: { page_size: 50 } });
+      setTxns(d.items ?? []);
+    } catch {
+      setTxns([]);
+    } finally {
+      setTxnsLoading(false);
+    }
+  };
+
+  // 流水类型 → 文案/颜色
+  const txnMeta = (t: { txn_type: string; direction: string; amount: number }): { label: string; cls: string; sign: string } => {
+    const map: Record<string, { label: string; cls: string }> = {
+      RECHARGE: { label: "充值", cls: "text-green-400" },
+      PACKAGE_ORDER: { label: "购买积分包", cls: "text-green-400" },
+      SUBSCRIPTION: { label: "订阅开通", cls: "text-green-400" },
+      ASSET_GENERATION: { label: "资产生成", cls: "text-red-400" },
+      VIDEO_GENERATION: { label: "视频生成", cls: "text-red-400" },
+      EXPORT: { label: "导出", cls: "text-red-400" },
+      FREEZE: { label: "冻结", cls: "text-amber-gold" },
+      UNFREEZE: { label: "解冻", cls: "text-amber-gold" },
+      REFUND: { label: "退款", cls: "text-green-400" },
+      ADMIN_ADJUST: { label: "管理员调整", cls: "text-blue-400" },
+    };
+    const m = map[t.txn_type] ?? { label: t.txn_type || "流水", cls: "text-text-secondary" };
+    const sign = t.direction === "CREDIT" || t.amount > 0 ? "+" : "";
+    return { label: m.label, cls: m.cls, sign };
+  };
 
   // 弹窗开关（对齐设计稿：body overflow 锁定 + ESC 关闭）
   const openPayModal = (o: PayOrder) => {
@@ -302,6 +330,15 @@ export default function PointsPage() {
           idempotency_key: `subscribe-${Date.now()}`,
         });
         toast.success("订阅订单已创建，等待支付回调（沙箱环境）");
+        // 开发环境：自动触发 mock 支付到账（生产无此端点，静默失败回退轮询）
+        try {
+          await api.post(`/orders/${resp.order_no}/mock-pay`);
+          toast.success("订阅已开通（沙箱支付）");
+          void loadPoints();
+          setOrder(null);
+          closePayModal();
+          return;
+        } catch { /* 生产环境无 mock-pay，走轮询 */ }
         if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = setInterval(async () => {
           try {
@@ -334,6 +371,15 @@ export default function PointsPage() {
         `purchase-${Date.now()}`,
       );
       toast.success("订单已创建，等待支付回调（沙箱环境）");
+      // 开发环境：自动触发 mock 支付到账（生产无此端点，静默失败回退轮询）
+      try {
+        await api.post(`/orders/${resp.order_no}/mock-pay`);
+        toast.success(`充值到账 +${pack.points} 积分`);
+        void loadPoints();
+        setOrder(null);
+        closePayModal();
+        return;
+      } catch { /* 生产环境无 mock-pay，走轮询 */ }
       // 轮询支付状态兜底（WS 到账事件会提前结束）
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(async () => {
@@ -384,15 +430,15 @@ export default function PointsPage() {
           {/* 中心导航（充值页无 active，对齐设计稿） */}
           <nav className="flex flex-col items-center gap-2 flex-shrink-0">
             <Link to="/" className="luxreal-nav-item" title="创作">
-              <Sparkles size={22} />
+              <Sparkles size={24} />
               <span>创作</span>
             </Link>
             <Link to="/feed" className="luxreal-nav-item" title="发现">
-              <Compass size={22} />
+              <Compass size={24} />
               <span>发现</span>
             </Link>
             <Link to="/projects" className="luxreal-nav-item" title="作品">
-              <Folder size={22} />
+              <Folder size={24} />
               <span>作品</span>
             </Link>
           </nav>
@@ -421,8 +467,13 @@ export default function PointsPage() {
             <ProfilePanel open={profileOpen} onClose={() => setProfileOpen(false)} />
           </div>
 
-          {/* 积分（真实余额） */}
-          <span className="sidebar-credits">{points === null ? "…" : points.toLocaleString()}</span>
+          {/* 积分（真实余额，点击查看明细，金色徽章 Coins 图标 + 数字） */}
+          <button className="sidebar-credits" style={{ cursor: "pointer" }} title="查看积分明细" onClick={() => void openTxns()}>
+            <span className="sidebar-credits-badge">
+              <Coins size={16} className="sidebar-credits-icon" />
+            </span>
+            {points === null ? "…" : points.toLocaleString()}
+          </button>
           {/* 充值（当前页） */}
           <Link to="/points" className="sidebar-recharge" title="充值">
             充值
@@ -443,28 +494,48 @@ export default function PointsPage() {
               让每一次创作都物超所值
             </p>
 
-            {/* Billing Toggle（积分包视图下隐藏，对齐设计稿 switchPlansView） */}
-            {view === "subscription" && (
-              <div className="billing-toggle-wrap">
-                <span
-                  className={`billing-label${billing === "monthly" ? " active" : ""}`}
-                  onClick={() => setBilling("monthly")}
-                >
-                  按月付费
-                </span>
-                <div
-                  className={`billing-switch${yearly ? " yearly" : ""}`}
-                  onClick={() => setBilling(yearly ? "monthly" : "yearly")}
-                />
-                <span
-                  className={`billing-label${yearly ? " active" : ""}`}
-                  onClick={() => setBilling("yearly")}
-                >
-                  按年付费
-                  <span className="billing-save">省 17%</span>
-                </span>
-              </div>
-            )}
+            {/* Billing Toggle（始终显示） */}
+            <div className="billing-toggle-wrap">
+              <span
+                className={`billing-label${billing === "monthly" ? " active" : ""}`}
+                onClick={() => setBilling("monthly")}
+              >
+                按月付费
+              </span>
+              <div
+                className={`billing-switch${yearly ? " yearly" : ""}`}
+                onClick={() => setBilling(yearly ? "monthly" : "yearly")}
+              />
+              <span
+                className={`billing-label${yearly ? " active" : ""}`}
+                onClick={() => setBilling("yearly")}
+              >
+                按年付费
+                {view === "subscription" && <span className="billing-save">省 17%</span>}
+              </span>
+            </div>
+
+            {/* 订阅套餐/积分包切换按钮（始终显示） */}
+            <div style={{ display: "flex", justifyContent: "center", marginTop: 24, gap: 8 }} id="packsToggle">
+              <button
+                className="plan-cta-btn"
+                style={view === "subscription"
+                  ? { width: "auto", padding: "10px 24px", borderColor: "#4C7FF8", background: "rgba(76, 127, 248, 0.1)" }
+                  : { width: "auto", padding: "10px 24px" }}
+                onClick={() => setView("subscription")}
+              >
+                订阅套餐
+              </button>
+              <button
+                className="plan-cta-btn"
+                style={view === "packs"
+                  ? { width: "auto", padding: "10px 24px", borderColor: "#4C7FF8", background: "rgba(76, 127, 248, 0.1)" }
+                  : { width: "auto", padding: "10px 24px" }}
+                onClick={() => setView("packs")}
+              >
+                积分包
+              </button>
+            </div>
           </section>
 
           {/* Pricing Container */}
@@ -652,49 +723,34 @@ export default function PointsPage() {
                     );
                   })}
                 </div>
+
+                {/* 积分包 FAQ */}
+                <div className="faq-section">
+                  <div className="section-header">
+                    <h2 className="section-title">常见问题</h2>
+                    <p className="section-subtitle">关于积分包的常见疑问</p>
+                  </div>
+                  <div className="faq-grid">
+                    {[
+                      { q: "积分会过期吗？", a: "购买的一次性积分包积分永久有效，不会过期。订阅套餐的月度积分当月有效，次月重置。消耗时系统会优先使用即将过期的积分。" },
+                      { q: "积分包可以与其他功能搭配使用吗？", a: "可以。积分可用于所有生成功能（角色、场景、道具、视频生成等），无限制地应用于任何需要积分的创作操作。" },
+                      { q: "如何充值积分？", a: "您可以随时在个人中心或当前页面选择积分包进行购买。购买后积分将立即到账并可用于创作。" },
+                      { q: "支持退款吗？", a: "未使用的积分包支持 7 天内无理由退款。如有退款需求，请联系客服处理。" },
+                      { q: "企业用户有优惠吗？", a: "大批量采购可享受专属报价和服务方案。如有 20 人以上团队采购需求，请联系我们的商务团队获取定制化优惠方案。" },
+                    ].map((f) => (
+                      <div key={f.q} className="faq-item">
+                        <div className="faq-question">
+                          <span>{f.q}</span>
+                          <ChevronDown size={20} />
+                        </div>
+                        <div className="faq-answer">{f.a}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* View Toggle（对齐设计稿 packsToggle：两个按钮常驻切换视图） */}
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: 48, gap: 8 }} id="packsToggle">
-              <button
-                className="plan-cta-btn"
-                style={view === "subscription"
-                  ? { width: "auto", padding: "10px 24px", borderColor: "#4C7FF8", background: "rgba(76, 127, 248, 0.1)" }
-                  : { width: "auto", padding: "10px 24px" }}
-                onClick={() => setView("subscription")}
-              >
-                订阅套餐
-              </button>
-              <button
-                className="plan-cta-btn"
-                style={view === "packs"
-                  ? { width: "auto", padding: "10px 24px", borderColor: "#4C7FF8", background: "rgba(76, 127, 248, 0.1)" }
-                  : { width: "auto", padding: "10px 24px" }}
-                onClick={() => setView("packs")}
-              >
-                积分包
-              </button>
-            </div>
-
-            {/* FAQ */}
-            <div className="faq-section">
-              <div className="section-header">
-                <h2 className="section-title">常见问题</h2>
-                <p className="section-subtitle">关于订阅和积分的常见疑问</p>
-              </div>
-              <div className="faq-grid">
-                {FAQS.map((f, idx) => (
-                  <div key={f.q} className={`faq-item${faqOpen === idx ? " open" : ""}`}>
-                    <div className="faq-question" onClick={() => setFaqOpen(faqOpen === idx ? null : idx)}>
-                      <span>{f.q}</span>
-                      <ChevronDown size={20} />
-                    </div>
-                    <div className="faq-answer">{f.a}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
 
           {/* Footer */}
@@ -784,6 +840,62 @@ export default function PointsPage() {
           </div>
         </div>
       </div>
+
+      {/* ===== 积分明细弹窗（GET /points/transactions） ===== */}
+      {txnOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: "rgba(5,5,15,0.72)", backdropFilter: "blur(6px)" }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setTxnOpen(false);
+          }}
+        >
+          <div
+            className="w-[560px] max-h-[75vh] flex flex-col rounded-2xl border border-[var(--luxreal-border)]"
+            style={{ background: "var(--luxreal-panel-bg, #15151D)", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--luxreal-border)]">
+              <div>
+                <div className="text-[15px] font-semibold text-[var(--luxreal-foreground)]">积分明细</div>
+                <div className="text-xs mt-0.5" style={{ color: "var(--luxreal-muted-foreground)" }}>
+                  当前余额 {points === null ? "…" : points.toLocaleString()} · 最近 50 条流水
+                </div>
+              </div>
+              <button onClick={() => setTxnOpen(false)} className="text-[var(--luxreal-muted-foreground)] hover:text-white transition-colors" aria-label="关闭">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-2.5">
+              {txnsLoading ? (
+                <div className="py-16 text-center text-sm" style={{ color: "var(--luxreal-muted-foreground)" }}>加载流水…</div>
+              ) : txns.length === 0 ? (
+                <div className="py-16 text-center text-sm" style={{ color: "var(--luxreal-muted-foreground)" }}>暂无积分流水</div>
+              ) : (
+                txns.map((t, i) => {
+                  const m = txnMeta(t);
+                  return (
+                    <div key={i} className="flex items-center gap-3">
+                      <div className={`text-sm font-medium w-24 flex-shrink-0 ${m.cls}`}>{m.label}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] text-white/70 truncate">{t.description || "—"}</div>
+                        <div className="text-[10px]" style={{ color: "var(--luxreal-muted-foreground)" }}>
+                          {t.created_at ? new Date(t.created_at).toLocaleString("zh-CN", { hour12: false }) : ""}
+                        </div>
+                      </div>
+                      <div className={`text-sm font-mono flex-shrink-0 ${m.cls}`}>
+                        {m.sign}{t.amount.toLocaleString()}
+                      </div>
+                      <div className="text-xs text-text-secondary font-mono flex-shrink-0 w-20 text-right">
+                        {t.balance_after.toLocaleString()}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

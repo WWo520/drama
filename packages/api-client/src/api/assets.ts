@@ -10,6 +10,16 @@ export interface CharacterItem {
   main_image_url: string;
   generation_status: string; // PENDING / QUEUED / RUNNING / SUCCESS / FAILED
   origin_episode_id: number | null;
+  // 多形象：该角色全部形象变体（backend ListCharacters 聚合返回；卡片形象名条/切换用）
+  variants?: VariantLite[];
+}
+
+// 形象变体精简项（对齐 GET /characters/:id/variants 返回结构）
+export interface VariantLite {
+  id: number;
+  name: string;
+  main_image_url: string;
+  generation_status: string;
 }
 
 export interface SceneItem {
@@ -19,6 +29,8 @@ export interface SceneItem {
   main_image_url: string;
   generation_status: string;
   point_cost: number;
+  // 场景时段变体（对齐 LuxReal 场景日夜多态）：按 time_of_day 分组的最新图
+  tod_variants?: { time_of_day: string; url: string }[];
 }
 
 export interface PropItem {
@@ -29,6 +41,7 @@ export interface PropItem {
   main_image_url: string;
   generation_status: string;
   point_cost: number;
+  description?: string; // F6: 道具描述（PATCH /props/:id 可编辑）
 }
 
 export interface AssetsOverview {
@@ -46,9 +59,22 @@ export const GenStatusMeta: Record<string, { label: string; tone: string }> = {
   FAILED: { label: "失败", tone: "red" },
 };
 
+export interface GenParams {
+  prompt?: string;
+  model_code?: string;
+  style_name?: string;
+  aspect_ratio?: string;
+  resolution?: string;
+  use_default_composition?: boolean;
+  ref_image_urls?: string[];
+}
+
 export interface BatchGenerateReq {
   episode_id: string;
-  items: { kind: "CHARACTER_VARIANT" | "SCENE" | "PROP"; target_id: number }[];
+  items: { kind: "CHARACTER_VARIANT" | "SCENE" | "PROP"; target_id: number; gen?: GenParams }[];
+  // 批量弹窗顶层参数：选中的图片模型 / 每个资产生成张数（≥1）
+  model_code?: string;
+  per_asset_count?: number;
 }
 
 export interface PresignResp {

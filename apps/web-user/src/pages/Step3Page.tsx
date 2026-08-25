@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import {
   Box, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, Film,
   GripVertical, History, ImagePlus, Loader2, Mic2, Monitor, MoreHorizontal,
-  Pencil, Play, Plus, RefreshCw, Settings2, Sparkles, Subtitles, User, X, Zap,
+  Pencil, Play, Plus, RefreshCw, Settings2, Sparkles, Subtitles, User, Zap,
 } from "lucide-react";
 
 import {
@@ -20,6 +20,7 @@ import {
   type BeatDetail,
   type BeatSummary,
   type EpisodeLite,
+  type NuAssetLinkItem,
   type NuVersionItem,
   type ProjectDetail,
   type ShotVideo,
@@ -28,6 +29,7 @@ import {
 import WorkbenchShell from "../layouts/WorkbenchShell";
 import ProjectLoadError from "../components/ProjectLoadError";
 import { useStepState } from "../hooks/useStepState";
+import { matchTaskTypes, useWsDrivenPoll } from "../hooks/useWsDrivenPoll";
 import "./step3.css";
 
 // 错误文案：ApiError 走错误码映射（05 C 章），避免弹出后端原始报文
@@ -44,6 +46,35 @@ function fmtVersionTime(iso: string): string {
   const m = iso?.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
   if (!m) return iso || "—";
   return `${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+}
+
+// 关联资产就绪判定（对齐后端 LoadShotRefs：参考图 URL 非空即可用）
+const assetReady = (l: NuAssetLinkItem) => !!l.main_image_url;
+
+// 资产类型 → 中文名（chips 提示用）
+const ASSET_KIND_LABEL: Record<string, string> = { CHARACTER: "角色", SCENE: "场景", PROP: "道具" };
+
+// ===== 关联资产 chip（17 - 工作台对齐：名称引用占位，对齐 LuxReal「关联资产 仓鼠 我 老板 4 +」） =====
+function AssetChip({ link, onGoAssets }: { link: NuAssetLinkItem; onGoAssets: () => void }) {
+  const ready = assetReady(link);
+  const label = link.name || ASSET_KIND_LABEL[link.asset_kind] || "资产";
+  return (
+    <div
+      className="asset-avatar"
+      style={ready ? undefined : { background: "#2A2A35" }}
+      title={`${ASSET_KIND_LABEL[link.asset_kind] ?? ""} · ${label}${ready ? "" : "（待生成）"}`}
+      onClick={onGoAssets}
+    >
+      {ready ? (
+        <img src={link.main_image_url} alt={label} className="w-full h-full object-cover" />
+      ) : (
+        <span className="w-full h-full flex items-center justify-center text-[9px] text-[#8B8B9A] select-none">
+          {label.slice(0, 1)}
+        </span>
+      )}
+      {!ready && <span className="absolute bottom-0 right-0 w-1.5 h-1.5 rounded-full" style={{ background: "#F5B23C" }} />}
+    </div>
+  );
 }
 
 // BeatDetail 展平后的单镜头文案
@@ -71,7 +102,17 @@ function ShotStatusBadge({ status }: { status: string }) {
 }
 
 // ===== 镜头卡 =====
-function ShotCard({ shot, detail }: { shot: ShotVideo; detail?: ShotDetailLite }) {
+function ShotCard({
+  shot,
+  detail,
+  onRegenerate,
+  onAddRefImage,
+}: {
+  shot: ShotVideo;
+  detail?: ShotDetailLite;
+  onRegenerate: (shot: ShotVideo) => void;
+  onAddRefImage: (shot: ShotVideo) => void;
+}) {
   const done = shot.video_generation_status === "SUCCESS";
   const running = shot.video_generation_status === "RUNNING";
   // 参考图 chips：无数据源时按镜头序号轮转渐变色（视觉保真占位）
@@ -86,7 +127,7 @@ function ShotCard({ shot, detail }: { shot: ShotVideo; detail?: ShotDetailLite }
             <span>{shot.duration_sec}s</span>
             <ChevronDown size={12} />
           </div>
-          <button className="icon-btn icon-btn-sm" onClick={() => toast.info("单镜头重新生成将在后续版本开放")}>
+          <button className="icon-btn icon-btn-sm" onClick={() => onRegenerate(shot)} disabled={running} title="单镜头重新生成">
             <RefreshCw size={14} />
           </button>
           <button className="icon-btn icon-btn-sm" onClick={() => toast.info("更多操作即将上线")}>
@@ -184,10 +225,11 @@ function ShotCard({ shot, detail }: { shot: ShotVideo; detail?: ShotDetailLite }
               <button
                 className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border text-white/70 hover:text-white transition-colors"
                 style={{ background: "#16161C", borderColor: "#2A2A35" }}
-                onClick={() => toast.info("添加参考图将在后续版本开放")}
+                onClick={() => onAddRefImage(shot)}
+                disabled={running}
               >
                 <ImagePlus size={12} />
-                <span>添加参考图</span>
+                <span>生成参考图</span>
               </button>
             </div>
             <div className="flex items-center gap-1.5">
@@ -222,15 +264,17 @@ function MaximizeIcon() {
 function GenVideoModal({
   beat,
   shots,
+  links,
   submitting,
   onClose,
   onConfirm,
 }: {
   beat: BeatSummary;
   shots: ShotVideo[];
+  links: NuAssetLinkItem[];
   submitting: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: (opts: { resolution?: string; video_model?: string; model_key?: string }) => void;
 }) {
   const [model, setModel] = useState("2.5");
   const [resolution, setResolution] = useState("1080P");
@@ -243,6 +287,9 @@ function GenVideoModal({
   const totalSec = shots.reduce((acc, s) => acc + (s.duration_sec || 0), 0);
   const factor = MODEL_OPTIONS.find((m) => m.key === model)?.factor ?? 4;
   const estCost = Math.max(totalSec * factor, shots.length * 10);
+  // 资产就绪度（17 - 工作台对齐）：未全就绪时提示纯文生视频降级（对齐后端 LoadShotRefs 行为）
+  const readyCount = links.filter((l) => !!l.main_image_url).length;
+  const notReady = links.length > 0 && readyCount < links.length;
 
   return (
     <div className="gen-modal-overlay" onClick={onClose}>
@@ -250,6 +297,16 @@ function GenVideoModal({
         <div className="modal-header">
           <div className="modal-title">生成视频</div>
           <div className="modal-desc">{beat.title} · {shots.length || beat.shot_group_count} 个镜头 · 选择模型与参数生成</div>
+          {notReady && (
+            /* 软门控提示（17 - 工作台对齐）：知情确认，不阻断 */
+            <div
+              className="mt-2 rounded-lg px-3 py-2 text-xs leading-relaxed"
+              style={{ background: "rgba(245,178,60,0.12)", color: "#F5B23C" }}
+            >
+              本单元有 {links.length - readyCount} 个关联资产未生成参考图，相关镜头将使用纯文生视频模式生成；可先返回 Step2
+              补齐资产以获得更好的一致性。
+            </div>
+          )}
         </div>
         <div className="gen-modal-body">
           {/* 生成模型 */}
@@ -279,7 +336,7 @@ function GenVideoModal({
                 分辨率
               </div>
               <div className="gen-segmented">
-                {["480P", "1080P", "4K"].map((r) => (
+                {["480P", "720P", "1080P"].map((r) => (
                   <button key={r} className={`gen-segmented-btn ${resolution === r ? "active" : ""}`} onClick={() => setResolution(r)}>{r}</button>
                 ))}
               </div>
@@ -369,7 +426,17 @@ function GenVideoModal({
         </div>
         <div className="modal-footer">
           <button className="btn-modal-cancel" onClick={onClose}>取消</button>
-          <button className="btn-modal-primary btn-gen-start" disabled={submitting} onClick={onConfirm}>
+          <button
+            className="btn-modal-primary btn-gen-start"
+            disabled={submitting}
+            onClick={() =>
+              onConfirm({
+                resolution: resolution === "480P" ? "P480" : resolution === "720P" ? "P720" : "P1080",
+                model_key: model,
+                video_model: MODEL_OPTIONS.find((m) => m.key === model)?.name ?? "Seedance 2.5",
+              })
+            }
+          >
             {submitting ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
             {submitting ? "提交中…" : "开始生成"}
           </button>
@@ -389,6 +456,8 @@ export default function Step3Page() {
   const [loadError, setLoadError] = useState(false);
   const [shotsMap, setShotsMap] = useState<Record<string, ShotVideo[]>>({});
   const [detailsMap, setDetailsMap] = useState<Record<string, BeatDetail>>({});
+  // 关联资产（17 - 工作台对齐）：beat_id → 关联资产清单；加载失败保持空（回退视觉占位）
+  const [linksMap, setLinksMap] = useState<Record<string, NuAssetLinkItem[]>>({});
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [scriptOpen, setScriptOpen] = useState<Record<string, boolean>>({});
   const [genTarget, setGenTarget] = useState<BeatSummary | null>(null);
@@ -405,7 +474,8 @@ export default function Step3Page() {
   const [replanKeepRefs, setReplanKeepRefs] = useState(true);
   const [replanApplySkill, setReplanApplySkill] = useState(false);
   const [replanSubmitting, setReplanSubmitting] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 重新规划进行中标记：驱动 STORYBOARD_PLAN_V1_LUXCHAT 终态后的分镜刷新
+  const [replanning, setReplanning] = useState(false);
 
   const stepState = useStepState(projectId, proj?.status ?? null);
 
@@ -469,6 +539,34 @@ export default function Step3Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, activeEpisode]);
 
+  // 加载本剧集的叙事单元↔资产关联（失败静默，收起态回退视觉占位）
+  const loadAssetLinks = useCallback(async (episodeId: string | null) => {
+    if (!episodeId) return;
+    try {
+      const d = await videoApi.nuAssetLinks(episodeId);
+      const map: Record<string, NuAssetLinkItem[]> = {};
+      (d.items ?? []).forEach((l) => {
+        (map[l.beat_id] ??= []).push(l);
+      });
+      setLinksMap(map);
+    } catch {
+      setLinksMap({});
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAssetLinks(activeEpisode);
+  }, [activeEpisode, loadAssetLinks]);
+
+  // 资产联动回写（17 - 工作台对齐 P2）：资产生成任务 WS 终态 → 刷新关联资产，
+  // 实现 Step2 补图后 chips/就绪度自动更新（在线仅事件驱动，断线 60s 兜底）
+  useWsDrivenPoll(() => void loadAssetLinks(activeEpisode), {
+    active: !!activeEpisode,
+    pollMs: 60000,
+    slowPollMs: 0,
+    match: matchTaskTypes(["CHAR_IMAGE_GEN", "SCENE_IMAGE_GEN", "PROP_IMAGE_GEN"]),
+  });
+
   useEffect(() => {
     if (beats.length > 0) {
       void loadShots(beats);
@@ -481,39 +579,82 @@ export default function Step3Page() {
     [beats, shotsMap],
   );
 
-  // 有活动任务 → 3s 轮询；全部终态 → 停止并刷新项目状态（解锁 Step4）
-  useEffect(() => {
-    if (anyActive && !pollRef.current) {
-      pollRef.current = setInterval(async () => {
+  // 定向刷新（限流治理）：只拉取有 RUNNING 镜头的 beat 并合并进 map，收敛请求扇出（N → 活跃数）
+  const refreshRunningShots = useCallback(async (beatList: BeatSummary[], prev: Record<string, ShotVideo[]>) => {
+    const targets = beatList.filter((b) => (prev[b.beat_id] ?? []).some((s) => isActive(s.video_generation_status)));
+    const next = { ...prev };
+    await Promise.all(
+      targets.map(async (b) => {
         try {
-          const map = await loadShots(beats);
-          const still = beats.some((b) => (map[b.beat_id] ?? []).some((s) => isActive(s.video_generation_status)));
-          if (!still && pollRef.current) {
-            clearInterval(pollRef.current);
-            pollRef.current = null;
-            toast.success("视频生成完成");
-            // 刷新项目状态：VIDEO_GENERATING → ALL_VIDEOS_READY（Step4 解锁）
-            try {
-              setProj(await projectsApi.detail(projectId));
-            } catch { /* 忽略 */ }
-          }
-        } catch { /* 轮询容错 */ }
-      }, 3000);
-    } else if (!anyActive && pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, [anyActive, beats, loadShots, projectId]);
+          const d = await videoApi.beatShots(b.beat_id);
+          next[b.beat_id] = d.items ?? [];
+        } catch { /* 忽略单 beat 刷新失败 */ }
+      }),
+    );
+    setShotsMap(next);
+    return next;
+  }, []);
 
-  // WS 实时进度：TASK_PROGRESS/TASK_SUCCESS → 主动刷新 shots
+  // 有活动任务：WS 终态推送驱动刷新（视频任务），断线回退 5s 轮询；全部终态 → 刷新项目状态（解锁 Step4）
+  const videoDoneRef = useRef(false);
+  const refreshVideos = useCallback(async () => {
+    if (videoDoneRef.current) return;
+    try {
+      const map = await refreshRunningShots(beats, shotsMap);
+      const still = beats.some((b) => (map[b.beat_id] ?? []).some((s) => isActive(s.video_generation_status)));
+      if (!still) {
+        videoDoneRef.current = true;
+        toast.success("视频生成完成");
+        // 刷新项目状态：VIDEO_GENERATING → ALL_VIDEOS_READY（Step4 解锁）
+        try {
+          setProj(await projectsApi.detail(projectId));
+        } catch { /* 忽略 */ }
+      }
+    } catch { /* 刷新容错 */ }
+  }, [beats, shotsMap, refreshRunningShots, projectId]);
+
+  useWsDrivenPoll(refreshVideos, {
+    active: anyActive,
+    pollMs: 5000,
+    match: matchTaskTypes(["VIDEO_SEGMENT_GEN", "VIDEO_GROUP_CONCAT"]),
+  });
+
+  // 重新规划（STORYBOARD_PLAN_V1_LUXCHAT）终态 → 刷新分镜数据（对齐 LuxReal 独立分镜生成）
+  useWsDrivenPoll(
+    () => {
+      if (!replanning) return;
+      void loadShots(beats);
+      void loadDetails(beats);
+      toast.success("重新规划完成，分镜已刷新");
+      setReplanning(false);
+    },
+    {
+      active: replanning,
+      pollMs: 5000,
+      match: matchTaskTypes(["STORYBOARD_PLAN_V1_LUXCHAT"]),
+    },
+  );
+
+  // 有活动任务重新出现（新一轮生成）→ 重置终态守卫
   useEffect(() => {
-    const handler = (ev: Event) => {
-      const data = (ev as CustomEvent).detail as { task_uuid?: string } | undefined;
-      if (data?.task_uuid) void loadShots(beats);
+    if (anyActive) videoDoneRef.current = false;
+  }, [anyActive]);
+
+  // WS 实时进度：TASK_PROGRESS → 2.5s 尾随防抖后定向刷新（突发进度合并为一次，避免打爆后端限流）
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const handler = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        void refreshRunningShots(beats, shotsMap);
+      }, 2500);
     };
     window.addEventListener("task:progress", handler);
-    return () => window.removeEventListener("task:progress", handler);
-  }, [beats, loadShots]);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("task:progress", handler);
+    };
+  }, [beats, shotsMap, refreshRunningShots]);
 
   const toggleExpand = (beatId: string) => {
     setExpandedIds((prev) => {
@@ -524,12 +665,12 @@ export default function Step3Page() {
     });
   };
 
-  // 提交生成视频（弹窗确认后）
-  const handleGenerate = async () => {
+  // 提交生成视频（弹窗确认后，弹窗参数随请求落任务表——对齐 LuxReal 参数持久化）
+  const handleGenerate = async (opts?: { resolution?: string; video_model?: string; model_key?: string }) => {
     if (!genTarget) return;
     try {
       setSubmitting(true);
-      const r = await videoApi.generateBeat(genTarget.beat_id);
+      const r = await videoApi.generateBeat(genTarget.beat_id, opts);
       toast.success(`已提交 ${r.created}/${r.total} 个视频生成任务`);
       setGenTarget(null);
       setExpandedIds((prev) => new Set(prev).add(genTarget.beat_id));
@@ -542,6 +683,27 @@ export default function Step3Page() {
       toast.error(errMsg(e, "生成视频失败"));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // 单镜头重新生成（阶段三：真实链路——计费冻结 + Outbox 派发）
+  const handleRegenerateShot = async (shot: ShotVideo) => {
+    try {
+      await videoApi.regenerateShot(String(shot.shot_id));
+      toast.success(`镜头 ${String(shot.sort_order).padStart(2, "0")} 重新生成任务已提交`);
+      void loadShots(beats);
+    } catch (e) {
+      toast.error(errMsg(e, "提交单镜头重新生成失败"));
+    }
+  };
+
+  // 生成镜头级参考图（对齐 LuxReal「镜头N的参考图」，SHOT_REF_IMAGE_GEN）
+  const handleAddRefImage = async (shot: ShotVideo) => {
+    try {
+      await videoApi.generateShotRefImage(String(shot.shot_id));
+      toast.success(`镜头 ${String(shot.sort_order).padStart(2, "0")} 参考图生成任务已提交`);
+    } catch (e) {
+      toast.error(errMsg(e, "提交镜头参考图生成失败"));
     }
   };
 
@@ -615,6 +777,7 @@ export default function Step3Page() {
       await splitApi.replan(replanTarget.beat_id);
       toast.success("重新规划任务已提交，请稍候");
       setReplanTarget(null);
+      setReplanning(true);
     } catch (e) {
       toast.error(errMsg(e, "提交重新规划失败"));
     } finally {
@@ -637,6 +800,7 @@ export default function Step3Page() {
       currentStep={3}
       canClick={stepState.canClick}
       goStep={stepState.goStep}
+      stepDone={stepState.stepDone}
       episodes={episodes}
       activeEpisodeId={activeEpisode}
       onSelectEpisode={setActiveEpisode}
@@ -679,9 +843,24 @@ export default function Step3Page() {
       {/* Content Scroll Area */}
       <div className="flex-1 overflow-y-auto px-6 pb-24 scrollbar-thin">
         <div className="flex flex-col gap-3 mx-auto" style={{ maxWidth: "85%" }}>
-          {beats.length === 0 && (
+          {beats.length === 0 && episodes.length === 0 && (
+            /* 未拆分空态引导（17 - 工作台对齐：可浏览 + 引导，不封锁） */
+            <div className="rounded-2xl border border-dashed border-white/10 p-14 flex flex-col items-center gap-4 text-center">
+              <Clapperboard size={32} className="text-[#6B7088]" />
+              <div className="text-sm text-white/70">完成剧本拆分后，可在此按叙事单元生成分镜与视频</div>
+              <button
+                className="h-10 px-6 rounded-xl flex items-center gap-2 text-sm text-white font-medium transition-all hover:opacity-90"
+                style={{ background: "linear-gradient(135deg, #4C7FF8, #8B5CF6)" }}
+                onClick={() => stepState.goStep(1)}
+              >
+                前往剧本拆分
+              </button>
+            </div>
+          )}
+
+          {beats.length === 0 && episodes.length > 0 && (
             <div className="rounded-2xl border border-dashed border-white/10 p-14 text-center text-sm text-slate-500">
-              暂无叙事单元。请先在 Step1 完成剧本拆分。
+              本集暂无叙事单元，可在 Step1 补充或新增。
             </div>
           )}
 
@@ -692,6 +871,8 @@ export default function Step3Page() {
             const doneCount = shots.filter((s) => s.video_generation_status === "SUCCESS").length;
             const allDone = shots.length > 0 && doneCount === shots.length;
             const showScript = scriptOpen[beat.beat_id] ?? true;
+            const links = linksMap[beat.beat_id] ?? [];
+            const readyCount = links.filter(assetReady).length;
 
             return (
               <div key={beat.beat_id} id={`unit-card-${beat.beat_id}`} className="video-unit-card">
@@ -725,6 +906,20 @@ export default function Step3Page() {
                   <div className="unit-actions" onClick={(e) => e.stopPropagation()}>
                     <span className="unit-duration-label">时长</span>
                     <span className="unit-duration-value">{beat.preset_duration_sec}秒</span>
+                    {links.length > 0 && (
+                      /* 单元级资产就绪度（17 - 工作台对齐）：n/m 已就绪，点击回 Step2 补齐 */
+                      <span
+                        className="text-[10px] px-2 py-0.5 rounded cursor-pointer transition-opacity hover:opacity-80"
+                        style={{
+                          background: readyCount === links.length ? "rgba(16,185,129,0.15)" : "rgba(245,178,60,0.15)",
+                          color: readyCount === links.length ? "#10B981" : "#F5B23C",
+                        }}
+                        title={`关联资产 ${readyCount}/${links.length} 已就绪${readyCount < links.length ? "，未就绪资产生成视频时将走纯文生视频" : ""}`}
+                        onClick={() => stepState.goStep(2)}
+                      >
+                        资产 {readyCount}/{links.length}
+                      </span>
+                    )}
                     <button className="icon-btn icon-btn-sm" onClick={() => toast.info("更多操作即将上线")}>
                       <MoreHorizontal size={16} />
                     </button>
@@ -775,7 +970,13 @@ export default function Step3Page() {
                     {shots.length > 0 ? (
                       <div className="shots-grid">
                         {shots.map((s) => (
-                          <ShotCard key={s.shot_uuid} shot={s} detail={detailOf(beat.beat_id, s.sort_order)} />
+                          <ShotCard
+                            key={s.shot_uuid}
+                            shot={s}
+                            detail={detailOf(beat.beat_id, s.sort_order)}
+                            onRegenerate={(shot) => void handleRegenerateShot(shot)}
+                            onAddRefImage={(shot) => void handleAddRefImage(shot)}
+                          />
                         ))}
                       </div>
                     ) : (
@@ -785,14 +986,29 @@ export default function Step3Page() {
                 ) : (
                   <>
                     <div className="script-preview-collapsed">{beat.script_text}</div>
-                    {/* 关联资产占位（头像渐变位，真实关联数据待后续接口） */}
+                    {/* 关联资产（17 - 工作台对齐）：真实关联数据 chips（就绪缩略图 / 未就绪名称占位）；无数据回退渐变占位 */}
                     <div className="assets-row">
                       <span className="assets-label">关联资产</span>
                       <div className="assets-avatars">
-                        <div className="asset-avatar asset-avatar-1" />
-                        <div className="asset-avatar asset-avatar-2" />
-                        <div className="asset-avatar asset-avatar-3" />
-                        <div className="asset-more">+{beat.shot_group_count > 3 ? beat.shot_group_count - 3 : 0}</div>
+                        {links.length > 0 ? (
+                          <>
+                            {links.slice(0, 5).map((l) => (
+                              <AssetChip key={`${l.asset_kind}-${l.asset_id}`} link={l} onGoAssets={() => stepState.goStep(2)} />
+                            ))}
+                            {links.length > 5 && (
+                              <div className="asset-more" title={`共 ${links.length} 个关联资产`} onClick={() => stepState.goStep(2)}>
+                                +{links.length - 5}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <div className="asset-avatar asset-avatar-1" />
+                            <div className="asset-avatar asset-avatar-2" />
+                            <div className="asset-avatar asset-avatar-3" />
+                            <div className="asset-more">+{beat.shot_group_count > 3 ? beat.shot_group_count - 3 : 0}</div>
+                          </>
+                        )}
                       </div>
                     </div>
                   </>
@@ -829,9 +1045,10 @@ export default function Step3Page() {
         <GenVideoModal
           beat={genTarget}
           shots={shotsMap[genTarget.beat_id] ?? []}
+          links={linksMap[genTarget.beat_id] ?? []}
           submitting={submitting}
           onClose={() => !submitting && setGenTarget(null)}
-          onConfirm={() => void handleGenerate()}
+          onConfirm={(opts) => void handleGenerate(opts)}
         />
       )}
 
@@ -914,23 +1131,6 @@ export default function Step3Page() {
                 {replanSubmitting ? "提交中…" : "重新规划"}
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* 未解锁提示（直接访问未达状态的 step 时温和提示） */}
-      {proj && !stepState.canClick(3) && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-[#1A1A2E] border border-[#2A2A3E] rounded-2xl p-6 w-[360px] text-center">
-            <X size={20} className="mx-auto mb-3 text-[#6B7088]" />
-            <div className="text-white text-sm font-medium mb-2">视频制作尚未解锁</div>
-            <div className="text-xs text-[#6B7088] mb-4">请先在 Step2 完成全部资产生成</div>
-            <button
-              className="btn-modal-primary w-full justify-center"
-              onClick={() => stepState.goStep(2)}
-            >
-              返回资产生成
-            </button>
           </div>
         </div>
       )}

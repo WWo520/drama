@@ -62,7 +62,8 @@ func (s *TaskStore) RenewLeaseDB(ctx context.Context, id int64, owner string, le
 func (s *TaskStore) CompleteTask(ctx context.Context, id int64, owner string, resultJSON []byte, output string) error {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE generation_tasks SET status='SUCCESS', completed_at=NOW(), lease_owner=NULL, lease_expires_at=NULL,
-		       progress_pct=100, result_output_json=COALESCE($3::jsonb, '{}'::jsonb), user_display_error=NULL
+		       progress_pct=100, result_output_json=COALESCE($3::jsonb, '{}'::jsonb), user_display_error=NULL,
+		       error_code=NULL, error_message=NULL
 		WHERE id=$1 AND status='RUNNING' AND lease_owner=$2`,
 		id, owner, resultJSON)
 	if err != nil {
@@ -123,6 +124,32 @@ func (s *TaskStore) FailTask(ctx context.Context, id int64, owner, reason string
 		return false, err
 	}
 	return dead, nil
+}
+
+// UnclaimTask 无执行器释放：RUNNING→QUEUED + 补发 Outbox（不计重试、不写失败日志；
+// Worker 能力不匹配不是任务错误，等有执行器的 Worker 消费。重试计数不动，
+// 与 ReapExpired 的宕机回收区分开——后者会累加 retry_count）。
+func (s *TaskStore) UnclaimTask(ctx context.Context, id int64, owner string) (bool, error) {
+	var taskID int64
+	err := s.pool.QueryRow(ctx, `
+		WITH upd AS (
+		  UPDATE generation_tasks SET status='QUEUED', enqueued_at=NOW(), lease_owner=NULL, lease_expires_at=NULL, updated_at=NOW()
+		  WHERE id=$1 AND status='RUNNING' AND lease_owner=$2
+		  RETURNING id
+		)
+		INSERT INTO task_dispatch_outbox (event_type, task_id, dispatch_key, queue_name, payload_json)
+		SELECT 'TASK_DISPATCH', id, 'task:'||id||':dispatch:unclaim-'||extract(epoch from now()), 'unclaim',
+		       jsonb_build_object('task_id', id)
+		FROM upd
+		RETURNING task_id`,
+		id, owner).Scan(&taskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *TaskStore) RequeueDue(ctx context.Context, now time.Time) ([]*task.Task, error) {
@@ -230,17 +257,57 @@ func (s *TaskStore) ReapExpired(ctx context.Context, now time.Time) ([]*task.Tas
 		if err := rows.Scan(&t.ID, &t.Priority); err != nil {
 			return nil, err
 		}
-		// 回 QUEUED + 新 Outbox（B4.1a 同一事务；enqueued_at 刷新）
-		if _, err := s.pool.Exec(ctx, `
+		// 08 审查 Major#15:超租约任务根据 retry_count/max_retry_count 决定回 QUEUED 或转 FAILED_DEAD；
+		// 转死信的任务不再生成新 Outbox（dispatch_key NOT NULL，WHERE 过滤）
+		// 枚举列赋值需显式 cast（CASE 表达式推断为 text，直接赋给 generation_status_enum 报 42804）
+		_, err := s.pool.Exec(ctx, `
 			WITH upd AS (
-			  UPDATE generation_tasks SET status='QUEUED', enqueued_at=NOW(), lease_owner=NULL, lease_expires_at=NULL,
-			         retry_count = retry_count + 1
-			  WHERE id=$1 AND status='RUNNING' RETURNING id
+			  UPDATE generation_tasks SET
+			    status=CASE WHEN retry_count+1 >= max_retry_count THEN 'FAILED_DEAD'::generation_status_enum ELSE 'QUEUED'::generation_status_enum END,
+			    enqueued_at=NOW(), lease_owner=NULL, lease_expires_at=NULL,
+			    retry_count = retry_count + 1, updated_at=NOW()
+			  WHERE id=$1 AND status='RUNNING' RETURNING id, status
 			)
 			INSERT INTO task_dispatch_outbox (event_type, task_id, dispatch_key, queue_name, payload_json)
 			SELECT 'TASK_DISPATCH', id, 'task:'||id||':dispatch:reap-'||extract(epoch from now()), 'reap',
 			       jsonb_build_object('task_id', id)
-			FROM upd`, t.ID); err != nil {
+			FROM upd WHERE status='QUEUED'`, t.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, &t)
+	}
+	return out, rows.Err()
+}
+
+// RequeueStuckQueued 修复卡死 QUEUED 任务（08 审查 Major#14）：Worker Claim 后 DB 错误导致任务永久滞留 QUEUED，
+// 利用迁移 000009 预留的 idx_gen_tasks_queued_repair 索引扫描并重新生成 Outbox 重投。
+func (s *TaskStore) RequeueStuckQueued(ctx context.Context, stuckBefore time.Time) ([]*task.Task, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, priority FROM generation_tasks
+		WHERE status='QUEUED' AND enqueued_at < $1 AND deleted_at IS NULL
+		FOR UPDATE SKIP LOCKED`, stuckBefore)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*task.Task
+	for rows.Next() {
+		var t task.Task
+		if err := rows.Scan(&t.ID, &t.Priority); err != nil {
+			return nil, err
+		}
+		// 刷新入队时间并补发 Outbox（dispatch_key 唯一约束用时间戳后缀避让）
+		if _, err := s.pool.Exec(ctx, `
+			WITH upd AS (
+			  UPDATE generation_tasks SET enqueued_at=NOW(), updated_at=NOW()
+			  WHERE id=$1 AND status='QUEUED' RETURNING id
+			)
+			INSERT INTO task_dispatch_outbox (event_type, task_id, dispatch_key, queue_name, payload_json)
+			SELECT 'TASK_DISPATCH', id, 'task:'||id||':dispatch:stuck-'||extract(epoch from now()), 'stuck-repair',
+			       jsonb_build_object('task_id', id)
+			FROM upd
+			ON CONFLICT (dispatch_key) DO NOTHING`, t.ID); err != nil {
 			return nil, err
 		}
 		out = append(out, &t)

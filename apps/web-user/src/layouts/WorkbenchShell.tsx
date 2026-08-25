@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  ChevronDown, ChevronLeft, ChevronRight, Layout, MessageCircle, Plus, Users,
+  Check, ChevronDown, ChevronLeft, ChevronRight, Layout, MessageCircle, Plus, Users,
 } from "lucide-react";
 
 import type { BeatSummary, EpisodeLite } from "@duanju/api-client";
@@ -23,6 +23,7 @@ export default function WorkbenchShell({
   currentStep,
   canClick,
   goStep,
+  stepDone,
   episodes,
   activeEpisodeId,
   onSelectEpisode,
@@ -33,6 +34,8 @@ export default function WorkbenchShell({
   currentStep: number;
   canClick: (s: number) => boolean;
   goStep: (s: number) => void;
+  /** 各 Step 是否已完成（17 - 工作台对齐 P2：已完成 ✓ / 进行中 / 未开始 三态视觉） */
+  stepDone?: (s: number) => boolean;
   episodes: EpisodeLite[];
   activeEpisodeId: string | null;
   onSelectEpisode: (id: string) => void;
@@ -49,7 +52,7 @@ export default function WorkbenchShell({
         <aside className="ep-sidebar flex flex-col flex-shrink-0 scrollbar-thin">
           {/* Top Header */}
           <div className="ep-sidebar-header">
-            <a className="ep-sidebar-back" onClick={() => navigate("/projects")}>
+            <a className="ep-sidebar-back" onClick={() => navigate("/")}>
               <ChevronLeft size={18} />
             </a>
             <span className="ep-sidebar-project">{projectTitle || "加载中…"}</span>
@@ -69,9 +72,9 @@ export default function WorkbenchShell({
                   <div className="ep-header">
                     <div className="ep-header-left">
                       {expanded ? (
-                        <ChevronDown size={14} className="ep-chevron" />
+                        <ChevronDown size={16} className="ep-chevron" />
                       ) : (
-                        <ChevronRight size={14} className="ep-chevron" />
+                        <ChevronRight size={16} className="ep-chevron" />
                       )}
                       <span className="ep-number">第{ep.sort_order}集</span>
                     </div>
@@ -110,7 +113,7 @@ export default function WorkbenchShell({
 
           {/* Bottom: Add Episode Button */}
           <button className="ep-add-btn" onClick={() => toast.info("手动新增剧集将在后续版本开放")}>
-            <Plus size={14} />
+            <Plus size={16} />
             新增剧集
           </button>
         </aside>
@@ -128,10 +131,12 @@ export default function WorkbenchShell({
                 {WORKFLOW_STEPS.map((s) => (
                   <a
                     key={s.n}
-                    className={`workflow-nav-item ${currentStep === s.n ? "active" : ""} ${canClick(s.n) ? "" : "disabled"}`}
+                    className={`workflow-nav-item ${currentStep === s.n ? "active" : ""} ${stepDone?.(s.n) && currentStep !== s.n ? "done" : ""} ${canClick(s.n) ? "" : "disabled"}`}
                     onClick={() => canClick(s.n) && goStep(s.n)}
                   >
-                    <span className="workflow-nav-num">{s.n}</span>
+                    <span className={`workflow-nav-num ${stepDone?.(s.n) && currentStep !== s.n ? "done" : ""}`}>
+                      {stepDone?.(s.n) && currentStep !== s.n ? <Check size={11} /> : s.n}
+                    </span>
                     <span className="workflow-nav-text">{s.label}</span>
                   </a>
                 ))}

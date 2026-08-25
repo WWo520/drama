@@ -44,6 +44,8 @@ type Worker struct {
 	leaseTTL time.Duration
 	// Settler 任务结算回调（S1-B09 计费集成：成功扣费/失败解冻）
 	Settler func(ctx context.Context, taskID int64, deliverable bool) error
+	// Notifier 任务终态通知回调（可选；WS 推送 TASK_SUCCESS/TASK_FAILED，轮询对齐 LuxReal 的 WS 驱动基础）
+	Notifier func(ctx context.Context, t *Task, status string, reason string)
 }
 
 func NewWorker(store Store, queue *Queue, handlers []Handler) *Worker {
@@ -83,7 +85,11 @@ func (w *Worker) processOnce(ctx context.Context) bool {
 	// ② DB CAS 最终裁决：QUEUED→RUNNING（Redis 锁只是加速层，DB 状态唯一裁决）
 	claimed, err := w.store.ClaimForRun(ctx, taskID, w.owner, time.Now().Add(w.leaseTTL))
 	if err != nil {
+		// 08 审查 Major#14：DB 错误时任务回 Redis 队列（不丢弃），避免永久卡 QUEUED
 		w.queue.Release(ctx, taskID, w.owner)
+		if rerr := w.queue.Requeue(ctx, taskID, time.Now().Add(5*time.Second), 5); rerr != nil {
+			log.Printf("worker: task %d DB 错误且回队失败: %v（等待 Reaper 卡死修复）", taskID, rerr)
+		}
 		return false
 	}
 	if !claimed {
@@ -106,18 +112,19 @@ func (w *Worker) processOnce(ctx context.Context) bool {
 	// ④ 执行
 	h, ok := w.resolveHandler(t.TaskType)
 	if !ok {
-		// 无执行器：按失败处理（避免任务永久卡死）
-		retryCount := t.RetryCount + 1
-		dead, ferr := w.store.FailTask(ctx, taskID, w.owner, "no handler for task_type: "+t.TaskType, retryCount, NextRetryAt(int(retryCount)))
-		if ferr != nil {
-			log.Printf("worker: task %d no-handler FailTask 失败: %v", taskID, ferr)
-		} else if dead {
-			_ = w.queue.PushDLQ(ctx, taskID, "no handler")
-			log.Printf("worker: task %d 无执行器进入死信", taskID)
-		} else {
-			log.Printf("worker: task %d 无执行器失败待重试(retry=%d)", taskID, retryCount)
+		// 无执行器：本 Worker 不具备该任务类型能力（如 asset 角色抢到 SCRIPT_SPLIT）。
+		// 能力不匹配不是任务错误：RUNNING→QUEUED 释放（不计重试、不判死信），等有执行器的 Worker 消费；
+		// 否则无执行器的 Worker 会把好任务重试 3 次刷成 FAILED_DEAD，且项目状态无人回滚永久卡死。
+		if _, uerr := w.store.UnclaimTask(ctx, taskID, w.owner); uerr != nil {
+			// DB 释放失败：仅释放 Redis 锁，靠租约过期由 Reaper 回收（Major#14 双保险）
+			log.Printf("worker: task %d 无执行器 DB 释放失败(%v)，等待租约过期回收", taskID, uerr)
+		}
+		// 延迟 10s 重入 Redis，避免本 Worker 立即重复领取
+		if rerr := w.queue.Requeue(ctx, taskID, time.Now().Add(10*time.Second), t.Priority); rerr != nil {
+			log.Printf("worker: task %d 无执行器重入队失败(%v)，等待 Outbox 重投", taskID, rerr)
 		}
 		w.queue.Release(ctx, taskID, w.owner)
+		log.Printf("worker: task %d 类型 %s 本 Worker 无执行器，已释放回队列等待可执行 Worker", taskID, t.TaskType)
 		return true
 	}
 	result, execErr := h.Execute(heartbeatCtx, t)
@@ -135,6 +142,10 @@ func (w *Worker) processOnce(ctx context.Context) bool {
 						log.Printf("worker: task %d 失败解冻失败: %v", taskID, serr)
 					}
 				}
+				// 终态通知（WS 推送 TASK_FAILED，前端据此刷新并停止轮询）
+				if w.Notifier != nil {
+					w.Notifier(ctx, t, StatusFailedDead, execErr.Error())
+				}
 			} else {
 				// 退避后重试：转 QUEUED + 新 Outbox（同一事务已由 FailTask 预留 next_retry_at；
 				// RequeueDue 扫描到点后自动重投）
@@ -142,12 +153,22 @@ func (w *Worker) processOnce(ctx context.Context) bool {
 			}
 		}
 	} else {
-		_ = w.store.CompleteTask(ctx, taskID, w.owner, result, "")
+		// 08 审查 Major#13：CompleteTask 失败（DB/租约丢失）→ 跳 Settler，不结算
+		errComplete := w.store.CompleteTask(ctx, taskID, w.owner, result, "")
+		if errComplete != nil {
+			log.Printf("worker: task %d 完成失败 (err=%v)，跳过计费结算", taskID, errComplete)
+			w.queue.Release(ctx, taskID, w.owner)
+			return true
+		}
 		// 计费结算：成功扣费（幂等：Settle 内部防重）
 		if w.Settler != nil {
 			if serr := w.Settler(ctx, taskID, true); serr != nil {
-				log.Printf("worker: task %d 计费结算失败: %v", taskID, serr)
+				log.Printf("worker: task %d 计费结算失败：%v", taskID, serr)
 			}
+		}
+		// 终态通知（WS 推送 TASK_SUCCESS，前端据此刷新并停止轮询）
+		if w.Notifier != nil {
+			w.Notifier(ctx, t, StatusSuccess, "")
 		}
 	}
 	w.queue.Release(ctx, taskID, w.owner)
@@ -164,8 +185,11 @@ func (w *Worker) heartbeat(ctx context.Context, taskID int64) {
 			return
 		case <-ticker.C:
 			expires := time.Now().Add(w.leaseTTL)
-			_ = w.queue.RenewLease(ctx, taskID, w.owner, w.leaseTTL)
-			_, _ = w.store.RenewLeaseDB(ctx, taskID, w.owner, expires)
+			// 08 审查 Major#13:心跳续租失败仅记录（Reaper 会回收超租约 RUNNING 任务回 QUEUED）
+			w.queue.RenewLease(ctx, taskID, w.owner, w.leaseTTL)
+			if _, err := w.store.RenewLeaseDB(ctx, taskID, w.owner, expires); err != nil {
+				log.Printf("worker: task %d 心跳续租失败：%v，等待 Reaper 回收", taskID, err)
+			}
 		}
 	}
 }

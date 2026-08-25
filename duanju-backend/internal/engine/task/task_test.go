@@ -99,6 +99,11 @@ type fakeStore struct {
 	requeueIDs []int64
 }
 
+// RequeueStuckQueued 卡死修复桩（接口演进，测试不需真实逻辑）。
+func (f *fakeStore) RequeueStuckQueued(_ context.Context, _ time.Time) ([]*Task, error) {
+	return nil, nil
+}
+
 func (f *fakeStore) ReapExpired(_ context.Context, _ time.Time) ([]*Task, error) {
 	return f.reaped, nil
 }
@@ -113,6 +118,9 @@ func (f *fakeStore) RenewLeaseDB(context.Context, int64, string, time.Time) (boo
 func (f *fakeStore) CompleteTask(context.Context, int64, string, []byte, string) error { return nil }
 func (f *fakeStore) FailTask(context.Context, int64, string, string, int16, time.Time) (bool, error) {
 	return false, nil
+}
+func (f *fakeStore) UnclaimTask(context.Context, int64, string) (bool, error) {
+	return true, nil
 }
 func (f *fakeStore) ClaimOutbox(context.Context, string, time.Time) (*OutboxRow, error) { return nil, nil }
 func (f *fakeStore) MarkOutboxPublished(context.Context, int64, string) error          { return nil }

@@ -2,8 +2,14 @@
 package creation
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -13,10 +19,11 @@ import (
 // CanvasExtraService 画布补齐服务。
 type CanvasExtraService struct {
 	repo *Repo
+	env  string // 08 审查 Critical#4：生产环境强制回调验签
 }
 
-func NewCanvasExtraService(repo *Repo) *CanvasExtraService {
-	return &CanvasExtraService{repo: repo}
+func NewCanvasExtraService(repo *Repo, env string) *CanvasExtraService {
+	return &CanvasExtraService{repo: repo, env: env}
 }
 
 // CanvasByProject 4.1 加载画布数据（GET /canvas/:project_id —— 项目视角别名）。
@@ -199,38 +206,70 @@ func (s *CanvasExtraService) ConsoleEpisodes(c *gin.Context) {
 }
 
 // ModelCallback 厂商异步生成回调（POST /internal/model-callback/:provider）。
-// 记录回调日志；开发期无真实厂商接入，返回 success 并记录。
+// 08 审查 Critical#4 修复：验签（HMAC-SHA256(rawBody, model_providers.webhook_secret)，头 X-Callback-Sign）
+// + 状态守卫（仅 RUNNING 可终态化）+ 合法枚举 + 真实 provider_id。生产环境未配密钥一律拒绝。
 func (s *CanvasExtraService) ModelCallback(c *gin.Context, provider string) {
+	rawBody, _ := io.ReadAll(c.Request.Body)
+	// ① 厂商解析（provider 路由参数此前从未使用——现用于密钥查找与审计归属）
+	var providerID int64
+	var webhookSecret string
+	if err := s.repo.pool.QueryRow(c.Request.Context(), `
+		SELECT id, COALESCE(webhook_secret,'') FROM model_providers WHERE name=$1 AND enabled=TRUE`,
+		provider).Scan(&providerID, &webhookSecret); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, 20009, "未知厂商")
+		return
+	}
+	// ② 验签：生产必须有密钥且校验通过；开发期密钥为空时放行但记 signature_valid=FALSE
+	signValid := false
+	if webhookSecret != "" {
+		mac := hmac.New(sha256.New, []byte(webhookSecret))
+		mac.Write(rawBody)
+		expected := hex.EncodeToString(mac.Sum(nil))
+		got := strings.ToLower(strings.TrimSpace(c.GetHeader("X-Callback-Sign")))
+		signValid = subtle.ConstantTimeCompare([]byte(expected), []byte(got)) == 1
+	}
+	if s.env == "production" && !signValid {
+		s.logModelCallback(c, providerID, 0, "", "REJECTED", false, map[string]any{"reason": "验签失败或未配置 webhook_secret"})
+		httpx.Fail(c, http.StatusUnauthorized, 10001, "验签失败")
+		return
+	}
 	var req struct {
 		ExternalTaskID string `json:"external_task_id"`
 		Status         string `json:"status"`
 		ResultURL      string `json:"result_url"`
 		ErrorMsg       string `json:"error_message"`
 	}
-	_ = c.ShouldBindJSON(&req)
+	_ = json.Unmarshal(rawBody, &req)
 	var taskID int64
 	if req.ExternalTaskID != "" {
 		_ = s.repo.pool.QueryRow(c.Request.Context(), `
 			SELECT id FROM generation_tasks WHERE external_task_id=$1 AND deleted_at IS NULL`, req.ExternalTaskID).Scan(&taskID)
 	}
-	// 记录回调日志（表结构：provider_id/task_id/external_task_id/callback_status/payload_json）
-	payload := mustJSON(map[string]any{"status": req.Status, "error": req.ErrorMsg, "result_url": req.ResultURL})
-	_, _ = s.repo.pool.Exec(c.Request.Context(), `
-		INSERT INTO model_callback_logs (provider_id, task_id, external_task_id, callback_status, signature_valid, payload_json)
-		VALUES ($1, $2, $3, $4, TRUE, $5::jsonb)`,
-		0, nullInt(taskID), req.ExternalTaskID, req.Status, payload)
-	// 任务状态回写（成功/失败）
-	if taskID > 0 {
+	// ③ 回调日志（真实 provider_id + 真实验签结果；partial unique index 防重放）
+	s.logModelCallback(c, providerID, taskID, req.ExternalTaskID, req.Status, signValid,
+		map[string]any{"status": req.Status, "error": req.ErrorMsg, "result_url": req.ResultURL})
+	// ④ 任务状态回写：仅 RUNNING 可终态化（防重放/防篡改非运行中任务）；FAILED 走合法枚举 FAILED_RETRYING
+	if taskID > 0 && (signValid || s.env != "production") {
 		if req.Status == "SUCCESS" {
 			_, _ = s.repo.pool.Exec(c.Request.Context(), `
 				UPDATE generation_tasks SET status='SUCCESS', completed_at=NOW(),
-					result_output_json=jsonb_build_object('url',$2) WHERE id=$1`, taskID, req.ResultURL)
+					result_output_json=jsonb_build_object('url',$2) WHERE id=$1 AND status='RUNNING'`, taskID, req.ResultURL)
 		} else if req.Status == "FAILED" {
 			_, _ = s.repo.pool.Exec(c.Request.Context(), `
-				UPDATE generation_tasks SET status='FAILED', error_message=$2, updated_at=NOW() WHERE id=$1`, taskID, req.ErrorMsg)
+				UPDATE generation_tasks SET status='FAILED_RETRYING', error_message=$2, updated_at=NOW()
+				WHERE id=$1 AND status='RUNNING'`, taskID, req.ErrorMsg)
 		}
 	}
 	httpx.OK(c, gin.H{"received": true})
+}
+
+// logModelCallback 写回调审计日志（失败仅吞掉不回传，与原行为一致但不静默外键违规）。
+func (s *CanvasExtraService) logModelCallback(c *gin.Context, providerID, taskID int64, externalTaskID, status string, signValid bool, payloadMap map[string]any) {
+	payload := mustJSON(payloadMap)
+	_, _ = s.repo.pool.Exec(c.Request.Context(), `
+		INSERT INTO model_callback_logs (provider_id, task_id, external_task_id, callback_status, signature_valid, payload_json)
+		VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+		providerID, nullInt(taskID), externalTaskID, status, signValid, payload)
 }
 
 func nullInt(n int64) *int64 {

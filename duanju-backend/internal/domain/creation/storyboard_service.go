@@ -4,7 +4,9 @@ package creation
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -188,7 +190,8 @@ func (s *StoryboardService) BeatStoryboards(c *gin.Context, beatUUID string) {
 	httpx.OK(c, gin.H{"items": items})
 }
 
-// GenerateStoryboards 3.3.1 生成分镜脚本（开发期：已由拆分产生分镜，此处幂等返回现状 + is_mock 标记）。
+// GenerateStoryboards 3.3.1 生成分镜脚本（18 - 视频制作 阶段二：真实 STORYBOARD_PLAN_V1_LUXCHAT 任务）。
+// SCRIPT_SPLIT 拆分直出的分镜为 v1；本端点对单个叙事单元重跑分镜技能（v2+），版本快照可回滚。
 func (s *StoryboardService) GenerateStoryboards(c *gin.Context, beatUUID string) {
 	uid := userID(c)
 	if uid == 0 {
@@ -200,14 +203,62 @@ func (s *StoryboardService) GenerateStoryboards(c *gin.Context, beatUUID string)
 		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "叙事单元不存在")
 		return
 	}
-	var planningMode string
-	_ = c.ShouldBindJSON(&struct {
-		PlanningMode *string `json:"planning_mode"`
-	}{&planningMode})
-	// 开发期：分镜由 SCRIPT_SPLIT 阶段产生，此端点幂等返回现有分镜数（生产接入 LLM 重生成）
-	var count int
-	_ = s.repo.pool.QueryRow(c.Request.Context(), `SELECT count(*) FROM shots WHERE narrative_unit_id=$1 AND deleted_at IS NULL`, beatID).Scan(&count)
-	httpx.OK(c, gin.H{"beat_id": beatUUID, "storyboard_count": count, "is_mock": true})
+	var req struct {
+		PlanningMode string `json:"planning_mode"`
+		SkillPrompt  string `json:"skill_prompt"` // 分镜技能风格提示词（可选）
+	}
+	_ = c.ShouldBindJSON(&req)
+	// RUNNING 门控：存在生成中视频任务的单元拒绝重规划（Worker 侧 SaveStoryboardPlan 二次校验兜底）
+	var running int
+	if err := s.repo.pool.QueryRow(c.Request.Context(), `
+		SELECT count(*) FROM shots WHERE narrative_unit_id=$1 AND deleted_at IS NULL AND video_generation_status='RUNNING'`,
+		beatID).Scan(&running); err == nil && running > 0 {
+		httpx.Fail(c, http.StatusConflict, 6003, "本单元有镜头视频正在生成，请等待完成后再重新生成分镜")
+		return
+	}
+	spaceID, err := s.repo.SpaceIDByProject(c.Request.Context(), projectID)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "查询空间失败")
+		return
+	}
+	taskUUID, err := s.createStoryboardPlanTask(c, spaceID, uid, projectID, beatID, req.PlanningMode, req.SkillPrompt)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建分镜生成任务失败")
+		return
+	}
+	httpx.OK(c, gin.H{"task_id": taskUUID, "beat_id": beatUUID, "status": "QUEUED"})
+}
+
+// createStoryboardPlanTask 建 STORYBOARD_PLAN_V1_LUXCHAT 任务 + Outbox（queue=split，LLM 类任务）。
+func (s *StoryboardService) createStoryboardPlanTask(c *gin.Context, spaceID, uid, projectID, beatID int64, planningMode, skillPrompt string) (string, error) {
+	taskUUID := newUUID()
+	params, _ := json.Marshal(map[string]any{
+		"beat_id":       beatID,
+		"planning_mode": planningMode,
+		"skill_prompt":  skillPrompt,
+	})
+	tx, err := s.repo.pool.Begin(c.Request.Context())
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(c.Request.Context())
+	var taskID int64
+	if err := tx.QueryRow(c.Request.Context(), `
+		INSERT INTO generation_tasks (task_uuid, request_id, idempotency_key, space_id, user_id, project_id, task_type,
+			status, request_params_json, progress_pct, retry_count, max_retry_count)
+		VALUES ($1, 'sbp-'||gen_random_uuid(), 'sbp-'||gen_random_uuid(), $2, $3, $4, 'STORYBOARD_PLAN_V1_LUXCHAT', 'QUEUED', $5::jsonb, 0, 0, 3)
+		RETURNING id`,
+		taskUUID, spaceID, uid, projectID, string(params)).Scan(&taskID); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(c.Request.Context(), `
+		INSERT INTO task_dispatch_outbox (event_type, task_id, dispatch_key, queue_name, payload_json)
+		VALUES ('TASK_DISPATCH', $1::bigint, 'task:'||$1::text||':dispatch:sbp', 'split',
+		        jsonb_build_object('task_id', $1::int, 'eligible_at_ms', extract(epoch from now())*1000, 'priority', 5, 'attempt_no', 1))`,
+		taskID); err != nil {
+		return "", err
+	}
+	return taskUUID, tx.Commit(c.Request.Context())
 }
 
 // ShotDetail 3.1.8 单镜头详情（完整 Prompt/资产绑定）。
@@ -291,7 +342,7 @@ func (s *StoryboardService) ShotsBatch(c *gin.Context) {
 
 // ---- 3.3.7b/3.3.8 镜头块视频 ----
 
-// GenerateShotGroupVideo 3.3.7b 单个镜头块视频生成。
+// GenerateShotGroupVideo 3.3.7b 单个镜头块视频生成（18 - 视频制作 阶段三：补 Outbox 真实派发）。
 func (s *StoryboardService) GenerateShotGroupVideo(c *gin.Context, sgUUID string) {
 	uid := userID(c)
 	if uid == 0 {
@@ -308,44 +359,32 @@ func (s *StoryboardService) GenerateShotGroupVideo(c *gin.Context, sgUUID string
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "查询空间失败")
 		return
 	}
-	// 建 VIDEO_GROUP_CONCAT 任务（开发期 mock 执行）
-	taskID, err := s.createGroupTask(c, spaceID, uid, projectID, sgID, "VIDEO_GROUP_CONCAT")
+	// 建块内全部非 SUCCESS 镜头的 VIDEO_SEGMENT_GEN 任务（逐镜头生成，Outbox 派发）
+	var beatID int64
+	_ = s.repo.pool.QueryRow(c.Request.Context(), `SELECT narrative_unit_id FROM shot_groups WHERE id=$1`, sgID).Scan(&beatID)
+	shots, err := s.repo.ListShotsByGroup(c.Request.Context(), sgID)
 	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取镜头失败")
+		return
+	}
+	taskIDs, err := s.repo.CreateVideoTasks(c.Request.Context(), projectID, spaceID, uid, beatID, shots, VideoGenOpts{})
+	if err != nil || len(taskIDs) == 0 {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建视频任务失败")
 		return
 	}
-	httpx.OK(c, gin.H{"task_id": taskID, "status": "QUEUED", "is_mock": true})
+	httpx.OK(c, gin.H{"created": len(taskIDs), "total": len(shots), "status": "QUEUED"})
 }
 
-// ConcatShotGroupVideo 3.3.8 镜头块 FFmpeg concat 拼接。
+// ConcatShotGroupVideo 3.3.8 镜头块拼接（VIDEO_GROUP_CONCAT，Outbox 真实派发 → Worker 校验全部 SUCCESS 后标记 COMPOSED）。
 func (s *StoryboardService) ConcatShotGroupVideo(c *gin.Context, sgUUID string) {
-	s.GenerateShotGroupVideo(c, sgUUID)
-}
-
-// createGroupTask 建镜头块级任务。
-func (s *StoryboardService) createGroupTask(c *gin.Context, spaceID, uid, projectID, sgID int64, taskType string) (string, error) {
-	taskUUID := newUUID()
-	params, _ := json.Marshal(map[string]any{"shot_group_id": sgID})
-	_, err := s.repo.pool.Exec(c.Request.Context(), `
-		INSERT INTO generation_tasks (task_uuid, space_id, user_id, project_id, task_type,
-			status, request_params_json, progress_pct, retry_count, max_retry_count)
-		VALUES ($1, $2, $3, $4, $5, 'QUEUED', $6::jsonb, 0, 0, 3)`,
-		taskUUID, spaceID, uid, projectID, taskType, string(params))
-	return taskUUID, err
-}
-
-// ---- 3.3.9 叙事单元整片合成 ----
-
-// ComposeBeatVideo 3.3.9 叙事单元整片视频合成。
-func (s *StoryboardService) ComposeBeatVideo(c *gin.Context, beatUUID string) {
 	uid := userID(c)
 	if uid == 0 {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
 		return
 	}
-	_, projectID, err := s.repo.ResolveNarrativeUnit(c.Request.Context(), beatUUID)
+	sgID, projectID, err := s.repo.ResolveShotGroup(c.Request.Context(), sgUUID)
 	if err != nil || s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid) != nil {
-		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "叙事单元不存在")
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "镜头块不存在")
 		return
 	}
 	spaceID, err := s.repo.SpaceIDByProject(c.Request.Context(), projectID)
@@ -353,46 +392,124 @@ func (s *StoryboardService) ComposeBeatVideo(c *gin.Context, beatUUID string) {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "查询空间失败")
 		return
 	}
-	taskUUID := newUUID()
-	params, _ := json.Marshal(map[string]any{"beat_uuid": beatUUID})
-	if _, err := s.repo.pool.Exec(c.Request.Context(), `
-		INSERT INTO generation_tasks (task_uuid, space_id, user_id, project_id, task_type,
-			status, request_params_json, progress_pct, retry_count, max_retry_count)
-		VALUES ($1, $2, $3, $4, 'FINAL_VIDEO_COMPOSE', 'QUEUED', $5::jsonb, 0, 0, 3)`,
-		taskUUID, spaceID, uid, projectID, string(params)); err != nil {
-		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建合成任务失败")
+	taskUUID, err := s.createDispatchedTask(c, spaceID, uid, projectID, "VIDEO_GROUP_CONCAT",
+		map[string]any{"shot_group_id": sgID}, "video")
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建拼接任务失败")
 		return
 	}
-	httpx.OK(c, gin.H{"task_id": taskUUID, "status": "QUEUED", "is_mock": true})
+	httpx.OK(c, gin.H{"task_id": taskUUID, "status": "QUEUED"})
 }
 
-// ---- 3.3.7c 重新规划 ----
+// createDispatchedTask 建任务 + Outbox 真实派发（18 - 视频制作 阶段三：替代只 INSERT 不派发的 mock）。
+func (s *StoryboardService) createDispatchedTask(c *gin.Context, spaceID, uid, projectID int64, taskType string, params map[string]any, queue string) (string, error) {
+	taskUUID := newUUID()
+	pj, _ := json.Marshal(params)
+	tx, err := s.repo.pool.Begin(c.Request.Context())
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(c.Request.Context())
+	var taskID int64
+	if err := tx.QueryRow(c.Request.Context(), `
+		INSERT INTO generation_tasks (task_uuid, request_id, idempotency_key, space_id, user_id, project_id, task_type,
+			status, request_params_json, progress_pct, retry_count, max_retry_count)
+		VALUES ($1, 'disp-'||gen_random_uuid(), 'disp-'||gen_random_uuid(), $2, $3, $4, $5, 'QUEUED', $6::jsonb, 0, 0, 3)
+		RETURNING id`,
+		taskUUID, spaceID, uid, projectID, taskType, string(pj)).Scan(&taskID); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(c.Request.Context(), `
+		INSERT INTO task_dispatch_outbox (event_type, task_id, dispatch_key, queue_name, payload_json)
+		VALUES ('TASK_DISPATCH', $1::bigint, 'task:'||$1::text||':dispatch:'||$2, $2,
+		        jsonb_build_object('task_id', $1::int, 'eligible_at_ms', extract(epoch from now())*1000, 'priority', 5, 'attempt_no', 1))`,
+		taskID, queue); err != nil {
+		return "", err
+	}
+	return taskUUID, tx.Commit(c.Request.Context())
+}
 
-// ReplanBeat 3.3.7c 叙事单元重新规划（开发期：重建规划任务）。
-func (s *StoryboardService) ReplanBeat(c *gin.Context, beatUUID string) {
+// GenerateShotRefImage 为单镜头生成镜头级参考图（SHOT_REF_IMAGE_GEN，
+// 对齐 LuxReal「镜头N的参考图」/ 智能镜头；任务经 Outbox 真实派发，由 asset worker 消费）。
+func (s *StoryboardService) GenerateShotRefImage(c *gin.Context, shotIDStr string) {
 	uid := userID(c)
 	if uid == 0 {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
 		return
 	}
-	_, projectID, err := s.repo.ResolveNarrativeUnit(c.Request.Context(), beatUUID)
+	shotID, err := strconv.ParseInt(shotIDStr, 10, 64)
+	if err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "镜头 ID 非法")
+		return
+	}
+	var projectID int64
+	if err := s.repo.pool.QueryRow(c.Request.Context(), `
+		SELECT project_id FROM shots WHERE id=$1 AND deleted_at IS NULL`, shotID).Scan(&projectID); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "镜头不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	spaceID, err := s.repo.SpaceIDByProject(c.Request.Context(), projectID)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "查询空间失败")
+		return
+	}
+	taskUUID, err := s.createDispatchedTask(c, spaceID, uid, projectID, "SHOT_REF_IMAGE_GEN",
+		map[string]any{"shot_id": shotID}, "asset")
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建镜头参考图任务失败")
+		return
+	}
+	httpx.OK(c, gin.H{"task_id": taskUUID, "shot_id": shotID})
+}
+
+// ---- 3.3.9 叙事单元整片合成 ----
+
+// ComposeBeatVideo 3.3.9 叙事单元整片视频合成（18 - 视频制作 阶段三：诚实化——
+// 原 mock 只 INSERT 不派发必留僵尸任务；单元级成片由 Step4 项目导出（FINAL_VIDEO_COMPOSE
+// 走 export_records 真实链路）承载，本端点改为完成度校验 + 可合成清单返回）。
+func (s *StoryboardService) ComposeBeatVideo(c *gin.Context, beatUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	beatID, projectID, err := s.repo.ResolveNarrativeUnit(c.Request.Context(), beatUUID)
 	if err != nil || s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid) != nil {
 		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "叙事单元不存在")
 		return
 	}
-	var req struct {
-		PlanningMode string `json:"planning_mode"`
+	shots, err := s.repo.ListShotsByBeat(c.Request.Context(), beatID)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取镜头失败")
+		return
 	}
-	_ = c.ShouldBindJSON(&req)
-	spaceID, _ := s.repo.SpaceIDByProject(c.Request.Context(), projectID)
-	taskUUID := newUUID()
-	params, _ := json.Marshal(map[string]any{"beat_uuid": beatUUID, "planning_mode": req.PlanningMode})
-	_, _ = s.repo.pool.Exec(c.Request.Context(), `
-		INSERT INTO generation_tasks (task_uuid, space_id, user_id, project_id, task_type,
-			status, request_params_json, progress_pct, retry_count, max_retry_count)
-		VALUES ($1, $2, $3, $4, 'BEAT_REPLAN', 'QUEUED', $5::jsonb, 0, 0, 3)`,
-		taskUUID, spaceID, uid, projectID, string(params))
-	httpx.OK(c, gin.H{"task_id": taskUUID, "status": "QUEUED", "is_mock": true})
+	total, done := len(shots), 0
+	for _, sh := range shots {
+		if sh.VideoStatus == "SUCCESS" {
+			done++
+		}
+	}
+	if done < total {
+		httpx.Fail(c, http.StatusConflict, 6003,
+			fmt.Sprintf("本单元还有 %d 个镜头未完成视频生成，无法合成", total-done))
+		return
+	}
+	httpx.OK(c, gin.H{
+		"beat_id": beatUUID, "status": "READY", "shots_done": done, "shots_total": total,
+		"hint": "单元内镜头已全部完成，可前往 Step4 成片预览进行项目级合成导出",
+	})
+}
+
+// ---- 3.3.7c 重新规划 ----
+
+// ReplanBeat 3.3.7c 叙事单元重新规划（18 - 视频制作 阶段二：收敛到 STORYBOARD_PLAN 真实任务，
+// 原 BEAT_REPLAN 为枚举外硬编码 INSERT（DB 层即失败）已移除）。
+func (s *StoryboardService) ReplanBeat(c *gin.Context, beatUUID string) {
+	s.GenerateStoryboards(c, beatUUID)
 }
 
 // ---- 3.3.3 分镜详情 / 3.3.6 分镜图编辑 / 3.3.7 分镜视频 ----
@@ -402,112 +519,36 @@ func (s *StoryboardService) StoryboardDetail(c *gin.Context, storyboardUUID stri
 	s.ShotDetail(c, storyboardUUID)
 }
 
-// StoryboardImageEdit 3.3.6 编辑单张分镜图（开发期 mock：任务入队）。
+// StoryboardImageEdit 3.3.6 编辑单张分镜图（暂未开放：原 STORYBOARD_IMAGE_EDIT 为枚举外任务类型，
+// 硬编码 INSERT 在 DB 层即报枚举非法；接口保留形状，待扩枚举后接入真实链路）。
 func (s *StoryboardService) StoryboardImageEdit(c *gin.Context, storyboardUUID string) {
 	uid := userID(c)
 	if uid == 0 {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
 		return
 	}
-	shotID, err := s.repo.ResolveShotID(c.Request.Context(), storyboardUUID)
-	if err != nil {
-		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "分镜不存在")
-		return
-	}
-	var projectID int64
-	if err := s.repo.pool.QueryRow(c.Request.Context(), `SELECT project_id FROM shots WHERE id=$1`, shotID).Scan(&projectID); err != nil || s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid) != nil {
-		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "分镜不存在")
-		return
-	}
-	var req struct {
-		Prompt    string `json:"prompt" binding:"required"`
-		RefAssetID string `json:"reference_asset_id"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
-		return
-	}
-	spaceID, _ := s.repo.SpaceIDByProject(c.Request.Context(), projectID)
-	taskUUID := newUUID()
-	params, _ := json.Marshal(map[string]any{"shot_id": shotID, "prompt": req.Prompt, "reference_asset_id": req.RefAssetID})
-	_, _ = s.repo.pool.Exec(c.Request.Context(), `
-		INSERT INTO generation_tasks (task_uuid, space_id, user_id, project_id, task_type,
-			status, request_params_json, progress_pct, retry_count, max_retry_count)
-		VALUES ($1, $2, $3, $4, 'STORYBOARD_IMAGE_EDIT', 'QUEUED', $5::jsonb, 0, 0, 3)`,
-		taskUUID, spaceID, uid, projectID, string(params))
-	httpx.OK(c, gin.H{"task_id": taskUUID, "status": "QUEUED", "is_mock": true})
+	httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "分镜图编辑功能暂未开放，敬请期待")
 }
 
-// StoryboardVideo 3.3.7 提交单个分镜视频生成任务。
+// StoryboardVideo 3.3.7 单个分镜视频生成（18 - 视频制作 阶段三：路由已指向 /shots/:id/regenerate
+// 真实链路（计费 + Outbox），本方法保留兼容占位；storyboard 与 shot 同实体）。
 func (s *StoryboardService) StoryboardVideo(c *gin.Context, storyboardUUID string) {
 	uid := userID(c)
 	if uid == 0 {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
 		return
 	}
-	shotID, err := s.repo.ResolveShotID(c.Request.Context(), storyboardUUID)
-	if err != nil {
-		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "分镜不存在")
-		return
-	}
-	var projectID int64
-	if err := s.repo.pool.QueryRow(c.Request.Context(), `SELECT project_id FROM shots WHERE id=$1`, shotID).Scan(&projectID); err != nil || s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid) != nil {
-		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "分镜不存在")
-		return
-	}
-	spaceID, _ := s.repo.SpaceIDByProject(c.Request.Context(), projectID)
-	taskUUID := newUUID()
-	params, _ := json.Marshal(map[string]any{"shot_id": shotID})
-	_, _ = s.repo.pool.Exec(c.Request.Context(), `
-		INSERT INTO generation_tasks (task_uuid, space_id, user_id, project_id, task_type,
-			status, request_params_json, progress_pct, retry_count, max_retry_count)
-		VALUES ($1, $2, $3, $4, 'VIDEO_SEGMENT_GEN', 'QUEUED', $5::jsonb, 0, 0, 3)`,
-		taskUUID, spaceID, uid, projectID, string(params))
-	httpx.OK(c, gin.H{"task_id": taskUUID, "status": "QUEUED", "is_mock": true})
+	httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "请使用单镜头重新生成接口（POST /shots/:shot_id/regenerate）")
 }
 
-// BatchGenerateStoryboardImage 3.3.5 批量生成分镜图。
+// BatchGenerateStoryboardImage 3.3.5 批量生成分镜图（暂未开放：STORYBOARD_IMAGE_GEN 枚举外，同上）。
 func (s *StoryboardService) BatchGenerateStoryboardImage(c *gin.Context) {
 	uid := userID(c)
 	if uid == 0 {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
 		return
 	}
-	var req struct {
-		ShotIDs     []string `json:"shot_ids" binding:"required,min=1,max=50"`
-		Concurrency int      `json:"concurrency"`
-		ForceRegen  bool     `json:"force_regen"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
-		return
-	}
-	created := 0
-	for _, sid := range req.ShotIDs {
-		shotID, err := s.repo.ResolveShotID(c.Request.Context(), sid)
-		if err != nil {
-			continue
-		}
-		var projectID int64
-		if err := s.repo.pool.QueryRow(c.Request.Context(), `SELECT project_id FROM shots WHERE id=$1`, shotID).Scan(&projectID); err != nil || s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid) != nil {
-			continue
-		}
-		spaceID, _ := s.repo.SpaceIDByProject(c.Request.Context(), projectID)
-		taskUUID := newUUID()
-		params, _ := json.Marshal(map[string]any{"shot_id": shotID, "force_regen": req.ForceRegen})
-		if _, err := s.repo.pool.Exec(c.Request.Context(), `
-			INSERT INTO generation_tasks (task_uuid, space_id, user_id, project_id, task_type,
-				status, request_params_json, progress_pct, retry_count, max_retry_count)
-			VALUES ($1, $2, $3, $4, 'STORYBOARD_IMAGE_GEN', 'QUEUED', $5::jsonb, 0, 0, 3)`,
-			taskUUID, spaceID, uid, projectID, string(params)); err == nil {
-			created++
-		}
-	}
-	if created == 0 {
-		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "无有效分镜可生成")
-		return
-	}
-	httpx.OK(c, gin.H{"created": created, "total": len(req.ShotIDs), "is_mock": true})
+	httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "分镜图批量生成功能暂未开放，敬请期待")
 }
 
 // ---- 3.3.14 / 3.3.16 任务查询/重试 ----
@@ -619,39 +660,61 @@ func (s *StoryboardService) VideoTrackTimeline(c *gin.Context, videoUUID string)
 	})
 }
 
-// VideoTTS 3.3.12 提交 TTS 配音任务。
+// VideoTTS 3.3.12 提交 TTS 配音任务（暂未开放：TTS_VOICE_GEN 为枚举外任务类型，
+// 硬编码 INSERT 在 DB 层即报枚举非法；待扩枚举后接入真实链路）。
 func (s *StoryboardService) VideoTTS(c *gin.Context, videoUUID string) {
 	uid := userID(c)
 	if uid == 0 {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
 		return
 	}
-	shotID, err := s.repo.ResolveShotID(c.Request.Context(), videoUUID)
+	httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "AI 配音功能暂未开放，敬请期待")
+}
+
+// EpisodeAssetLinks GET /episodes/:episode_id/asset-links（17 - 工作台对齐）。
+// 返回剧集下各叙事单元的关联资产清单（nu_asset_links JOIN 名称/参考图/生成状态），
+// 供 Step3「关联资产」名称占位展示与单元级就绪度判断；JOIN 口径与 LoadShotRefs 一致。
+func (s *StoryboardService) EpisodeAssetLinks(c *gin.Context, epUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	epID, projectID, err := s.repo.ResolveEpisode(c.Request.Context(), epUUID)
+	if err != nil || s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid) != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "剧集不存在")
+		return
+	}
+	rows, err := s.repo.pool.Query(c.Request.Context(), `
+		SELECT nu.nu_uuid::text, nal.asset_kind::text, nal.asset_id,
+		       COALESCE(ch.name, sc.base_name, p.name, ''),
+		       COALESCE(a.main_image_url, ''), COALESCE(a.generation_status::text, '')
+		FROM nu_asset_links nal
+		JOIN narrative_units nu ON nu.id = nal.narrative_unit_id AND nu.deleted_at IS NULL
+		LEFT JOIN characters ch ON nal.asset_kind = 'CHARACTER' AND nal.asset_id = ch.id
+		LEFT JOIN scenes sc ON nal.asset_kind = 'SCENE' AND nal.asset_id = sc.id
+		LEFT JOIN props p ON nal.asset_kind = 'PROP' AND nal.asset_id = p.id
+		LEFT JOIN assets a ON a.id = COALESCE(ch.asset_id, sc.asset_id, p.asset_id)
+		WHERE nu.episode_id = $1
+		ORDER BY nu.sort_order ASC, nal.id ASC`, epID)
 	if err != nil {
-		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "视频不存在")
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取关联资产失败")
 		return
 	}
-	var projectID int64
-	var dialog string
-	if err := s.repo.pool.QueryRow(c.Request.Context(), `
-		SELECT project_id, COALESCE(dialogue_text,'') FROM shots WHERE id=$1 AND deleted_at IS NULL`, shotID).
-		Scan(&projectID, &dialog); err != nil || s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid) != nil {
-		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "视频不存在")
-		return
+	defer rows.Close()
+	items := make([]map[string]any, 0)
+	for rows.Next() {
+		var assetID int64
+		var beatUUID, kind, name, img, status string
+		if err := rows.Scan(&beatUUID, &kind, &assetID, &name, &img, &status); err != nil {
+			continue
+		}
+		items = append(items, map[string]any{
+			"beat_id": beatUUID, "asset_kind": kind, "asset_id": assetID,
+			"name": name, "main_image_url": img, "generation_status": status,
+		})
 	}
-	var req struct {
-		VoiceCode string `json:"voice_code" binding:"omitempty"`
-	}
-	_ = c.ShouldBindJSON(&req)
-	spaceID, _ := s.repo.SpaceIDByProject(c.Request.Context(), projectID)
-	taskUUID := newUUID()
-	params, _ := json.Marshal(map[string]any{"shot_id": shotID, "dialogue_text": dialog, "voice_code": req.VoiceCode})
-	_, _ = s.repo.pool.Exec(c.Request.Context(), `
-		INSERT INTO generation_tasks (task_uuid, space_id, user_id, project_id, task_type,
-			status, request_params_json, progress_pct, retry_count, max_retry_count)
-		VALUES ($1, $2, $3, $4, 'TTS_VOICE_GEN', 'QUEUED', $5::jsonb, 0, 0, 3)`,
-		taskUUID, spaceID, uid, projectID, string(params))
-	httpx.OK(c, gin.H{"task_id": taskUUID, "status": "QUEUED", "is_mock": true})
+	httpx.OK(c, gin.H{"items": items})
 }
 
 func newUUID() string {

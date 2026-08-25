@@ -26,6 +26,8 @@ type AdminStore interface {
 	DeleteWork(ctx context.Context, workUUID string, operatorID int64) error
 	// ListReports 举报列表（11.74）。
 	ListReports(ctx context.Context, page, pageSize int) ([]map[string]any, int, error)
+	// ReviewReport 举报处理（A2：通过/驳回）。
+	ReviewReport(ctx context.Context, reportID int64, approve bool, note string, operatorID int64) error
 	// ListOrders 订单列表（P2）。
 	ListOrders(ctx context.Context, page, pageSize int) ([]map[string]any, int, error)
 	// ListPackages 套餐列表（P2）。
@@ -177,6 +179,30 @@ func (s *AdminService) ListReports(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"items": items, "pagination": gin.H{"page": page, "page_size": pageSize, "total": total}})
+}
+
+// ReviewReport 举报处理（A2：通过/驳回，支持批量）。
+func (s *AdminService) ReviewReport(c *gin.Context) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	reportID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "id 非法")
+		return
+	}
+	var req struct {
+		Approve bool   `json:"approve"`
+		Note    string `json:"note"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	if err := s.store.ReviewReport(c.Request.Context(), reportID, req.Approve, req.Note, uid); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, 20009, err.Error())
+		return
+	}
+	httpx.OK(c, nil)
 }
 
 // ListOrders 订单列表（P2）。

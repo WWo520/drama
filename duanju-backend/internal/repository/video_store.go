@@ -4,6 +4,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,19 +23,80 @@ func NewVideoStore(pool *pgxpool.Pool) *VideoStore {
 
 var _ agent.VideoStore = (*VideoStore)(nil)
 
+// LoadShotRefs 加载镜头参考图 URL 列表（F10：shot_asset_refs 优先，否则继承 nu_asset_links）。
+// 参考图来源：characters/scenes/props 的 main_image_url 字段。
+// 排序：角色图优先、场景次之（对齐 18 - 视频制作：主体一致性权重最高）。
+func (s *VideoStore) LoadShotRefs(ctx context.Context, shotID int64, narrativeUnitID int64) ([]string, error) {
+	// 1. 优先查镜头级覆盖（shot_asset_refs）
+	rows, err := s.pool.Query(ctx, `
+		SELECT a.main_image_url FROM shot_asset_refs sar
+		LEFT JOIN characters c ON sar.asset_kind='CHARACTER' AND sar.asset_id=c.id
+		LEFT JOIN scenes sc ON sar.asset_kind='SCENE' AND sar.asset_id=sc.id
+		LEFT JOIN props p ON sar.asset_kind='PROP' AND sar.asset_id=p.id
+		LEFT JOIN assets a ON a.id=COALESCE(c.asset_id, sc.asset_id, p.asset_id)
+		WHERE sar.shot_id=$1 AND a.main_image_url IS NOT NULL AND a.main_image_url != ''
+		ORDER BY CASE sar.asset_kind WHEN 'CHARACTER' THEN 1 WHEN 'SCENE' THEN 2 ELSE 3 END, sar.id ASC`, shotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var urls []string
+	for rows.Next() {
+		var url string
+		if err := rows.Scan(&url); err != nil {
+			continue
+		}
+		urls = append(urls, url)
+	}
+	if len(urls) > 0 {
+		return urls, nil // 镜头级覆盖存在，直接返回
+	}
+
+	// 2. 镜头级无覆盖，继承叙事单元级（nu_asset_links）
+	rows2, err := s.pool.Query(ctx, `
+		SELECT a.main_image_url FROM nu_asset_links nal
+		LEFT JOIN characters c ON nal.asset_kind='CHARACTER' AND nal.asset_id=c.id
+		LEFT JOIN scenes sc ON nal.asset_kind='SCENE' AND nal.asset_id=sc.id
+		LEFT JOIN props p ON nal.asset_kind='PROP' AND nal.asset_id=p.id
+		LEFT JOIN assets a ON a.id=COALESCE(c.asset_id, sc.asset_id, p.asset_id)
+		WHERE nal.narrative_unit_id=$1 AND a.main_image_url IS NOT NULL AND a.main_image_url != ''
+		ORDER BY CASE nal.asset_kind WHEN 'CHARACTER' THEN 1 WHEN 'SCENE' THEN 2 ELSE 3 END, nal.id ASC`, narrativeUnitID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows2.Close()
+	urls = []string{}
+	for rows2.Next() {
+		var url string
+		if err := rows2.Scan(&url); err != nil {
+			continue
+		}
+		urls = append(urls, url)
+	}
+	return urls, nil
+}
+
 // LoadShot 镜头信息。
 func (s *VideoStore) LoadShot(ctx context.Context, shotID int64) (*agent.ShotInfo, error) {
 	var info agent.ShotInfo
 	err := s.pool.QueryRow(ctx, `
 		SELECT sh.id, sh.shot_group_id, sh.project_id, sh.narrative_unit_id, sh.duration_sec,
-		       COALESCE(sh.prompt_refined, '')
+		       COALESCE(sh.prompt_refined, ''), COALESCE(sh.reference_image_url, '')
 		FROM shots sh WHERE sh.id = $1 AND sh.deleted_at IS NULL`, shotID,
 	).Scan(&info.ShotID, &info.ShotGroupID, &info.ProjectID, &info.NarrativeUnitID,
-		&info.DurationSec, &info.PromptRefined)
+		&info.DurationSec, &info.PromptRefined, &info.ReferenceImageURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, agent.ErrProjectNotFound
 	}
 	return &info, err
+}
+
+// SaveShotRefImage 记录镜头级参考图（shots.reference_image_url，对齐 LuxReal「镜头N的参考图」）。
+func (s *VideoStore) SaveShotRefImage(ctx context.Context, shotID int64, imageURL string, taskID int64) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE shots SET reference_image_url=$2, updated_at=NOW()
+		WHERE id=$1 AND deleted_at IS NULL`, shotID, imageURL)
+	return err
 }
 
 // SaveShotVideo 回调幂等：仅 shot 的 video_generation_status 不是 SUCCESS 时才写入（CAS 防重）。
@@ -92,6 +154,25 @@ func (s *VideoStore) MarkVideoGenerating(ctx context.Context, projectID int64) e
 	_, err := s.pool.Exec(ctx, `
 		UPDATE projects SET status='VIDEO_GENERATING', current_step='VIDEO_PRODUCTION'
 		WHERE id=$1 AND status IN ('PARTIAL_ASSETS','ALL_ASSETS_READY')`, projectID)
+	return err
+}
+
+// ConcatShotGroup 镜头块拼接（3.3.8，VIDEO_GROUP_CONCAT）：块内镜头全部 SUCCESS 才标记块完成
+// （generated_video_url='COMPOSED'，对齐 LuxReal「拼接成段」语义；块内有未完成镜头返回错误）。
+func (s *VideoStore) ConcatShotGroup(ctx context.Context, shotGroupID int64) error {
+	var remaining int
+	if err := s.pool.QueryRow(ctx, `
+		SELECT count(*) FROM shots
+		WHERE shot_group_id=$1 AND deleted_at IS NULL AND video_generation_status != 'SUCCESS'`,
+		shotGroupID).Scan(&remaining); err != nil {
+		return err
+	}
+	if remaining > 0 {
+		return fmt.Errorf("镜头块内还有 %d 个镜头未完成，无法拼接", remaining)
+	}
+	_, err := s.pool.Exec(ctx, `
+		UPDATE shot_groups SET video_generation_status='SUCCESS', generated_video_url='COMPOSED'
+		WHERE id=$1 AND deleted_at IS NULL`, shotGroupID)
 	return err
 }
 

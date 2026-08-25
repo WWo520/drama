@@ -136,6 +136,15 @@ func (s *Service) Refresh(c *gin.Context) {
 			return
 		}
 	}
+	// 08 审查 Major#8：Refresh Token 轮换——旧 refresh jti 立即拉黑（剩余 TTL），防被盗旧 token 持续可用 7 天
+	if jti != "" {
+		if exp, ok := claims["exp"].(float64); ok {
+			ttl := time.Until(time.Unix(int64(exp), 0))
+			if ttl > 0 {
+				_ = s.rdb.Set(c.Request.Context(), s.refreshBlacklistKey(jti), "1", ttl).Err()
+			}
+		}
+	}
 	u, err := s.repo.GetByUUID(c.Request.Context(), uid)
 	if err != nil {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeRefreshExpired, "账号不存在")

@@ -1,10 +1,11 @@
 // AdminAppearancePanel：平台配置 → 外观定制 Tab。
-// 数据源：主题 GET /admin/themes、风格库 GET /admin/style-library（后端当前仅提供查询，编辑规划中，只读展示）。
+// 数据源：主题 GET /admin/themes、风格库 GET /admin/style-library；编辑 PUT /admin/themes/:id、PUT /admin/style-library/:id。
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@duanju/api-client";
 import { Palette, Sparkles, RefreshCw } from "lucide-react";
 
 import { toast, errMessage } from "../lib";
+import Modal from "../components/Modal";
 
 interface ThemeRow {
   id: number;
@@ -48,6 +49,16 @@ export default function AdminAppearancePanel() {
   const [styles, setStyles] = useState<StyleRow[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // 主题编辑弹窗
+  const [themeEdit, setThemeEdit] = useState<ThemeRow | null>(null);
+  const [tForm, setTForm] = useState({ name: "", primary: "#0B0B1A", accent: "#F5B23C", status: "ON", isDefault: false });
+  const [savingT, setSavingT] = useState(false);
+
+  // 风格编辑弹窗
+  const [styleEdit, setStyleEdit] = useState<StyleRow | null>(null);
+  const [sForm, setSForm] = useState({ name: "", description: "", thumbnail: "", sortOrder: "0", enabled: true });
+  const [savingS, setSavingS] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -68,13 +79,79 @@ export default function AdminAppearancePanel() {
     void load();
   }, [load]);
 
+  // ---------- 主题编辑 ----------
+
+  const openThemeEdit = (t: ThemeRow) => {
+    setThemeEdit(t);
+    setTForm({ name: t.name, primary: t.primary_color || "#0B0B1A", accent: t.accent_color || "#F5B23C", status: t.status || "ON", isDefault: t.is_default });
+  };
+
+  const saveTheme = async () => {
+    if (!themeEdit) return;
+    if (!tForm.name.trim()) {
+      toast("主题名称不能为空", "error");
+      return;
+    }
+    setSavingT(true);
+    try {
+      await api.put(`/admin/themes/${themeEdit.id}`, {
+        name: tForm.name.trim(),
+        primary_color: tForm.primary,
+        accent_color: tForm.accent,
+        status: tForm.status,
+        is_default: tForm.isDefault,
+      });
+      toast("主题已保存", "success");
+      setThemeEdit(null);
+      void load();
+    } catch (e) {
+      toast(errMessage(e), "error");
+    } finally {
+      setSavingT(false);
+    }
+  };
+
+  // ---------- 风格编辑 ----------
+
+  const openStyleEdit = (s: StyleRow) => {
+    setStyleEdit(s);
+    setSForm({ name: s.name, description: "", thumbnail: s.thumbnail_url || "", sortOrder: "0", enabled: true });
+  };
+
+  const saveStyle = async () => {
+    if (!styleEdit) return;
+    if (!sForm.name.trim()) {
+      toast("风格名称不能为空", "error");
+      return;
+    }
+    setSavingS(true);
+    try {
+      await api.put(`/admin/style-library/${styleEdit.id}`, {
+        name: sForm.name.trim(),
+        description: sForm.description,
+        thumbnail_url: sForm.thumbnail.trim(),
+        sort_order: Number(sForm.sortOrder) || 0,
+        enabled: sForm.enabled,
+      });
+      toast("风格已保存", "success");
+      setStyleEdit(null);
+      void load();
+    } catch (e) {
+      toast(errMessage(e), "error");
+    } finally {
+      setSavingS(false);
+    }
+  };
+
+  const inputCls = "w-full bg-[#0B0B1A] border border-[#2A2A3E] rounded-lg px-3 py-2 text-sm text-white placeholder-text-muted focus:outline-none focus:border-amber-gold/50 transition-colors";
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Palette className="w-4 h-4 text-amber-gold" />
           <h3 className="text-white font-semibold">外观定制</h3>
-          <span className="text-xs text-text-muted">主题与画面风格库（仅查询展示，编辑接口规划中）</span>
+          <span className="text-xs text-text-muted">主题与画面风格库（编辑保存后全局生效）</span>
         </div>
         <button
           onClick={() => void load()}
@@ -100,6 +177,7 @@ export default function AdminAppearancePanel() {
               <th className={TH}>强调色</th>
               <th className={TH}>默认</th>
               <th className={TH}>状态</th>
+              <th className={TH}>操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#2A2A3E]/60">
@@ -117,11 +195,14 @@ export default function AdminAppearancePanel() {
                     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-text-muted bg-[#2A2A3E]/60 border border-[#2A2A3E]">停用</span>
                   )}
                 </td>
+                <td className={TD}>
+                  <button onClick={() => openThemeEdit(t)} className="text-amber-gold hover:text-amber-300 text-sm transition-colors">编辑</button>
+                </td>
               </tr>
             ))}
             {themes.length === 0 && !loading && (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-text-muted text-sm">暂无主题数据</td>
+                <td colSpan={7} className="px-3 py-8 text-center text-text-muted text-sm">暂无主题数据</td>
               </tr>
             )}
           </tbody>
@@ -144,6 +225,7 @@ export default function AdminAppearancePanel() {
               <th className={TH}>作用域</th>
               <th className={TH}>Prompt 后缀</th>
               <th className={TH}>默认</th>
+              <th className={TH}>操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#2A2A3E]/60">
@@ -157,16 +239,124 @@ export default function AdminAppearancePanel() {
                   {s.prompt_suffix_static || "—"}
                 </td>
                 <td className={TD}>{s.is_default ? "✓" : "—"}</td>
+                <td className={TD}>
+                  <button onClick={() => openStyleEdit(s)} className="text-amber-gold hover:text-amber-300 text-sm transition-colors">编辑</button>
+                </td>
               </tr>
             ))}
             {styles.length === 0 && !loading && (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-text-muted text-sm">暂无风格数据</td>
+                <td colSpan={7} className="px-3 py-8 text-center text-text-muted text-sm">暂无风格数据</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {/* 主题编辑弹窗 */}
+      <Modal
+        title="编辑主题"
+        subtitle={themeEdit ? `${themeEdit.theme_code}` : undefined}
+        open={themeEdit !== null}
+        onClose={() => setThemeEdit(null)}
+        footer={
+          <>
+            <button onClick={() => setThemeEdit(null)} className="px-4 py-2 rounded-lg text-sm text-text-secondary bg-bg-card border border-[#2A2A3E] hover:border-[#3A3A4E] transition-colors">取消</button>
+            <button
+              onClick={() => void saveTheme()}
+              disabled={savingT}
+              className="px-4 py-2 rounded-lg text-sm font-semibold bg-gradient-to-r from-amber-gold to-amber-dim text-[#0B0B1A] hover:shadow-lg hover:shadow-amber-gold/20 transition-all disabled:opacity-50"
+            >
+              {savingT ? "保存中…" : "保存主题"}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-text-secondary mb-1.5">名称</label>
+            <input type="text" className={inputCls} value={tForm.name} onChange={(e) => setTForm((f) => ({ ...f, name: e.target.value }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-text-secondary mb-1.5">主色</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={tForm.primary} onChange={(e) => setTForm((f) => ({ ...f, primary: e.target.value }))} className="w-10 h-9 rounded cursor-pointer bg-transparent border border-[#2A2A3E]" />
+                <input type="text" className={inputCls} value={tForm.primary} onChange={(e) => setTForm((f) => ({ ...f, primary: e.target.value }))} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm text-text-secondary mb-1.5">强调色</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={tForm.accent} onChange={(e) => setTForm((f) => ({ ...f, accent: e.target.value }))} className="w-10 h-9 rounded cursor-pointer bg-transparent border border-[#2A2A3E]" />
+                <input type="text" className={inputCls} value={tForm.accent} onChange={(e) => setTForm((f) => ({ ...f, accent: e.target.value }))} />
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-text-secondary mb-1.5">状态</label>
+              <select className={inputCls} value={tForm.status} onChange={(e) => setTForm((f) => ({ ...f, status: e.target.value }))}>
+                <option value="ON">启用</option>
+                <option value="OFF">停用</option>
+              </select>
+            </div>
+            <div className="flex items-end pb-2">
+              <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+                <input type="checkbox" checked={tForm.isDefault} onChange={(e) => setTForm((f) => ({ ...f, isDefault: e.target.checked }))} className="custom-checkbox" />
+                设为默认主题
+              </label>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 风格编辑弹窗 */}
+      <Modal
+        title="编辑风格"
+        subtitle={styleEdit ? `${styleEdit.style_code} · ${styleEdit.category || "—"}` : undefined}
+        open={styleEdit !== null}
+        onClose={() => setStyleEdit(null)}
+        footer={
+          <>
+            <button onClick={() => setStyleEdit(null)} className="px-4 py-2 rounded-lg text-sm text-text-secondary bg-bg-card border border-[#2A2A3E] hover:border-[#3A3A4E] transition-colors">取消</button>
+            <button
+              onClick={() => void saveStyle()}
+              disabled={savingS}
+              className="px-4 py-2 rounded-lg text-sm font-semibold bg-gradient-to-r from-amber-gold to-amber-dim text-[#0B0B1A] hover:shadow-lg hover:shadow-amber-gold/20 transition-all disabled:opacity-50"
+            >
+              {savingS ? "保存中…" : "保存风格"}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-text-secondary mb-1.5">名称</label>
+            <input type="text" className={inputCls} value={sForm.name} onChange={(e) => setSForm((f) => ({ ...f, name: e.target.value }))} />
+          </div>
+          <div>
+            <label className="block text-sm text-text-secondary mb-1.5">描述</label>
+            <textarea rows={2} className={inputCls} value={sForm.description} onChange={(e) => setSForm((f) => ({ ...f, description: e.target.value }))} />
+          </div>
+          <div>
+            <label className="block text-sm text-text-secondary mb-1.5">缩略图 URL</label>
+            <input type="text" className={inputCls} value={sForm.thumbnail} placeholder="https://..." onChange={(e) => setSForm((f) => ({ ...f, thumbnail: e.target.value }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-text-secondary mb-1.5">排序</label>
+              <input type="number" className={inputCls} value={sForm.sortOrder} onChange={(e) => setSForm((f) => ({ ...f, sortOrder: e.target.value }))} />
+            </div>
+            <div className="flex items-end pb-2">
+              <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+                <input type="checkbox" checked={sForm.enabled} onChange={(e) => setSForm((f) => ({ ...f, enabled: e.target.checked }))} className="custom-checkbox" />
+                启用（创作页可选）
+              </label>
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -62,11 +62,12 @@ type ImageResponse struct {
 
 // VideoRequest 文生视频请求。
 type VideoRequest struct {
-	Prompt      string
-	RefImageURL string
-	DurationSec int
-	Resolution  string // P480/P720/P1080
-	ModelKey    string
+	Prompt       string
+	RefImageURL  string   // 单参考图（向后兼容；F10 后建议用 RefImageURLs）
+	RefImageURLs []string // F10: 多参考图列表（镜头级参考图机制）
+	DurationSec  int
+	Resolution   string // P480/P720/P1080
+	ModelKey     string
 }
 
 // VideoResponse 视频生成响应（异步任务提交后回调，返回外部任务 ID）。

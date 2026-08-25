@@ -2,6 +2,7 @@
 package creation
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -9,16 +10,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/duanju/backend/internal/engine/agent"
 	"github.com/duanju/backend/internal/pkg/httpx"
 )
 
-// AssetDetailService 资产详情服务（复用 Repo）。
+// AssetDetailService 资产详情服务（复用 Repo；llm 可为 nil：AI 优化降级规则改写）。
 type AssetDetailService struct {
 	repo *Repo
+	llm  agent.LLMClient
 }
 
-func NewAssetDetailService(repo *Repo) *AssetDetailService {
-	return &AssetDetailService{repo: repo}
+func NewAssetDetailService(repo *Repo, llm agent.LLMClient) *AssetDetailService {
+	return &AssetDetailService{repo: repo, llm: llm}
 }
 
 // ---- 3.2.4 修改角色基础信息 ----
@@ -36,10 +39,10 @@ func (s *AssetDetailService) UpdateCharacter(c *gin.Context, charIDStr string) {
 		return
 	}
 	var req struct {
-		Name            string   `json:"name"`
-		AppearancePrompt string  `json:"appearance_prompt"`
-		Tags            []string `json:"tags"`
-		Description     string   `json:"description"`
+		Name             string   `json:"name"`
+		AppearancePrompt string   `json:"appearance_prompt"`
+		Tags             []string `json:"tags"`
+		Description      string   `json:"description"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
@@ -363,9 +366,40 @@ func (s *AssetDetailService) EpisodeScenes(c *gin.Context, epUUID string) {
 		if err := rows.Scan(&id, &code, &name, &img, &status, &cost); err != nil {
 			continue
 		}
-		items = append(items, map[string]any{"scene_id": id, "code": code, "base_name": name, "main_image_url": img, "generation_status": status, "point_cost": cost})
+		items = append(items, map[string]any{
+			"scene_id": id, "code": code, "base_name": name, "main_image_url": img,
+			"generation_status": status, "point_cost": cost,
+			"tod_variants": s.sceneTodVariants(c.Request.Context(), id),
+		})
 	}
 	httpx.OK(c, gin.H{"items": items})
+}
+
+// sceneTodVariants 场景时段变体：按 time_of_day 分组取最近一张成功图（对齐 LuxReal 场景日夜多态）。
+func (s *AssetDetailService) sceneTodVariants(ctx context.Context, sceneID int64) []map[string]any {
+	rows, err := s.repo.pool.Query(ctx, `
+		SELECT COALESCE(time_of_day,''), original_url FROM generated_images
+		WHERE target_kind='SCENE' AND target_id=$1 AND deleted_at IS NULL AND state='SUCCESS'
+		  AND COALESCE(time_of_day,'') <> ''
+		ORDER BY id DESC`, sceneID)
+	if err != nil {
+		return []map[string]any{}
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	out := make([]map[string]any, 0, 4)
+	for rows.Next() {
+		var tod, url string
+		if err := rows.Scan(&tod, &url); err != nil {
+			continue
+		}
+		if seen[tod] {
+			continue
+		}
+		seen[tod] = true
+		out = append(out, map[string]any{"time_of_day": tod, "url": url})
+	}
+	return out
 }
 
 // EpisodeProps GET /episodes/:episode_id/props。
@@ -382,7 +416,7 @@ func (s *AssetDetailService) EpisodeProps(c *gin.Context, epUUID string) {
 	}
 	rows, err := s.repo.pool.Query(c.Request.Context(), `
 		SELECT id, COALESCE(code,''), COALESCE(name,''), COALESCE(category::text,''),
-		       COALESCE(main_image_url,''), COALESCE(generation_status::text,''), COALESCE(point_cost,0)
+		       COALESCE(main_image_url,''), COALESCE(generation_status::text,''), COALESCE(point_cost,0), COALESCE(description_prompt,'')
 		FROM props WHERE origin_episode_id=$1 AND deleted_at IS NULL ORDER BY id ASC`, epID)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取道具失败")
@@ -392,12 +426,12 @@ func (s *AssetDetailService) EpisodeProps(c *gin.Context, epUUID string) {
 	items := make([]map[string]any, 0)
 	for rows.Next() {
 		var id int64
-		var code, name, category, img, status string
+		var code, name, category, img, status, desc string
 		var cost int
-		if err := rows.Scan(&id, &code, &name, &category, &img, &status, &cost); err != nil {
+		if err := rows.Scan(&id, &code, &name, &category, &img, &status, &cost, &desc); err != nil {
 			continue
 		}
-		items = append(items, map[string]any{"prop_id": id, "code": code, "name": name, "category": category, "main_image_url": img, "generation_status": status, "point_cost": cost})
+		items = append(items, map[string]any{"prop_id": id, "code": code, "name": name, "category": category, "main_image_url": img, "generation_status": status, "point_cost": cost, "description": desc})
 	}
 	httpx.OK(c, gin.H{"items": items})
 }

@@ -2,6 +2,7 @@
 package creation
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -344,9 +345,10 @@ func (s *MarketService) CloseTaskOrder(c *gin.Context, orderUUID string) {
 	}
 	var oid, publisherID int64
 	var status string
+	var reward int
 	if err := s.repo.pool.QueryRow(c.Request.Context(), `
-		SELECT id, publisher_user_id, status::text FROM task_orders WHERE order_uuid=$1::uuid AND deleted_at IS NULL`, orderUUID).
-		Scan(&oid, &publisherID, &status); err != nil {
+		SELECT id, publisher_user_id, status::text, reward_points FROM task_orders WHERE order_uuid=$1::uuid AND deleted_at IS NULL`, orderUUID).
+		Scan(&oid, &publisherID, &status, &reward); err != nil {
 		httpx.Fail(c, http.StatusNotFound, 20001, "任务不存在")
 		return
 	}
@@ -358,8 +360,36 @@ func (s *MarketService) CloseTaskOrder(c *gin.Context, orderUUID string) {
 		httpx.Fail(c, http.StatusBadRequest, 20009, "仅进行中的任务可截止")
 		return
 	}
-	if _, err := s.repo.pool.Exec(c.Request.Context(), `
+	// 08 审查 Critical#5：截止即退回发布方冻结积分（同事务）
+	tx, err := s.repo.pool.Begin(c.Request.Context())
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "截止失败")
+		return
+	}
+	defer tx.Rollback(c.Request.Context())
+	if _, err := tx.Exec(c.Request.Context(), `
 		UPDATE task_orders SET status='CLOSED', updated_at=NOW() WHERE id=$1`, oid); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "截止失败")
+		return
+	}
+	if reward > 0 {
+		if _, err := tx.Exec(c.Request.Context(), `
+			UPDATE point_accounts SET frozen_balance=frozen_balance-$2, current_balance=current_balance+$2, last_txn_at=NOW()
+			WHERE owner_type='USER' AND owner_id=$1 AND frozen_balance>=$2`, publisherID, reward); err != nil {
+			httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "冻结积分退回失败")
+			return
+		}
+		if _, err := tx.Exec(c.Request.Context(), `
+			INSERT INTO point_transactions (account_id, owner_type, owner_id, txn_type, direction, amount,
+				balance_after, operator_user_id, description, idempotency_key)
+			SELECT pa.id, 'USER', pa.owner_id, 'MARKET_UNFREEZE', 'CREDIT', $2, pa.current_balance, $1, '任务截止退回冻结', $3
+			FROM point_accounts pa WHERE pa.owner_type='USER' AND pa.owner_id=$1`,
+			publisherID, reward, fmt.Sprintf("market-unfreeze-%d", oid)); err != nil {
+			httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "冻结积分退回失败")
+			return
+		}
+	}
+	if err := tx.Commit(c.Request.Context()); err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "截止失败")
 		return
 	}

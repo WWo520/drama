@@ -20,22 +20,22 @@ var ErrSpaceForbidden = errors.New("space membership required")
 
 // ProjectRow 项目行。
 type ProjectRow struct {
-	ID            int64
-	ProjectUUID   string
-	SpaceID       int64
-	SpaceUUID     string
-	OwnerID       int64
-	Title         string
-	SourceScriptText string
-	CoverImageURL *string
-	ProjectType   string
-	CurrentStep   string
-	Status        string
+	ID                int64
+	ProjectUUID       string
+	SpaceID           int64
+	SpaceUUID         string
+	OwnerID           int64
+	Title             string
+	SourceScriptText  string
+	CoverImageURL     *string
+	ProjectType       string
+	CurrentStep       string
+	Status            string
 	TotalEpisodeCount int
 	TotalDurationSec  int
-	LastOpenedAt  string
-	CreatedAt     string
-	UpdatedAt     string
+	LastOpenedAt      string
+	CreatedAt         string
+	UpdatedAt         string
 }
 
 // Repo creation 数据访问。
@@ -358,9 +358,39 @@ func (r *Repo) ListShotsByBeat(ctx context.Context, beatID int64) ([]ShotVideoDT
 	return out, rows.Err()
 }
 
+// ListShotsByGroup 镜头块下全部镜头（3.3.7b 镜头块批量生成用）。
+func (r *Repo) ListShotsByGroup(ctx context.Context, shotGroupID int64) ([]ShotVideoDTO, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT sh.id, sh.shot_uuid::text, sh.sort_order, sh.duration_sec,
+		       COALESCE(sh.video_generation_status::text, 'PENDING'),
+		       COALESCE(sh.generated_video_url, '')
+		FROM shots sh WHERE sh.shot_group_id=$1 AND sh.deleted_at IS NULL ORDER BY sh.sort_order`,
+		shotGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ShotVideoDTO, 0)
+	for rows.Next() {
+		var s ShotVideoDTO
+		if err := rows.Scan(&s.ShotID, &s.ShotUUID, &s.SortOrder, &s.DurationSec, &s.VideoStatus, &s.GeneratedVideoURL); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// VideoGenOpts 视频生成参数（弹窗提交；18 - 视频制作 阶段三参数落库，VideoHandler 优先读取）。
+type VideoGenOpts struct {
+	Resolution string // P480/P720/P1080；空=默认 P720
+	ModelKey   string // 模型 key（须命中 models.model_key 才参与路由）；空=keystore 默认路由
+	VideoModel string // 用户选择的模型展示名（落 ai_model_requested 仅作记录，不参与路由）
+}
+
 // CreateVideoTasks beat 下所有 PENDING shots 批量建 VIDEO_SEGMENT_GEN 任务（3.3.7a，Outbox 同事务）。
 // 返回创建的任务 ID 列表（计费冻结按任务维度进行）。
-func (r *Repo) CreateVideoTasks(ctx context.Context, projectID, spaceID, userID, beatID int64, shots []ShotVideoDTO) ([]int64, error) {
+func (r *Repo) CreateVideoTasks(ctx context.Context, projectID, spaceID, userID, beatID int64, shots []ShotVideoDTO, opts VideoGenOpts) ([]int64, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -371,13 +401,20 @@ func (r *Repo) CreateVideoTasks(ctx context.Context, projectID, spaceID, userID,
 		if sh.VideoStatus == "SUCCESS" {
 			continue
 		}
-		params, _ := json.Marshal(map[string]any{"shot_id": sh.ShotID})
+		p := map[string]any{"shot_id": sh.ShotID}
+		if opts.Resolution != "" {
+			p["resolution"] = opts.Resolution
+		}
+		if opts.ModelKey != "" {
+			p["model_key"] = opts.ModelKey
+		}
+		params, _ := json.Marshal(p)
 		var taskID int64
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO generation_tasks (request_id, idempotency_key, space_id, user_id, project_id, task_type, status, request_params_json)
-			VALUES ('video-'||gen_random_uuid(), 'video-'||gen_random_uuid(), $1, $2, $3, 'VIDEO_SEGMENT_GEN', 'QUEUED', $4::jsonb)
+			INSERT INTO generation_tasks (request_id, idempotency_key, space_id, user_id, project_id, task_type, status, ai_model_requested, request_params_json)
+			VALUES ('video-'||gen_random_uuid(), 'video-'||gen_random_uuid(), $1, $2, $3, 'VIDEO_SEGMENT_GEN', 'QUEUED', NULLIF($4,''), $5::jsonb)
 			RETURNING id`,
-			spaceID, userID, projectID, string(params)).Scan(&taskID); err != nil {
+			spaceID, userID, projectID, opts.VideoModel, string(params)).Scan(&taskID); err != nil {
 			return nil, err
 		}
 		if _, err := tx.Exec(ctx, `
@@ -415,6 +452,38 @@ func (r *Repo) MarkTaskFailed(ctx context.Context, taskID int64, reason string) 
 		UPDATE generation_tasks SET status='FAILED', error_message=$2, user_display_error=$2, updated_at=NOW()
 		WHERE id=$1`, taskID, reason)
 	return err
+}
+
+// BeatAssetReadiness 单元关联资产就绪度（F10 门控，18 - 视频制作 阶段一.3）：
+// linked=关联资产数；ready=参考图（assets.main_image_url）非空数。
+// linked>0 且 ready<linked → 引导回 Step2（对齐 LuxReal code=6002）；无关联资产则放行纯 T2V。
+func (r *Repo) BeatAssetReadiness(ctx context.Context, beatID int64) (linked, ready int, err error) {
+	err = r.pool.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE COALESCE(a.main_image_url,'') != '')
+		FROM nu_asset_links nal
+		LEFT JOIN characters c ON nal.asset_kind='CHARACTER' AND nal.asset_id=c.id
+		LEFT JOIN scenes sc ON nal.asset_kind='SCENE' AND nal.asset_id=sc.id
+		LEFT JOIN props p ON nal.asset_kind='PROP' AND nal.asset_id=p.id
+		LEFT JOIN assets a ON a.id=COALESCE(c.asset_id, sc.asset_id, p.asset_id)
+		WHERE nal.narrative_unit_id=$1`, beatID).Scan(&linked, &ready)
+	return
+}
+
+// ResolveVideoModelKey 校验模型 key（models.model_key，T2V 能力、启用中）：
+// 无效/为空返回空串（走默认路由），避免前端任意字符串阻断 Key 选择。
+func (r *Repo) ResolveVideoModelKey(ctx context.Context, key string) string {
+	if key == "" {
+		return ""
+	}
+	var one int
+	if err := r.pool.QueryRow(ctx, `
+		SELECT 1 FROM models m
+		JOIN model_providers p ON p.id=m.provider_id
+		WHERE m.model_key=$1 AND m.capability='T2V' AND m.enabled AND m.deleted_at IS NULL
+		  AND p.enabled AND p.deleted_at IS NULL`, key).Scan(&one); err != nil {
+		return ""
+	}
+	return key
 }
 
 // ListBeats 叙事单元列表（3.1.4）。
@@ -559,6 +628,16 @@ func (r *Repo) ResolveNarrativeUnit(ctx context.Context, nuUUID string) (int64, 
 		return 0, 0, fmt.Errorf("%w: nu", ErrNotFound)
 	}
 	return id, projectID, err
+}
+
+// SaveVersionSnapshot 保存叙事单元版本快照（F4：编辑前自动快照，用于回滚）。
+func (r *Repo) SaveVersionSnapshot(ctx context.Context, narrativeUnitID, userID int64, script, storyboard string) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO narrative_unit_versions (narrative_unit_id, version_num, label, script_snapshot, storyboard_json_snapshot, created_by_user_id, created_from)
+		SELECT $1, COALESCE(MAX(version_num),0)+1, '编辑前快照', $3, $4, $2, 'MANUAL_EDIT'
+		FROM narrative_unit_versions WHERE narrative_unit_id=$1`,
+		narrativeUnitID, userID, script, storyboard)
+	return err
 }
 
 // ResolveCharacter character_id（数字）→ (id, project_id)。

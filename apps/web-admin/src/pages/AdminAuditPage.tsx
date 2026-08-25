@@ -26,7 +26,7 @@ import {
 import { toast, errMessage, fmtNum, exportCSV } from "../lib";
 import "./AdminAuditPage.css";
 
-type TabKey = "pending" | "approved" | "rejected" | "draft";
+type TabKey = "pending" | "approved" | "rejected" | "draft" | "reports" | "logs"; // A2+A3: 举报 + 审计日志
 type ComplianceState = "pass" | "fail" | "warn";
 
 interface AuditRow {
@@ -67,6 +67,8 @@ const TAB_STATUS: Record<TabKey, string> = {
   approved: "PUBLISHED",
   rejected: "REJECTED",
   draft: "UNPUBLISHED",
+  reports: "", // A2: 举报无状态映射（前端仅展示 PENDING 列表）
+  logs: "", // 审计日志无状态映射，仅作占位
 };
 
 const TAB_LABEL: Record<TabKey, string> = {
@@ -74,6 +76,8 @@ const TAB_LABEL: Record<TabKey, string> = {
   approved: "已通过",
   rejected: "已驳回",
   draft: "草稿",
+  reports: "举报", // A2: 举报处理 tab
+  logs: "审计日志", // A3: 审计日志 tab
 };
 
 // 行内状态标签（复用设计稿 tag 样式）
@@ -149,6 +153,19 @@ const FALLBACK_ROWS: AuditRow[] = [
   },
 ];
 
+// 审计日志回退行（接口失败时展示）
+const FALLBACK_AUDIT_ROWS: AuditRow[] = [
+  { work_id: "LOG-001", title: "管理员张三将《都市巅峰之逆袭归来》状态改为已下架", meta: "操作：下架", author: "张三", authorInitial: "Z", authorGrad: "from-amber-400 to-orange-500", submitted: "2026-08-22 14:32", compliance: [{ label: "系统", state: "pass" }], media_url: "", status: "LOG", real: false },
+  { work_id: "LOG-002", title: "管理员李四审核通过《战神归来之凤唳九天》", meta: "操作：审核通过", author: "李四", authorInitial: "L", authorGrad: "from-green-400 to-emerald-500", submitted: "2026-08-22 13:18", compliance: [{ label: "系统", state: "pass" }], media_url: "", status: "LOG", real: false },
+  { work_id: "LOG-003", title: "管理员王五创建新套餐《Pro 年费版》", meta: "操作：新增套餐", author: "王五", authorInitial: "W", authorGrad: "from-blue-400 to-cyan-500", submitted: "2026-08-22 12:45", compliance: [{ label: "系统", state: "pass" }], media_url: "", status: "LOG", real: false },
+];
+
+// 举报回退行（接口失败时展示）
+const FALLBACK_REPORT_ROWS: AuditRow[] = [
+  { work_id: "RPT-001", title: "《战神归来之凤唳九天》涉嫌血腥暴力", meta: "举报人：用户小王", author: "小王", authorInitial: "王", authorGrad: "from-red-400 to-orange-500", submitted: "2026-08-22 15:30", compliance: [{ label: "暴力", state: "fail" }], media_url: "", status: "PENDING", real: false },
+  { work_id: "RPT-002", title: "《都市巅峰之逆袭归来》涉嫌抄袭", meta: "举报人：用户小李", author: "小李", authorInitial: "李", authorGrad: "from-blue-400 to-cyan-500", submitted: "2026-08-22 14:20", compliance: [{ label: "版权", state: "warn" }], media_url: "", status: "PENDING", real: false },
+];
+
 // 封面渐变池（按行序循环）
 const COVER_GRADS = [
   "from-purple-600 to-pink-500",
@@ -180,6 +197,8 @@ export default function AdminAuditPage() {
     approved: 1247,
     rejected: 186,
     draft: 32,
+    reports: 0, // A2: 举报初始计数
+    logs: 0, // A3: 审计日志初始计数
   });
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -189,6 +208,37 @@ export default function AdminAuditPage() {
 
   const load = useCallback(async (p: number, t: TabKey) => {
     try {
+      if (t === "reports") {
+        // A2: 举报页（GET /admin/reports）
+        const resp = await api.get<{ items: { report_id: number; work_id: string; title: string; reason: string; status: string; created_at: string }[]; pagination: { total: number } }>(`/admin/reports?page=${p}&page_size=${PAGE_SIZE}`);
+        const mapped: AuditRow[] = (resp.items || []).map((r: { report_id: number; work_id: string; title: string; reason: string; status: string; created_at: string }) => ({
+          work_id: String(r.report_id), // 用 report_id 作为操作主键
+          title: r.title || "未知作品",
+          meta: r.reason,
+          author: "举报用户",
+          authorInitial: "举报",
+          authorGrad: "",
+          submitted: r.created_at,
+          compliance: [{ label: r.reason, state: "fail" as ComplianceState }],
+          media_url: "",
+          status: r.status,
+          real: true,
+        }));
+        setRows(mapped);
+        setTotal(resp.pagination?.total || 0);
+        setTabTotals((prev) => ({ ...prev, reports: resp.pagination?.total || 0 }));
+        setIsReal(true);
+        return;
+      }
+      if (t === "logs") {
+        // A3: 审计日志页（GET /admin/audit-logs）
+        const resp = await api.get<{ items: AuditRow[]; pagination: { total: number } }>(`/admin/audit-logs?page=${p}&page_size=${PAGE_SIZE}`);
+        setRows(resp.items || []);
+        setTotal(resp.pagination?.total || 0);
+        setTabTotals((prev) => ({ ...prev, logs: resp.pagination?.total || 0 }));
+        setIsReal(true);
+        return;
+      }
       const resp = await api.get<AuditResp>(`/audit/works?status=${TAB_STATUS[t]}&page=${p}&page_size=${PAGE_SIZE}`);
       const mapped: AuditRow[] = resp.items.map((w) => ({
         work_id: w.work_id,
@@ -208,7 +258,13 @@ export default function AdminAuditPage() {
       setTabTotals((prev) => ({ ...prev, [t]: resp.pagination.total }));
       setIsReal(true);
     } catch {
-      if (t === "pending") {
+      if (t === "reports") {
+        setRows(FALLBACK_REPORT_ROWS);
+        setTotal(2);
+      } else if (t === "logs") {
+        setRows(FALLBACK_AUDIT_ROWS);
+        setTotal(3);
+      } else if (t === "pending") {
         setRows(FALLBACK_ROWS);
         setTotal(128);
       } else {
@@ -226,6 +282,7 @@ export default function AdminAuditPage() {
   // 首次进入时并行拉 4 个 tab 的计数（page_size=1 轻量请求，避免未访问 tab 的角标停留在设计稿静态值）
   useEffect(() => {
     (Object.keys(TAB_STATUS) as TabKey[]).forEach((t) => {
+      if (t === "logs") return; // 审计日志 tab 无需预取计数
       api
         .get<AuditResp>(`/audit/works?status=${TAB_STATUS[t]}&page=1&page_size=1`)
         .then((resp) => setTabTotals((prev) => ({ ...prev, [t]: resp.pagination.total })))
@@ -242,6 +299,14 @@ export default function AdminAuditPage() {
     setJumpInput("1");
     setSelected(new Set());
     setKeyword("");
+    if (t === "logs") {
+      setRows(FALLBACK_AUDIT_ROWS);
+      setTotal(3);
+    }
+    if (t === "reports") {
+      setRows(FALLBACK_REPORT_ROWS);
+      setTotal(2);
+    }
   };
 
   const filtered = useMemo(
@@ -421,6 +486,12 @@ export default function AdminAuditPage() {
           </div>
           <div className={`audit-tab ${tab === "draft" ? "active" : ""}`} onClick={() => switchTab("draft")}>
             草稿<span className="tab-badge">{fmtNum(tabTotals.draft)}</span>
+          </div>
+          <div className={`audit-tab ${tab === "reports" ? "active" : ""}`} onClick={() => switchTab("reports")}>
+            举报<span className="tab-badge">{fmtNum(tabTotals.reports)}</span>
+          </div>
+          <div className={`audit-tab ${tab === "logs" ? "active" : ""}`} onClick={() => switchTab("logs")}>
+            审计日志<span className="tab-badge">{fmtNum(tabTotals.logs)}</span>
           </div>
         </div>
 

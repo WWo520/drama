@@ -1,22 +1,25 @@
 // 发现页（批次4：设计稿 discover.html 迁移，DOM 1:1）
 // CSS 原样提取 → src/pages/feed.css（theme tokens + shell 类 + 瀑布流卡片类）
 // 接口对接：GET /works（workApi.feed，S3-F01 广场信息流）；失败或空时回退设计稿 30 张静态卡片（视觉保真）
+// 互动：详情弹窗 GET /works/:id + 评论 GET /works/:id/comments，点赞/取消赞/收藏/评论/举报（后端接口齐全）
 // 搜索：后端暂无搜索接口，客户端按标题/作者过滤（state 保存）
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  Compass, Eye, Folder, Heart, Image, Loader2,
-  Play, Search, Sparkles, Video,
+  Coins, Compass, Eye, Folder, Heart, Image, Loader2, MessageCircle, Send, Flag, X,
+  Play, Search, Sparkles, Video, Bookmark,
 } from "lucide-react";
 
 import { api, workApi, type WorkItem } from "@duanju/api-client";
 import { useAuthStore } from "../stores/authStore";
 import ProfilePanel from "../components/ProfilePanel";
 import { useAvatarUrl } from "../hooks/useAvatarUrl";
+import { toast } from "sonner";
 import "./feed.css";
 
 // 卡片视觉元数据（瀑布流高度/缩略渐变/头像渐变/点赞数/播放数 —— 原样摘自设计稿 30 张卡）
 interface FeedCard {
+  work_id?: string | null;
   title: string;
   author: string;
   kind: "video" | "image";
@@ -26,6 +29,29 @@ interface FeedCard {
   avatar: string;
   likes: string;
   views: string;
+}
+
+// 作品详情（GET /works/:work_id）
+interface WorkDetail {
+  work_id: string;
+  title: string;
+  cover_url: string;
+  description?: string;
+  view_count: number;
+  like_count: number;
+  favorite_count: number;
+  comment_count: number;
+  duration_sec?: number;
+  author: string;
+  published_at?: string;
+}
+
+// 评论项（GET /works/:work_id/comments）
+interface CommentItem {
+  comment_id: string;
+  author: string;
+  content: string;
+  created_at: string;
 }
 
 // 设计稿静态卡片（API 无数据时的视觉回退；数据源 discover.html L1217-1954）
@@ -89,9 +115,16 @@ function fmtCount(n: number): string {
   return String(n);
 }
 
+// 时长秒 → 类型徽标文案（详情弹窗）
+function durationLabel(sec?: number): string {
+  if (!sec) return "作品";
+  return `${fmtDuration(sec)}`;
+}
+
 // 真接口数据 → 卡片视图模型
 function toCard(w: WorkItem, idx: number): FeedCard {
   return {
+    work_id: w.work_id,
     title: w.title,
     author: w.author,
     kind: "video",
@@ -113,6 +146,115 @@ export default function FeedPage() {
   const [keyword, setKeyword] = useState("");
   const [points, setPoints] = useState<number | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+
+  // 详情弹窗（互动：详情/评论/点赞/收藏/举报）
+  const [detail, setDetail] = useState<WorkDetail | null>(null);
+  const [comments, setComments] = useState<CommentItem[]>([]);
+  const [commentInput, setCommentInput] = useState("");
+  const [liked, setLiked] = useState(false);
+  const [fav, setFav] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+
+  const openDetail = async (c: FeedCard) => {
+    if (!c.work_id) {
+      toast.info("示例卡片暂不支持互动");
+      return;
+    }
+    setDetailLoading(true);
+    try {
+      const [d, cm] = await Promise.all([
+        api.get<WorkDetail>(`/works/${c.work_id}`),
+        api.get<{ items: CommentItem[] }>(`/works/${c.work_id}/comments`, { params: { page_size: 50 } }),
+      ]);
+      setDetail(d);
+      setComments(cm.items ?? []);
+      setLiked(false);
+      setFav(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "作品加载失败");
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const closeDetail = () => {
+    setDetail(null);
+    setComments([]);
+    setCommentInput("");
+    setReportOpen(false);
+  };
+
+  // 点赞/取消赞
+  const toggleLike = async () => {
+    if (!detail) return;
+    try {
+      if (liked) {
+        await api.delete(`/works/${detail.work_id}/like`);
+        setDetail({ ...detail, like_count: Math.max(0, detail.like_count - 1) });
+      } else {
+        await api.post(`/works/${detail.work_id}/like`);
+        setDetail({ ...detail, like_count: detail.like_count + 1 });
+      }
+      setLiked((v) => !v);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "操作失败");
+    }
+  };
+
+  // 收藏
+  const toggleFav = async () => {
+    if (!detail) return;
+    try {
+      await api.post(`/works/${detail.work_id}/favorite`);
+      setFav((v) => {
+        const next = !v;
+        setDetail({ ...detail, favorite_count: detail.favorite_count + (next ? 1 : -1) });
+        return next;
+      });
+      toast.success(fav ? "已取消收藏" : "已收藏");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "操作失败");
+    }
+  };
+
+  // 发表评论
+  const submitComment = async () => {
+    if (!detail) return;
+    const content = commentInput.trim();
+    if (!content) {
+      toast.info("请输入评论内容");
+      return;
+    }
+    try {
+      await api.post(`/works/${detail.work_id}/comments`, { content });
+      setCommentInput("");
+      const cm = await api.get<{ items: CommentItem[] }>(`/works/${detail.work_id}/comments`, { params: { page_size: 50 } });
+      setComments(cm.items ?? []);
+      setDetail({ ...detail, comment_count: detail.comment_count + 1 });
+      toast.success("评论已发表");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "评论失败");
+    }
+  };
+
+  // 举报
+  const submitReport = async () => {
+    if (!detail) return;
+    if (!reportReason.trim()) {
+      toast.info("请填写举报原因");
+      return;
+    }
+    try {
+      await api.post(`/works/${detail.work_id}/report`, { reason: reportReason.trim() });
+      toast.success("举报已提交，审核后会处理");
+      setReportOpen(false);
+      setReportReason("");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "举报失败");
+    }
+  };
 
   // 广场信息流：GET /works；失败或空时回退设计稿静态卡（视觉保真，标注占位）
   useEffect(() => {
@@ -173,15 +315,15 @@ export default function FeedPage() {
           {/* 中心导航（发现 active） */}
           <nav className="flex flex-col items-center gap-2 flex-shrink-0">
             <Link to="/" className="luxreal-nav-item" title="创作">
-              <Sparkles size={22} />
+              <Sparkles size={24} />
               <span>创作</span>
             </Link>
             <Link to="/feed" className="luxreal-nav-item active" title="发现">
-              <Compass size={22} />
+              <Compass size={24} />
               <span>发现</span>
             </Link>
             <Link to="/projects" className="luxreal-nav-item" title="作品">
-              <Folder size={22} />
+              <Folder size={24} />
               <span>作品</span>
             </Link>
           </nav>
@@ -210,8 +352,13 @@ export default function FeedPage() {
             <ProfilePanel open={profileOpen} onClose={() => setProfileOpen(false)} />
           </div>
 
-          {/* 积分（真实余额） */}
-          <span className="sidebar-credits">{points === null ? "…" : points.toLocaleString()}</span>
+          {/* 积分（真实余额，金色徽章 Coins 图标 + 数字） */}
+          <span className="sidebar-credits">
+            <span className="sidebar-credits-badge">
+              <Coins size={16} className="sidebar-credits-icon" />
+            </span>
+            {points === null ? "…" : points.toLocaleString()}
+          </span>
           {/* 充值 */}
           <Link to="/points" className="sidebar-recharge" title="充值">
             充值
@@ -249,7 +396,7 @@ export default function FeedPage() {
                 {/* 瀑布流网格 */}
                 <div className="masonry-grid">
                   {visibleCards.map((c, idx) => (
-                    <div key={`${c.title}-${idx}`} className="discover-card">
+                    <div key={`${c.title}-${idx}`} className="discover-card" onClick={() => void openDetail(c)}>
                       <div className="card-thumb">
                         <div className={`card-thumb-gradient thumb-${c.thumb}`} style={{ height: c.height }} />
                         <div className="card-overlay" />
@@ -292,6 +439,164 @@ export default function FeedPage() {
           </main>
         </div>
       </div>
+
+      {/* ===== 作品详情弹窗（互动：点赞/收藏/评论/举报） ===== */}
+      {(detail || detailLoading) && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: "rgba(5,5,15,0.72)", backdropFilter: "blur(6px)" }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeDetail();
+          }}
+        >
+          <div
+            className="w-[560px] max-h-[80vh] flex flex-col rounded-2xl border border-[var(--luxreal-border)]"
+            style={{ background: "var(--luxreal-panel-bg, #15151D)", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--luxreal-border)]">
+              <div className="text-[15px] font-semibold text-[var(--luxreal-foreground)] truncate">
+                {detail ? detail.title : "加载中…"}
+              </div>
+              <button onClick={closeDetail} className="text-[var(--luxreal-muted-foreground)] hover:text-white transition-colors" aria-label="关闭">
+                <X size={18} />
+              </button>
+            </div>
+
+            {detailLoading ? (
+              <div className="flex items-center justify-center py-20 gap-2" style={{ color: "var(--luxreal-muted-foreground)" }}>
+                <Loader2 size={18} className="animate-spin" />
+                <span className="text-sm">加载作品详情…</span>
+              </div>
+            ) : detail ? (
+              <>
+                {/* 作品信息 */}
+                <div className="px-5 py-4 border-b border-[var(--luxreal-border)]">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white" style={{ background: AVATAR_GRADIENTS[0] }}>
+                      {(detail.author || "U").slice(0, 1).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-white font-medium truncate">{detail.author || "匿名创作者"}</div>
+                      <div className="text-xs" style={{ color: "var(--luxreal-muted-foreground)" }}>
+                        {detail.published_at ? new Date(detail.published_at).toLocaleDateString("zh-CN") : ""}
+                      </div>
+                    </div>
+                    <span className="text-xs px-2.5 py-1 rounded-full" style={{ background: "rgba(245,178,60,0.12)", color: "var(--luxreal-primary)" }}>
+                      AI{durationLabel(detail.duration_sec)}
+                    </span>
+                  </div>
+                  {detail.cover_url && (
+                    <div className="mt-3 rounded-xl overflow-hidden border border-[var(--luxreal-border)]">
+                      <img src={detail.cover_url} alt={detail.title} className="w-full max-h-[220px] object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    </div>
+                  )}
+                  {detail.description && <p className="mt-3 text-[13px] leading-relaxed text-white/70">{detail.description}</p>}
+                  <div className="flex items-center gap-1.5 mt-3 text-xs" style={{ color: "var(--luxreal-muted-foreground)" }}>
+                    <Eye size={14} />{fmtCount(detail.view_count)} 播放
+                  </div>
+                </div>
+
+                {/* 互动操作栏 */}
+                <div className="flex items-center gap-2 px-5 py-3 border-b border-[var(--luxreal-border)]">
+                  <button
+                    onClick={() => void toggleLike()}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${liked ? "text-red-400 bg-red-400/10" : "text-white/70 hover:text-white bg-white/5"}`}
+                  >
+                    <Heart size={14} fill={liked ? "currentColor" : "none"} />
+                    {fmtCount(detail.like_count)}
+                  </button>
+                  <button
+                    onClick={() => void toggleFav()}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${fav ? "text-amber-gold bg-amber-gold/10" : "text-white/70 hover:text-white bg-white/5"}`}
+                  >
+                    <Bookmark size={14} fill={fav ? "currentColor" : "none"} />
+                    {fav ? "已收藏" : "收藏"}
+                  </button>
+                  <button
+                    onClick={() => setReportOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-white/70 hover:text-red-400 bg-white/5 transition-colors ml-auto"
+                  >
+                    <Flag size={14} /> 举报
+                  </button>
+                </div>
+
+                {/* 评论列表 */}
+                <div className="flex-1 min-h-0 overflow-y-auto px-5 py-3 space-y-3">
+                  <div className="flex items-center gap-1.5 text-xs" style={{ color: "var(--luxreal-muted-foreground)" }}>
+                    <MessageCircle size={14} />
+                    评论 {detail.comment_count}
+                  </div>
+                  {comments.length === 0 && (
+                    <div className="py-8 text-center text-sm" style={{ color: "var(--luxreal-muted-foreground)" }}>
+                      暂无评论，来抢沙发～
+                    </div>
+                  )}
+                  {comments.map((cm) => (
+                    <div key={cm.comment_id} className="flex gap-3">
+                      <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ background: AVATAR_GRADIENTS[Number(cm.comment_id.charCodeAt(0)) % AVATAR_GRADIENTS.length] }}>
+                        {(cm.author || "U").slice(0, 1).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs text-white/85 font-medium">{cm.author}</div>
+                        <div className="text-[13px] text-white/65 leading-relaxed break-words">{cm.content}</div>
+                        <div className="text-[10px] mt-0.5" style={{ color: "var(--luxreal-muted-foreground)" }}>
+                          {cm.created_at ? new Date(cm.created_at).toLocaleString("zh-CN", { hour12: false }) : ""}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 评论输入 */}
+                <div className="flex items-center gap-2 px-5 py-3 border-t border-[var(--luxreal-border)]">
+                  <input
+                    type="text"
+                    value={commentInput}
+                    maxLength={1000}
+                    placeholder="写下你的评论…"
+                    onChange={(e) => setCommentInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void submitComment(); }}
+                    className="flex-1 bg-white/5 border border-[var(--luxreal-border)] rounded-lg px-3 py-2 text-sm text-white placeholder-[var(--luxreal-muted-foreground)] focus:outline-none focus:border-[var(--luxreal-primary)]/50 transition-colors"
+                  />
+                  <button
+                    onClick={() => void submitComment()}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-[#0B0B1A] bg-gradient-to-r from-amber-gold to-amber-dim hover:shadow-lg hover:shadow-amber-gold/20 transition-all"
+                  >
+                    <Send size={13} /> 发布
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
+
+          {/* 举报弹窗 */}
+          {reportOpen && detail && (
+            <div
+              className="fixed inset-0 z-[60] flex items-center justify-center"
+              style={{ background: "rgba(5,5,15,0.6)" }}
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setReportOpen(false);
+              }}
+            >
+              <div className="w-[400px] rounded-2xl border border-[var(--luxreal-border)] p-5" style={{ background: "var(--luxreal-panel-bg, #15151D)" }}>
+                <div className="text-sm font-semibold text-white mb-3">举报作品</div>
+                <textarea
+                  rows={3}
+                  value={reportReason}
+                  maxLength={256}
+                  placeholder="请描述违规原因（如：涉及侵权、低俗内容等）"
+                  onChange={(e) => setReportReason(e.target.value)}
+                  className="w-full bg-white/5 border border-[var(--luxreal-border)] rounded-lg px-3 py-2 text-sm text-white placeholder-[var(--luxreal-muted-foreground)] focus:outline-none focus:border-red-400/50 transition-colors"
+                />
+                <div className="flex items-center justify-end gap-3 mt-4">
+                  <button onClick={() => setReportOpen(false)} className="px-4 py-2 rounded-lg text-sm text-white/70 hover:text-white transition-colors">取消</button>
+                  <button onClick={() => void submitReport()} className="px-4 py-2 rounded-lg text-sm font-semibold bg-red-500/90 hover:bg-red-500 text-white transition-colors">提交举报</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

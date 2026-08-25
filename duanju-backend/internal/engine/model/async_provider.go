@@ -17,9 +17,9 @@ import (
 
 // AsyncTaskProvider 异步生成厂商（创建任务 + 轮询查询）。
 type AsyncTaskProvider struct {
-	name  string
-	caps  []Capability
-	http  *http.Client
+	name string
+	caps []Capability
+	http *http.Client
 	// 端点模板：{base} 由 KeyCredential.BaseURL 提供；{id} 为任务 ID
 	imageCreatePath string // 文生图创建任务路径，如 /api/v1/images/generations
 	imageQueryPath  string // 文生图查询路径，如 /api/v1/images/generations/{id}
@@ -70,17 +70,33 @@ func NewAsyncTaskProvider(name string, caps []Capability, opt AsyncProviderOptio
 	return p
 }
 
-func (p *AsyncTaskProvider) Name() string { return p.name }
+func (p *AsyncTaskProvider) Name() string               { return p.name }
 func (p *AsyncTaskProvider) Capabilities() []Capability { return p.caps }
+
+// normalizeVolcSize 比例格式归一化：前端/弹窗传 "16:9"，火山即梦 API 要求 "R16_9"。
+func normalizeVolcSize(ratio string) string {
+	if ratio == "" || strings.HasPrefix(ratio, "R") || strings.HasPrefix(ratio, "r") {
+		return ratio
+	}
+	if w, h, ok := strings.Cut(ratio, ":"); ok && w != "" && h != "" {
+		return "R" + w + "_" + h
+	}
+	return ratio
+}
 
 // GenerateImage 文生图：创建任务 → 轮询 → 返回结果 URL（同步阻塞，适配 worker 单任务模型）。
 func (p *AsyncTaskProvider) GenerateImage(ctx context.Context, k *KeyCredential, req *ImageRequest) (*ImageResponse, error) {
 	if p.imageCreatePath == "" {
 		return nil, fmt.Errorf("provider %s 未配置图片生成端点", p.name)
 	}
-	body := map[string]any{"prompt": req.Prompt, "model": req.ModelKey}
+	// 模型取值：调用方指定优先；为空回退 keystore 按 models 表回填的默认模型（避免空 model 被 API 拒绝）。
+	useModel := req.ModelKey
+	if useModel == "" {
+		useModel = k.ModelKey
+	}
+	body := map[string]any{"prompt": req.Prompt, "model": useModel}
 	if req.AspectRatio != "" {
-		body["size"] = req.AspectRatio // 火山即梦：R16_9/R9_16/R1_1
+		body["size"] = normalizeVolcSize(req.AspectRatio) // 火山即梦：R16_9/R9_16/R1_1
 	}
 	if req.Resolution != "" {
 		body["resolution"] = req.Resolution
@@ -93,7 +109,7 @@ func (p *AsyncTaskProvider) GenerateImage(ctx context.Context, k *KeyCredential,
 	if err != nil {
 		return nil, err
 	}
-	return &ImageResponse{ImageURL: url, ModelUsed: req.ModelKey, KeyID: k.ID}, nil
+	return &ImageResponse{ImageURL: url, ModelUsed: useModel, KeyID: k.ID}, nil
 }
 
 // GenerateVideo 文生视频：创建任务 → 轮询 → 返回结果 URL（同步阻塞）。
@@ -101,15 +117,28 @@ func (p *AsyncTaskProvider) GenerateVideo(ctx context.Context, k *KeyCredential,
 	if p.videoCreatePath == "" {
 		return nil, fmt.Errorf("provider %s 未配置视频生成端点", p.name)
 	}
-	body := map[string]any{"prompt": req.Prompt, "model": req.ModelKey}
+	// 模型取值：调用方指定优先；为空回退 keystore 按 models 表回填的默认模型。
+	useModel := req.ModelKey
+	if useModel == "" {
+		useModel = k.ModelKey
+	}
+	body := map[string]any{"prompt": req.Prompt, "model": useModel}
 	if req.DurationSec > 0 {
 		body["duration"] = req.DurationSec // 秒；部分厂商用 5/10 枚举
 	}
 	if req.Resolution != "" {
 		body["resolution"] = req.Resolution // P480/P720/P1080
 	}
-	if req.RefImageURL != "" {
-		body["image_url"] = req.RefImageURL // I2V 首帧
+	// F10 参考图：RefImageURLs 多图优先，RefImageURL 单图向后兼容。
+	// 火山 ark：image_url 收 string（单图首帧）或 []string（多图参考，1~4 张）。
+	refs := dedupeURLs(req.RefImageURLs)
+	if len(refs) == 0 && req.RefImageURL != "" {
+		refs = []string{req.RefImageURL}
+	}
+	if len(refs) == 1 {
+		body["image_url"] = refs[0]
+	} else if len(refs) > 1 {
+		body["image_url"] = refs
 	}
 	taskID, err := p.createTask(ctx, k, p.videoCreatePath, body)
 	if err != nil {
@@ -119,12 +148,26 @@ func (p *AsyncTaskProvider) GenerateVideo(ctx context.Context, k *KeyCredential,
 	if err != nil {
 		return nil, err
 	}
-	return &VideoResponse{ExternalTaskID: taskID, VideoURL: url, ModelUsed: req.ModelKey, KeyID: k.ID}, nil
+	return &VideoResponse{ExternalTaskID: taskID, VideoURL: url, ModelUsed: useModel, KeyID: k.ID}, nil
 }
 
 // Chat 不支持（由 LLM Provider 提供）。
 func (p *AsyncTaskProvider) Chat(_ context.Context, _ *KeyCredential, _ *ChatRequest) (*ChatResponse, error) {
 	return nil, fmt.Errorf("provider %s 不支持对话", p.name)
+}
+
+// dedupeURLs URL 列表去重保序（跳过空值；参考图来源可能重复命中单元级+镜头级）。
+func dedupeURLs(urls []string) []string {
+	seen := make(map[string]bool, len(urls))
+	out := make([]string, 0, len(urls))
+	for _, u := range urls {
+		if u == "" || seen[u] {
+			continue
+		}
+		seen[u] = true
+		out = append(out, u)
+	}
+	return out
 }
 
 // createTask POST 创建异步任务，解析 task_id（兼容火山 {id} 与可灵 {data:{task_id}}）。
@@ -191,7 +234,13 @@ func (p *AsyncTaskProvider) pollTask(ctx context.Context, k *KeyCredential, quer
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
-			return "", NewRetryableError(resp.StatusCode, "provider http "+resp.Status)
+			// 08 审查 Major#17：轮询阶段瞬时 429/5xx 等待后继续（不终止整个异步任务，避免重试重建厂商任务重复计费）
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(p.pollInterval):
+				continue
+			}
 		}
 		if resp.StatusCode >= 400 {
 			return "", fmt.Errorf("provider error %d: %s", resp.StatusCode, truncate(string(raw), 200))

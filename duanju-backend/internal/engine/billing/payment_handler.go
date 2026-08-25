@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -62,6 +63,38 @@ func (h *PaymentHandler) CreateOrder(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, resp)
+}
+
+// MockPay 开发环境模拟支付到账（仅 dev 注册；生产不注册该路由）。
+// 内部生成 mock 回调参数并走 HandleCallback——验签/金额/幂等全链路与真实回调一致。
+func (h *PaymentHandler) MockPay(c *gin.Context) {
+	uid := c.GetInt64(middleware.CtxUserID)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	orderNo := c.Param("order_no")
+	if orderNo == "" {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "order_no 为空")
+		return
+	}
+	// 归属校验：仅订单所有者可模拟支付自己的订单
+	order, err := h.svc.store.GetOrderByNoForUser(c.Request.Context(), orderNo, uid)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, 20001, "订单不存在")
+		return
+	}
+	if order.PayStatus == "PAID" {
+		httpx.OK(c, gin.H{"order_no": orderNo, "paid": true, "already": true})
+		return
+	}
+	cb := h.svc.BuildMockCallback(order.OrderNo, order.AmountYuan, "MOCK-"+fmt.Sprint(time.Now().UnixMilli()))
+	result := h.svc.HandleCallback(c.Request.Context(), cb)
+	if result != "success" {
+		httpx.Fail(c, http.StatusBadRequest, 20009, "模拟支付失败："+result)
+		return
+	}
+	httpx.OK(c, gin.H{"order_no": orderNo, "paid": true})
 }
 
 // PayCallback 9.7 支付宝回调（返回纯文本 success/fail，不套 ApiResponse——支付宝协议）。

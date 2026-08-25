@@ -57,6 +57,12 @@ type BillStore interface {
 	MarkTaskSettled(ctx context.Context, taskID int64) (bool, error)
 	// IsTaskSettled 检查是否已结算。
 	IsTaskSettled(ctx context.Context, taskID int64) (bool, error)
+	// FreezeAtomic 单事务冻结：任务幂等检查 + 账户行锁 + 余额守卫 + 快照固化 + 冻结流水（08 审查 Major#10）。
+	// alreadyFrozen=true 表示任务已冻结（幂等跳过）。
+	FreezeAtomic(ctx context.Context, ownerType string, ownerID, taskID int64, amount int, meta *TxnMeta) (alreadyFrozen bool, err error)
+	// SettleAtomic 单事务结算：MarkTaskSettled CAS + 扣费/解冻同事务（08 审查 Major#11）。
+	// alreadySettled=true 表示已结算（幂等拒绝）；actualCost>0 且小于冻结额时按实际成本扣费并解冻差额。
+	SettleAtomic(ctx context.Context, taskID int64, deliverable bool, actualCost int, meta *TxnMeta) (alreadySettled bool, err error)
 	// ListTransactions 积分流水（分页）。
 	ListTransactions(ctx context.Context, accountID int64, page, pageSize int) ([]map[string]any, int, error)
 }
@@ -78,83 +84,25 @@ func NewEngine(store BillStore) *Engine {
 	return &Engine{store: store}
 }
 
-// Freeze 阶段1 冻结（API 侧提交任务时）：同一事务 FOR UPDATE → 校验 → 双余额 → FROZEN 流水。
-// 幂等：任务已有冻结则返回既有快照不重复冻结（04 H.3 提交冻结）。
+// Freeze 阶段1 冻结（API 侧提交任务时）：单事务 任务幂等 → 账户行锁 → 余额守卫 → 双余额 → FROZEN 流水（08 审查 Major#10）。
+// 幂等：任务已有冻结则跳过不重复冻结（04 H.3 提交冻结）。
 func (e *Engine) Freeze(ctx context.Context, ownerType string, ownerID int64, taskID int64, amount int, meta *TxnMeta) error {
 	if amount <= 0 {
 		return fmt.Errorf("冻结金额必须 > 0")
 	}
-	// 幂等：已冻结（任务存在 frozen_points>0）直接跳过
-	existing, err := e.store.LoadTaskBill(ctx, taskID)
-	if err == nil && existing.FrozenPoints > 0 {
-		return nil // 已冻结，幂等返回
-	}
-	acc, err := e.store.GetAccountForUpdate(ctx, ownerType, ownerID)
-	if err != nil {
-		return err
-	}
-	if acc.CurrentBalance < amount {
-		return fmt.Errorf("%w: 需 %d 积分，当前 %d", ErrInsufficient, amount, acc.CurrentBalance)
-	}
-	// 固化任务快照（同一事务）
-	if err := e.store.SaveTaskBill(ctx, taskID, &TaskBill{
-		TaskID: taskID, AccountID: acc.ID, OwnerType: ownerType, OwnerID: ownerID,
-		SpaceID: meta.SpaceID, OperatorUserID: meta.OperatorUserID, ProjectID: meta.ProjectID,
-		FrozenPoints: amount, IdempotencyKey: fmt.Sprintf("freeze-%d", taskID),
-	}); err != nil {
-		return err
-	}
-	return e.store.Freeze(ctx, acc, amount, taskID, meta)
+	_, err := e.store.FreezeAtomic(ctx, ownerType, ownerID, taskID, amount, meta)
+	return err
 }
 
-// Settle 终态结算：任务结果可交付 → Deduct；不可交付 → 全额 Unfreeze（03 A.3 黄金规则①）。
-// 幂等：已结算任务直接返回（乱序/重复回调安全）。
+// Settle 终态结算：任务结果可交付 → 冻结转实扣；不可交付 → 全额解冻（03 A.3 黄金规则①）。
+// 幂等：MarkTaskSettled CAS 与资金变动同一事务（08 审查 Major#11），并发/重复回调安全。
 func (e *Engine) Settle(ctx context.Context, taskID int64, deliverable bool, actualCost int, meta *TxnMeta) error {
-	// 幂等检查（防重复回调/乱序最终一致）
-	settled, err := e.store.IsTaskSettled(ctx, taskID)
+	already, err := e.store.SettleAtomic(ctx, taskID, deliverable, actualCost, meta)
 	if err != nil {
 		return err
 	}
-	if settled {
+	if already {
 		return ErrAlreadySettled
-	}
-	bill, err := e.store.LoadTaskBill(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	// 未冻结积分的任务（如当前拆分任务不计费）：无资金变动，直接标记已结算避免空转账户查找失败
-	if bill.AccountID == 0 && bill.FrozenPoints == 0 {
-		_, err = e.store.MarkTaskSettled(ctx, taskID)
-		return err
-	}
-	acc, err := e.store.GetAccountForUpdate(ctx, bill.OwnerType, bill.OwnerID)
-	if err != nil {
-		return err
-	}
-
-	// 锁定任务行（防并发结算）
-	ok, err := e.store.MarkTaskSettled(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrAlreadySettled // 并发结算被抢占
-	}
-
-	if deliverable {
-		// 成功：frozen→spent（实际扣费 = 冻结额 − 豁免额）
-		cost := bill.FrozenPoints
-		if actualCost > 0 && actualCost < cost {
-			cost = actualCost
-		}
-		if err := e.store.Deduct(ctx, acc, cost, taskID, meta); err != nil {
-			return err
-		}
-	} else {
-		// 失败/取消/超时：全额解冻（永不倒扣）
-		if err := e.store.Unfreeze(ctx, acc, bill.FrozenPoints, taskID, meta); err != nil {
-			return err
-		}
 	}
 	return nil
 }

@@ -82,12 +82,22 @@ func (s *AssetStore) SaveGeneratedImage(ctx context.Context, t *AssetTarget, ima
 	}
 	defer tx.Rollback(ctx)
 
-	// generated_images 记录
+	// generated_images 记录（含弹窗生成参数快照，供历史面板展示）
 	var giID int64
+	gen := t.Gen
+	promptSnap, modelCode, styleName, aspectRatio, timeOfDay := "", "", "", "", ""
+	// 与 asset_handler 默认构图逻辑一致：无弹窗参数（批量生成）时角色默认开启三视图
+	useDefaultComp := t.Kind == "CHARACTER_VARIANT"
+	if gen != nil {
+		promptSnap, modelCode, styleName, aspectRatio, timeOfDay = gen.Prompt, gen.ModelCode, gen.StyleName, gen.AspectRatio, gen.TimeOfDay
+		useDefaultComp = gen.UseDefaultComposition
+	}
 	err = tx.QueryRow(ctx, `
-		INSERT INTO generated_images (asset_id, state, original_url, generation_task_id)
-		VALUES ($1, 'SUCCESS', $2, $3) RETURNING id`,
-		nullableAssetID(t.AssetID), imageURL, taskID).Scan(&giID)
+		INSERT INTO generated_images (asset_id, state, original_url, generation_task_id, prompt,
+			target_kind, target_id, model_code, style_name, aspect_ratio, use_default_composition, time_of_day)
+		VALUES ($1, 'SUCCESS', $2, $3, NULLIF($4,''), $5, $6, NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), $10, NULLIF($11,'')) RETURNING id`,
+		nullableAssetID(t.AssetID), imageURL, taskID, promptSnap,
+		t.Kind, t.TargetID, modelCode, styleName, aspectRatio, useDefaultComp, timeOfDay).Scan(&giID)
 	if err != nil {
 		return err
 	}
@@ -110,10 +120,21 @@ func (s *AssetStore) SaveGeneratedImage(ctx context.Context, t *AssetTarget, ima
 			return err
 		}
 	case "SCENE":
+		var todVal, weatherVal any
+		if gen != nil {
+			if gen.TimeOfDay != "" {
+				todVal = gen.TimeOfDay
+			}
+			if gen.Weather != "" {
+				weatherVal = gen.Weather
+			}
+		}
 		if _, err := tx.Exec(ctx, `
-			UPDATE scenes SET generation_status='SUCCESS', main_image_url=$1, point_cost=$2, generation_task_id=$3
+			UPDATE scenes SET generation_status='SUCCESS', main_image_url=$1, point_cost=$2, generation_task_id=$3,
+			       time_of_day_variant=COALESCE($5::time_of_day_enum, time_of_day_variant),
+			       weather=COALESCE($6::weather_enum, weather)
 			WHERE id=$4`,
-			imageURL, t.PointCost, taskID, t.TargetID); err != nil {
+			imageURL, t.PointCost, taskID, t.TargetID, todVal, weatherVal); err != nil {
 			return err
 		}
 	case "PROP":
@@ -172,14 +193,14 @@ func (s *AssetStore) LoadAssetTarget(ctx context.Context, targetKind string, tar
 		// 若已是衍生图重生成（传 variant.id），则回退查 character_variants。
 		err := s.pool.QueryRow(ctx, `
 			SELECT 0, c.project_id, c.origin_episode_id, c.asset_id,
-			       COALESCE(c.description_notes, '')
+			       COALESCE(c.edited_prompt, c.description_notes, '')
 			FROM characters c WHERE c.id = $1 AND c.deleted_at IS NULL`, targetID).
 			Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID, &t.Prompt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// 回退：按 variant.id 查
 			err2 := s.pool.QueryRow(ctx, `
 				SELECT cv.point_cost, c.project_id, c.origin_episode_id, cv.asset_id,
-				       COALESCE(c.description_notes, '')
+				       COALESCE(c.edited_prompt, c.description_notes, '')
 				FROM character_variants cv JOIN characters c ON c.id = cv.character_id
 				WHERE cv.id = $1`, targetID).
 				Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID, &t.Prompt)
@@ -191,8 +212,23 @@ func (s *AssetStore) LoadAssetTarget(ctx context.Context, targetKind string, tar
 		return t, err
 	case "SCENE":
 		err := s.pool.QueryRow(ctx, `
-			SELECT point_cost, project_id, origin_episode_id, asset_id, COALESCE(base_prompt, '')
-			FROM scenes WHERE id = $1`,
+SELECT point_cost, project_id, origin_episode_id, asset_id,
+       COALESCE(edited_prompt,
+           COALESCE(base_prompt, '') ||
+           CASE time_of_day_variant
+               WHEN 'DAY_BRIGHT' THEN '。白日，明亮阳光，自然光从窗外射入，空气通透度高'
+               WHEN 'DUSK' THEN '。黄昏，暖色调夕阳，天空橙红色渐变，长影效果'
+               WHEN 'NIGHT' THEN '。夜晚，城市夜景灯光，冷色调人工光源，星空点缀'
+               ELSE ''
+           END ||
+           CASE weather
+               WHEN 'SUNNY' THEN '。晴朗天气，光线充足，色彩饱和度高'
+               WHEN 'RAINY' THEN '。细雨朦胧，空气中水汽弥漫，地面湿润反光，雾气较重'
+               WHEN 'SNOWY' THEN '。雪景氛围，飘落雪花，白茫茫覆盖，冷色调'
+               ELSE ''
+           END
+       )
+FROM scenes WHERE id = $1`,
 			targetID).Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID, &t.Prompt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, asset.ErrTokenExpired
@@ -200,7 +236,7 @@ func (s *AssetStore) LoadAssetTarget(ctx context.Context, targetKind string, tar
 		return t, err
 	case "PROP":
 		err := s.pool.QueryRow(ctx, `
-			SELECT point_cost, project_id, origin_episode_id, asset_id, COALESCE(description, '')
+			SELECT point_cost, project_id, origin_episode_id, asset_id, COALESCE(edited_prompt, description_prompt, '')
 			FROM props WHERE id = $1`,
 			targetID).Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID, &t.Prompt)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -276,7 +312,8 @@ func (s *AssetStore) ListVersions(ctx context.Context, narrativeUnitID int64) ([
 	return out, rows.Err()
 }
 
-// RollbackVersion 回滚到指定版本（S2-B05）：恢复 narrative_units 脚本/内容字段。
+// RollbackVersion 回滚到指定版本（S2-B05）：恢复 narrative_units 脚本/内容字段；
+// 18 - 视频制作 阶段二：同时从 storyboard_json_snapshot 恢复该版本的 shots/shot_groups。
 func (s *AssetStore) RollbackVersion(ctx context.Context, narrativeUnitID, versionID int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -289,6 +326,49 @@ func (s *AssetStore) RollbackVersion(ctx context.Context, narrativeUnitID, versi
 		WHERE v.id=$2 AND v.narrative_unit_id=$1 AND nu.id=$1`, narrativeUnitID, versionID); err != nil {
 		return err
 	}
+	// 恢复该版本分镜：软删当前 shots/groups → 快照 JSON 重建（快照为 []agent.ShotGroup 序列化）
+	var sbJSON string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(storyboard_json_snapshot::text, '') FROM narrative_unit_versions
+		WHERE id=$1 AND narrative_unit_id=$2`, versionID, narrativeUnitID).Scan(&sbJSON); err == nil && sbJSON != "" && sbJSON != "null" {
+		var groups []agent.ShotGroup
+		if jerr := json.Unmarshal([]byte(sbJSON), &groups); jerr == nil && len(groups) > 0 {
+			if _, derr := tx.Exec(ctx, `UPDATE shots SET deleted_at=NOW() WHERE narrative_unit_id=$1 AND deleted_at IS NULL`, narrativeUnitID); derr != nil {
+				return derr
+			}
+			if _, derr := tx.Exec(ctx, `UPDATE shot_groups SET deleted_at=NOW() WHERE narrative_unit_id=$1 AND deleted_at IS NULL`, narrativeUnitID); derr != nil {
+				return derr
+			}
+			totalDur := 0
+			for gi, sg := range groups {
+				var sgID int64
+				if qerr := tx.QueryRow(ctx, `
+					INSERT INTO shot_groups (narrative_unit_id, project_id, sort_order, group_type, title, duration_sec, shot_count)
+					VALUES ($1, (SELECT project_id FROM narrative_units WHERE id=$1), $2, 'NAMED_SEGMENT', $3, $4, $5) RETURNING id`,
+					narrativeUnitID, gi+1, sg.Title, int(sg.DurationSec), len(sg.Shots)).Scan(&sgID); qerr != nil {
+					return qerr
+				}
+				for si, sh := range sg.Shots {
+					if _, ierr := tx.Exec(ctx, `
+						INSERT INTO shots (shot_group_id, narrative_unit_id, project_id, sort_order, duration_sec,
+							shot_size, camera_movement, camera_angle, subject_description, background_description,
+							local_light_description, dialogue_text, ambient_sound, prompt_original, prompt_refined)
+						VALUES ($1, $2, (SELECT project_id FROM narrative_units WHERE id=$2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+						sgID, narrativeUnitID, si+1, int(sh.DurationSec), sh.ShotSize, sh.CameraMovement, sh.CameraAngle,
+						sh.SubjectDescription, sh.BackgroundDescription, sh.LocalLightDescription,
+						sh.DialogueText, sh.AmbientSound,
+						sh.SubjectDescription+" "+sh.BackgroundDescription, sh.PromptRefined); ierr != nil {
+						return ierr
+					}
+					totalDur += int(sh.DurationSec)
+				}
+			}
+			if _, uerr := tx.Exec(ctx, `UPDATE narrative_units SET actual_duration_sec=$2 WHERE id=$1`,
+				narrativeUnitID, totalDur); uerr != nil {
+				return uerr
+			}
+		}
+	}
 	// 状态机：回滚后保持 PARTIAL_ASSETS（可重新规划）
 	if _, err := tx.Exec(ctx, `
 		UPDATE projects SET status='PARTIAL_ASSETS', current_step='ASSET_GENERATION'
@@ -300,7 +380,7 @@ func (s *AssetStore) RollbackVersion(ctx context.Context, narrativeUnitID, versi
 }
 
 // CreateVariant 创建角色变体（3.2.6）：插入 PENDING 行 + 资产生成任务。
-func (s *AssetStore) CreateVariant(ctx context.Context, projectID, characterID, userID int64, variantName, variantType string) (int64, error) {
+func (s *AssetStore) CreateVariant(ctx context.Context, projectID, characterID, userID int64, variantName, variantType, clothingDesc, extraAppearancePrompt string) (int64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -308,9 +388,9 @@ func (s *AssetStore) CreateVariant(ctx context.Context, projectID, characterID, 
 	defer tx.Rollback(ctx)
 	var vid int64
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO character_variants (character_id, variant_name, variant_type, generation_status, point_cost)
-		VALUES ($1, $2, $3, 'PENDING', 10) RETURNING id`,
-		characterID, variantName, variantType).Scan(&vid); err != nil {
+		INSERT INTO character_variants (character_id, variant_name, variant_type, clothing_desc, extra_appearance_prompt, generation_status, point_cost)
+		VALUES ($1, $2, $3, NULLIF($4,''), NULLIF($5,''), 'PENDING', 10) RETURNING id`,
+		characterID, variantName, variantType, clothingDesc, extraAppearancePrompt).Scan(&vid); err != nil {
 		return 0, err
 	}
 	// 生成任务 + Outbox
@@ -333,6 +413,7 @@ func (s *AssetStore) CreateVariant(ctx context.Context, projectID, characterID, 
 	}
 	return vid, tx.Commit(ctx)
 }
+
 var kindToTaskType = map[string]string{
 	"CHARACTER_VARIANT": "CHAR_IMAGE_GEN",
 	"SCENE":             "SCENE_IMAGE_GEN",
@@ -341,6 +422,11 @@ var kindToTaskType = map[string]string{
 
 // CreateAssetTask 创建资产生成任务（QUEUED + Outbox 同一事务；任务参数带 target_kind/target_id）。
 func (s *AssetStore) CreateAssetTask(ctx context.Context, spaceID, userID, projectID, episodeID int64, kind string, targetID int64, cost int) (int64, error) {
+	return s.CreateAssetTaskWithGen(ctx, spaceID, userID, projectID, episodeID, kind, targetID, cost, nil)
+}
+
+// CreateAssetTaskWithGen 建资产生成任务（可携带弹窗生成参数 gen）。
+func (s *AssetStore) CreateAssetTaskWithGen(ctx context.Context, spaceID, userID, projectID, episodeID int64, kind string, targetID int64, cost int, gen *agent.GenParams) (int64, error) {
 	taskType, ok := kindToTaskType[kind]
 	if !ok {
 		return 0, errors.New("unknown asset kind: " + kind)
@@ -352,7 +438,11 @@ func (s *AssetStore) CreateAssetTask(ctx context.Context, spaceID, userID, proje
 	defer tx.Rollback(ctx)
 
 	// 参数 JSON 在 Go 端序列化（避免 pgx 枚举/text 推断歧义）
-	params, _ := json.Marshal(map[string]any{"target_kind": kind, "target_id": targetID, "cost": cost})
+	paramsMap := map[string]any{"target_kind": kind, "target_id": targetID, "cost": cost}
+	if gen != nil {
+		paramsMap["gen"] = gen
+	}
+	params, _ := json.Marshal(paramsMap)
 
 	var taskID int64
 	err = tx.QueryRow(ctx, `
@@ -389,11 +479,19 @@ func nullableAssetID(id *int64) any {
 
 // ListCharacters 角色列表（3.2.2）：项目内角色 + 默认变体缩略图。
 func (s *AssetStore) ListCharacters(ctx context.Context, projectID int64) ([]map[string]any, error) {
+	// 聚合该角色全部形象变体（id/name/main_image_url/generation_status），供前端形象名条切换。
+	// 主图/状态取第一个变体（与历史口径一致）。跨集复用 assets.items 前缀与前端 CharacterItem 对齐。
 	rows, err := s.pool.Query(ctx, `
 		SELECT c.id, c.code, c.name, c.tags, c.description_notes,
 		       COALESCE((SELECT cv.main_image_url FROM character_variants cv WHERE cv.character_id=c.id AND cv.deleted_at IS NULL ORDER BY cv.id LIMIT 1), ''),
 		       COALESCE((SELECT cv.generation_status::text FROM character_variants cv WHERE cv.character_id=c.id AND cv.deleted_at IS NULL ORDER BY cv.id LIMIT 1), 'PENDING'),
-		       c.origin_episode_id
+		       c.origin_episode_id,
+		       COALESCE((SELECT json_agg(json_build_object(
+		           'id', cv.id,
+		           'name', COALESCE(cv.variant_name,''),
+		           'main_image_url', COALESCE(cv.main_image_url,''),
+		           'generation_status', COALESCE(cv.generation_status::text,'PENDING')
+		       ) ORDER BY cv.id) FROM character_variants cv WHERE cv.character_id=c.id AND cv.deleted_at IS NULL), '[]'::json)
 		FROM characters c WHERE c.project_id=$1 AND c.deleted_at IS NULL ORDER BY c.id`, projectID)
 	if err != nil {
 		return nil, err
@@ -404,7 +502,8 @@ func (s *AssetStore) ListCharacters(ctx context.Context, projectID int64) ([]map
 		var id int64
 		var code, name, tags, notes, thumb, status string
 		var originEp *int64
-		if err := rows.Scan(&id, &code, &name, &tags, &notes, &thumb, &status, &originEp); err != nil {
+		var variantsJson []byte
+		if err := rows.Scan(&id, &code, &name, &tags, &notes, &thumb, &status, &originEp, &variantsJson); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
@@ -416,6 +515,7 @@ func (s *AssetStore) ListCharacters(ctx context.Context, projectID int64) ([]map
 			"main_image_url":    thumb,
 			"generation_status": status,
 			"origin_episode_id": originEp,
+			"variants":          json.RawMessage(variantsJson),
 		})
 	}
 	return out, rows.Err()

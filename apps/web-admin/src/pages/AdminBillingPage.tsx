@@ -29,6 +29,41 @@ import "./AdminBillingPage.css";
 
 type TabKey = "packages" | "orders" | "withdraw" | "models";
 
+// ---------- 提现审核 ----------
+
+interface WithdrawRow {
+  request_id: string;
+  user: string;
+  amount_yuan: string;
+  payee_name: string;
+  payee_account: string;
+  status: string; // PENDING / APPROVED / REJECTED
+  review_note: string;
+  created_at: string;
+}
+
+interface WithdrawResp {
+  items: WithdrawRow[];
+  pagination?: { total: number };
+}
+
+const WITHDRAW_TABS: { key: string; label: string }[] = [
+  { key: "PENDING", label: "待审核" },
+  { key: "APPROVED", label: "已通过" },
+  { key: "REJECTED", label: "已拒绝" },
+];
+
+function withdrawStatusTag(status: string): { label: string; cls: string } {
+  switch (status) {
+    case "APPROVED":
+      return { label: "已通过", cls: "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-green-400 bg-green-400/10 border border-green-400/30" };
+    case "REJECTED":
+      return { label: "已拒绝", cls: "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-red-400 bg-red-400/10 border border-red-400/30" };
+    default:
+      return { label: "待审核", cls: "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-amber-gold bg-amber-gold/10 border border-amber-gold/30" };
+  }
+}
+
 // ---------- 套餐卡 ----------
 
 interface PackageCardData {
@@ -306,6 +341,46 @@ export default function AdminBillingPage() {
   const [ordKeywordInput, setOrdKeywordInput] = useState("");
   const [ordKeyword, setOrdKeyword] = useState("");
 
+  // 提现审核
+  const [withdrawRows, setWithdrawRows] = useState<WithdrawRow[]>([]);
+  const [withdrawLoading, setWithdrawLoading] = useState(false);
+  const [withdrawTotal, setWithdrawTotal] = useState(0);
+  const [withdrawPage, setWithdrawPage] = useState(1);
+  const [withdrawStatus, setWithdrawStatus] = useState("PENDING");
+  const [reviewTarget, setReviewTarget] = useState<WithdrawRow | null>(null);
+  const [reviewApprove, setReviewApprove] = useState(true);
+  const [reviewNote, setReviewNote] = useState("");
+  const [reviewing, setReviewing] = useState(false);
+
+  const loadWithdrawals = useCallback(async (p: number, st: string) => {
+    setWithdrawLoading(true);
+    try {
+      const resp = await api.get<WithdrawResp>(`/admin/withdrawals?status=${st}&page=${p}&page_size=${ORDER_PAGE_SIZE}`);
+      setWithdrawRows(resp.items ?? []);
+      setWithdrawTotal(resp.pagination?.total ?? 0);
+    } catch (e) {
+      toast(errMessage(e), "error");
+    } finally {
+      setWithdrawLoading(false);
+    }
+  }, []);
+
+  const submitReview = async () => {
+    if (!reviewTarget) return;
+    setReviewing(true);
+    try {
+      await api.post(`/admin/withdrawals/${reviewTarget.request_id}/review`, { approve: reviewApprove, note: reviewNote.trim() });
+      toast(reviewApprove ? "已通过该提现申请" : "已拒绝该提现申请", "success");
+      setReviewTarget(null);
+      setReviewNote("");
+      void loadWithdrawals(withdrawPage, withdrawStatus);
+    } catch (e) {
+      toast(errMessage(e), "error");
+    } finally {
+      setReviewing(false);
+    }
+  };
+
   const loadPackages = useCallback(async () => {
     try {
       const resp = await api.get<PackagesResp>("/admin/packages");
@@ -374,6 +449,10 @@ export default function AdminBillingPage() {
   useEffect(() => {
     if (tab === "orders") loadOrders(orderPage);
   }, [tab, orderPage, loadOrders]);
+
+  useEffect(() => {
+    if (tab === "withdraw") void loadWithdrawals(withdrawPage, withdrawStatus);
+  }, [tab, withdrawPage, withdrawStatus, loadWithdrawals]);
 
   const filteredCards = useMemo(
     () =>
@@ -789,12 +868,166 @@ export default function AdminBillingPage() {
         </div>
       )}
 
-      {/* TAB 3: 提现审核（后端未实现，占位） */}
+      {/* TAB 3: 提现审核（GET /admin/withdrawals + POST /admin/withdrawals/:id/review） */}
       {tab === "withdraw" && (
-        <div className="bg-bg-card border border-[#2A2A3E] rounded-xl py-20 flex flex-col items-center justify-center">
-          <Banknote className="w-10 h-10 text-text-muted mb-4" />
-          <div className="text-sm text-white font-medium mb-1">提现审核</div>
-          <p className="text-xs text-text-muted">创作者提现审核功能规划中，敬请期待</p>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex gap-2">
+              {WITHDRAW_TABS.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => {
+                    setWithdrawStatus(t.key);
+                    setWithdrawPage(1);
+                    void loadWithdrawals(1, t.key);
+                  }}
+                  className={`px-4 py-2 rounded-lg text-sm transition-colors ${withdrawStatus === t.key ? "bg-amber-gold text-[#0B0B1A] font-semibold" : "bg-bg-card border border-[#2A2A3E] text-text-secondary hover:text-white"}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <span className="text-xs text-text-muted">共 {withdrawTotal} 条 · 仅待审核可操作</span>
+          </div>
+
+          <div className="bg-bg-card border border-[#2A2A3E] rounded-xl overflow-hidden">
+            <table className="w-full">
+              <thead className="bg-[#12122A]/60 border-b border-[#2A2A3E]">
+                <tr>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">申请时间</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">用户</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">金额(¥)</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">收款人</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">收款账户</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">状态</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider">审核备注</th>
+                  <th className="px-3 py-3 text-center text-xs font-medium text-text-muted uppercase tracking-wider">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#2A2A3E]/60">
+                {withdrawRows.map((w) => {
+                  const tag = withdrawStatusTag(w.status);
+                  return (
+                    <tr key={w.request_id} className="hover:bg-white/[0.02]">
+                      <td className="px-3 py-3 text-sm text-text-secondary whitespace-nowrap">{fmtTime(w.created_at)}</td>
+                      <td className="px-3 py-3 text-sm text-white whitespace-nowrap">{w.user || "—"}</td>
+                      <td className="px-3 py-3 text-sm text-amber-gold font-mono whitespace-nowrap">¥{Number(w.amount_yuan || 0).toFixed(2)}</td>
+                      <td className="px-3 py-3 text-sm text-text-secondary whitespace-nowrap">{w.payee_name || "—"}</td>
+                      <td className="px-3 py-3 text-sm text-text-secondary font-mono max-w-[180px] truncate" title={w.payee_account}>{w.payee_account || "—"}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className={tag.cls}>{tag.label}</span>
+                      </td>
+                      <td className="px-3 py-3 text-sm text-text-secondary max-w-[160px] truncate" title={w.review_note || ""}>{w.review_note || "—"}</td>
+                      <td className="px-3 py-3 text-center whitespace-nowrap">
+                        {w.status === "PENDING" ? (
+                          <div className="flex items-center justify-center gap-3 text-xs">
+                            <button
+                              onClick={() => {
+                                setReviewTarget(w);
+                                setReviewApprove(true);
+                                setReviewNote("");
+                              }}
+                              className="text-green-400 hover:text-green-300 transition-colors"
+                            >
+                              通过
+                            </button>
+                            <button
+                              onClick={() => {
+                                setReviewTarget(w);
+                                setReviewApprove(false);
+                                setReviewNote("");
+                              }}
+                              className="text-red-400 hover:text-red-300 transition-colors"
+                            >
+                              拒绝
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-text-muted">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {withdrawRows.length === 0 && !withdrawLoading && (
+                  <tr>
+                    <td colSpan={8} className="px-3 py-12 text-center text-sm text-text-muted">暂无提现申请</td>
+                  </tr>
+                )}
+                {withdrawLoading && (
+                  <tr>
+                    <td colSpan={8} className="px-3 py-12 text-center text-sm text-text-muted">加载中…</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {withdrawTotal > ORDER_PAGE_SIZE && (
+            <div className="flex items-center justify-end gap-2 text-sm">
+              <button
+                disabled={withdrawPage <= 1}
+                onClick={() => {
+                  const p = withdrawPage - 1;
+                  setWithdrawPage(p);
+                  void loadWithdrawals(p, withdrawStatus);
+                }}
+                className="px-3 py-1.5 rounded-lg bg-bg-card border border-[#2A2A3E] text-text-secondary disabled:opacity-40 transition-colors"
+              >
+                上一页
+              </button>
+              <span className="text-text-muted">{withdrawPage} / {Math.max(1, Math.ceil(withdrawTotal / ORDER_PAGE_SIZE))}</span>
+              <button
+                disabled={withdrawPage >= Math.ceil(withdrawTotal / ORDER_PAGE_SIZE)}
+                onClick={() => {
+                  const p = withdrawPage + 1;
+                  setWithdrawPage(p);
+                  void loadWithdrawals(p, withdrawStatus);
+                }}
+                className="px-3 py-1.5 rounded-lg bg-bg-card border border-[#2A2A3E] text-text-secondary disabled:opacity-40 transition-colors"
+              >
+                下一页
+              </button>
+            </div>
+          )}
+
+          {/* 审核弹窗 */}
+          <Modal
+            title={reviewApprove ? "通过提现申请" : "拒绝提现申请"}
+            subtitle={reviewTarget ? `${reviewTarget.user} · ¥${Number(reviewTarget.amount_yuan || 0).toFixed(2)}` : undefined}
+            open={reviewTarget !== null}
+            onClose={() => setReviewTarget(null)}
+            footer={
+              <>
+                <button onClick={() => setReviewTarget(null)} className="px-4 py-2 rounded-lg text-sm text-text-secondary bg-bg-card border border-[#2A2A3E] hover:border-[#3A3A4E] transition-colors">取消</button>
+                <button
+                  onClick={() => void submitReview()}
+                  disabled={reviewing}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors disabled:opacity-50 ${reviewApprove ? "bg-green-500/90 hover:bg-green-500" : "bg-red-500/90 hover:bg-red-500"}`}
+                >
+                  {reviewing ? "提交中…" : reviewApprove ? "确认通过" : "确认拒绝"}
+                </button>
+              </>
+            }
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-text-secondary">
+                {reviewApprove
+                  ? "通过后该提现申请将标记为已通过（打款由财务线下完成）。"
+                  : "拒绝后用户可重新发起提现申请。"}
+              </p>
+              <div>
+                <label className="block text-sm text-text-secondary mb-1.5">审核备注（可选）</label>
+                <textarea
+                  rows={3}
+                  value={reviewNote}
+                  placeholder={reviewApprove ? "如：核对账户信息无误" : "如：收款账户信息有误"}
+                  onChange={(e) => setReviewNote(e.target.value)}
+                  className="input-field"
+                />
+              </div>
+            </div>
+          </Modal>
         </div>
       )}
 

@@ -78,7 +78,7 @@ func TestSplitSuccess(t *testing.T) {
 	store := &fakeSplitStore{}
 	h := NewSplitHandler(llm, store)
 
-	out, err := h.Execute(context.Background(), taskWithParams("测试剧本"))
+	out, err := h.Execute(context.Background(), taskWithParams("剧本")) // 摘录须覆盖原文（覆盖率校验），validJSON 摘录为 "剧本"
 	require.NoError(t, err)
 	assert.Contains(t, string(out), `"shots":8`) // fakeStore 返回的统计
 	require.NotNil(t, store.saved)
@@ -105,7 +105,7 @@ func TestBadJSONAllRetriesFail(t *testing.T) {
 	_, err := h.Execute(context.Background(), taskWithParams("剧本"))
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidJSON) || strings.Contains(err.Error(), "拆分失败"))
-	assert.Equal(t, 3, llm.calls, "最多重试 3 次")
+	assert.Equal(t, 4, llm.calls, "最多重试 4 次（maxTry=4，含首次）")
 }
 
 func TestInvalidEnumRejected(t *testing.T) {

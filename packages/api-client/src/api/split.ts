@@ -1,5 +1,6 @@
 // 拆分域 API：触发拆分 / 剧集列表 / 叙事单元列表（TAG 3 · 3.1.1/3.1.2/3.1.4/3.1.5）。
 import { api } from "../index";
+import type { ShotLinkedAsset } from "./video";
 
 export interface EpisodeLite {
   episode_id: string;
@@ -32,12 +33,17 @@ export interface BeatDetail extends BeatSummary {
       shot_id: string;
       sort_order: number;
       duration_sec: number;
-      shot_scale: string;
+      shot_size: string;
       camera_movement: string;
       camera_angle: string;
       subject_description: string;
+      background_description: string;
+      local_light_description: string;
       dialogue_text: string;
+      ambient_sound: string;
+      prompt_refined: string;
       video_generation_status: string | null;
+      linked_assets?: ShotLinkedAsset[]; // 该镜头引用的资产（小图/@ 引用展示）
     }[];
   }[];
 }
@@ -71,9 +77,11 @@ export const splitApi = {
     api.get<{ items: BeatSummary[] }>(`/episodes/${episodeId}/beats`),
   // 3.1.5 叙事单元详情（含剧本原文）
   beatDetail: (beatId: string) => api.get<BeatDetail>(`/beats/${beatId}`),
-  // 3.3.7c 叙事单元重新规划（开发期 mock：入队 BEAT_REPLAN 任务）
-  replan: (beatId: string, planningMode?: string) =>
+  // 3.3.7c 叙事单元重新规划（18 - 视频制作 阶段二：STORYBOARD_PLAN_V1_LUXCHAT 真实任务；
+  // skillPrompt 为可选分镜风格提示词，后端注入 system prompt）
+  replan: (beatId: string, planningMode?: string, skillPrompt?: string) =>
     api.post<{ task_id: string; status: string; is_mock?: boolean }>(`/beats/${beatId}/replan`, {
       planning_mode: planningMode,
+      skill_prompt: skillPrompt,
     }),
 };

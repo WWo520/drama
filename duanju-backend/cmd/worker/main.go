@@ -90,10 +90,17 @@ func main() {
 		VideoCreatePath: "/v1/videos/text2video",
 		VideoQueryPath:  "/v1/videos/text2video/{id}",
 	})
+	// MiniMax H3（视频）：content[] 多模态结构（text + image_url role 标注），
+	// 参考图 ≤9 张、时长 4~15s、提示词 ≤7000 字；DB 配置厂商 name=minimax 时按名匹配。
+	minimax := model.NewMinimaxH3Provider("minimax", []model.Capability{model.CapT2V, model.CapI2V}, "", "")
+	// AutoDL.Art 托管 ComfyUI（视频）：免开机 GPU 实例、按量计费的工作流包装 API；
+	// 提交 POST {base_url} + 轮询 GET {base_url}/result/{task_id}；
+	// DB 配置厂商 name=autodl-comfy，base_url 含工作流 ID（…/comfyui_workflow/{workflow_id}）。
+	autodlComfy := model.NewAutodlComfyProvider("autodl-comfy", []model.Capability{model.CapT2V, model.CapI2V})
 	mockImage := model.NewMockProvider("mock-image", model.CapT2I, model.CapI2I)
 	mockVideo := model.NewMockProvider("mock-video", model.CapT2V, model.CapI2V)
 	modelEngine := model.NewEngine([]model.Provider{
-		realLLM, mockLLM, volc, jimeng, kling, mockImage, mockVideo,
+		realLLM, mockLLM, volc, jimeng, kling, minimax, autodlComfy, mockImage, mockVideo,
 	}, keyStore)
 
 	// Agent 引擎（S1-B05）：SplitHandler 注册为 SCRIPT_SPLIT 执行器
@@ -167,6 +174,12 @@ func main() {
 				lg.Warn("拆分任务死信回滚项目状态失败", logger.F("err", rerr.Error(), "project_id", *t.ProjectID)...)
 			}
 		}
+		if status == task.StatusFailedDead && assetHandler.Handles(t.TaskType) {
+			// 资产图生成任务死信：回写资产表 FAILED_DEAD（前端进度条消失、按钮恢复，避免卡"生成中"）
+			if rerr := assetStore.MarkAssetDeadByTask(ctx, t.ID); rerr != nil {
+				lg.Warn("资产任务死信回写失败", logger.F("err", rerr.Error(), "task_id", t.ID)...)
+			}
+		}
 		uuid := userUUID(ctx, t.UserID)
 		if uuid == "" {
 			return
@@ -208,11 +221,16 @@ func main() {
 			action, taskID, deliverable); aerr != nil {
 			lg.Warn("审计写入失败", logger.F("err", aerr.Error())...)
 		}
-		// 读取任务 space_id 填充计费快照（空 TxnMeta 会导致 point_transactions.related_space_id 外键失败）
+		// 读取任务 space_id/user_id/project_id 填充计费快照（空 TxnMeta 会导致
+		// point_transactions.related_space_id / operator_user_id 外键失败——曾漏填
+		// OperatorUserID=0 无对应用户，结算整体回滚、冻结积分永久卡死）
 		meta := &billing.TxnMeta{}
 		var spaceID, userID int64
-		if err := pool.QueryRow(ctx, `SELECT space_id, user_id FROM generation_tasks WHERE id=$1`, taskID).Scan(&spaceID, &userID); err == nil {
+		var projectID *int64
+		if err := pool.QueryRow(ctx, `SELECT space_id, user_id, project_id FROM generation_tasks WHERE id=$1`, taskID).Scan(&spaceID, &userID, &projectID); err == nil {
 			meta.SpaceID = spaceID
+			meta.OperatorUserID = userID
+			meta.ProjectID = projectID
 		}
 		if err := billingEngine.Settle(ctx, taskID, deliverable, 0, meta); err != nil {
 			if errors.Is(err, billing.ErrAlreadySettled) {

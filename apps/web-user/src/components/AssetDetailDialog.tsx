@@ -21,6 +21,18 @@ const STYLES = [
 ];
 const RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4"];
 const RESOLUTIONS = ["1K", "2K", "4K"];
+// 场景时段选项（对齐 time_of_day_enum；仅 SCENE 显示）——场景日夜变体
+const SCENE_TOD_OPTIONS = [
+  { value: "", label: "默认时段" },
+  { value: "DAY_BRIGHT", label: "白天" },
+  { value: "MORNING_SUNRISE", label: "清晨" },
+  { value: "AFTERNOON_GOLDEN_HOUR", label: "午后" },
+  { value: "SUNSET_DUSK", label: "黄昏" },
+  { value: "NIGHT_CANDLELIT", label: "夜晚·烛光" },
+  { value: "NIGHT_NEON", label: "夜晚·霓虹" },
+  { value: "OVERCAST_DAY", label: "阴天" },
+  { value: "STORM_NIGHT", label: "暴风雨夜" },
+];
 
 export type DialogKind = "CHARACTER_VARIANT" | "SCENE" | "PROP";
 
@@ -29,6 +41,7 @@ interface VariantLite {
   name: string;
   main_image_url: string;
   generation_status: string;
+  multi_view_images?: string[]; // 同一形象的多视图（对齐 LuxReal「新增视图」）
 }
 
 interface DialogData {
@@ -147,11 +160,14 @@ export default function AssetDetailDialog({
   const [styleName, setStyleName] = useState("通用写实");
   const [ratio, setRatio] = useState(kind === "PROP" ? "1:1" : "16:9");
   const [resolution, setResolution] = useState("1K");
+  const [sceneTod, setSceneTod] = useState(""); // 场景时段（SCENE）
   const [models, setModels] = useState<ModelOption[]>([]);
   const [refImages, setRefImages] = useState<string[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyMode, setHistoryMode] = useState<"card" | "list">("card");
   const [favOnly, setFavOnly] = useState(false);
+  // 历史图选择模式（对齐 LuxReal 交互）：先点击选中卡片（高亮），底部出现「设为主图」操作条
+  const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
   const [activeVariant, setActiveVariant] = useState<number | null>(null);
   const [optimizing, setOptimizing] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -281,15 +297,19 @@ export default function AssetDetailDialog({
     setGenerating(true);
     try {
       await savePrompt(prompt);
+      // 角色选中具体形象时传 variant id：只生成/更新该形象（后端按 variant id 精确回写主图）；
+      // 未选中形象时传 character id（角色级，更新默认形象）。
+      const genTargetId = isChar && activeVariant ? activeVariant : targetId;
       await assetsApi.batchGenerate({
         episode_id: episodeId,
         items: [{
-          kind, target_id: targetId,
+          kind, target_id: genTargetId,
           gen: {
             prompt, model_code: modelCode, style_name: styleName,
             aspect_ratio: ratio, resolution,
             use_default_composition: isChar && useDefaultComp,
             ref_image_urls: refImages.length ? refImages : undefined,
+            time_of_day: isChar || !sceneTod ? undefined : sceneTod,
           },
         }],
       });
@@ -356,14 +376,17 @@ export default function AssetDetailDialog({
     }
   };
 
-  // 创建新形象（角色）
+  // 创建新形象（角色）：创建后切到新形象的空白图片模板，并清空提示词输入框（从零开始设计）
   const createVariant = async () => {
     if (!isChar) return;
     try {
-      await api.post(`/characters/${targetId}/variants`, {
+      const r = await api.post<{ variant_id: number }>(`/characters/${targetId}/variants`, {
         variant_name: `未命名形象${(data?.variants?.length || 0) + 1}`, variant_type: "COSTUME",
       });
-      toast.success("创建新形象成功");
+      toast.success("已创建空白形象，请输入提示词后生成");
+      setPrompt(""); // 清空提示词：新形象从零设计，避免沿用旧形象提示词
+      setRefImages([]); // 参考图同步清空
+      if (r?.variant_id) setActiveVariant(r.variant_id); // 切到新形象（空白图片模板）
       void loadData();
       onChanged();
     } catch {
@@ -392,9 +415,54 @@ export default function AssetDetailDialog({
   };
 
   const cost = data?.point_cost || 6;
-  const mainUrl = (isChar && activeVariant
-    ? data?.variants?.find((v) => v.id === activeVariant)?.main_image_url
-    : data?.main_image_url) || data?.main_image_url || "";
+   // 主图跟随选中形象：选中形象有图显示其图；无图显示空白模板（不兜底角色主图，
+   // 否则形象切换看起来"没变化"）；未选形象显示角色默认主图。
+   const mainUrl = isChar && activeVariant
+     ? (data?.variants?.find((v) => v.id === activeVariant)?.main_image_url || "")
+     : (data?.main_image_url || "");
+
+   // ---- 形象视图管理 + 删除形象（对齐 LuxReal「未命名形象」编辑区） ----
+   const activeVariantData = isChar
+     ? (data?.variants?.find((v) => v.id === activeVariant) ?? data?.variants?.[0] ?? null)
+     : null;
+   const variantViews = Array.isArray(activeVariantData?.multi_view_images) ? activeVariantData.multi_view_images : [];
+   const viewFileRef = useRef<HTMLInputElement>(null);
+
+   const addVariantView = async (file: File) => {
+     if (!activeVariantData) return;
+     try {
+       const url = await uploadFile(file);
+       await api.post(`/character-variants/${activeVariantData.id}/views`, { image_url: url });
+       toast.success("已新增视图");
+       void loadData();
+     } catch {
+       toast.error("新增视图失败");
+     }
+   };
+
+   const deleteVariantView = async (idx: number) => {
+     if (!activeVariantData) return;
+     try {
+       await api.delete(`/character-variants/${activeVariantData.id}/views/${idx}`);
+       void loadData();
+     } catch {
+       toast.error("删除视图失败");
+     }
+   };
+
+   const deleteVariant = async () => {
+     if (!activeVariantData) return;
+     if (!window.confirm(`确定删除形象「${activeVariantData.name || "未命名形象"}」吗？此操作不可恢复。`)) return;
+     try {
+       await api.delete(`/character-variants/${activeVariantData.id}`);
+       toast.success("已删除形象");
+       setActiveVariant(null);
+       void loadData();
+       onChanged();
+     } catch {
+       toast.error("删除形象失败");
+     }
+   };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" onClick={onClose}>
@@ -544,6 +612,45 @@ export default function AssetDetailDialog({
               </div>
             </div>
 
+            {/* 形象视图（多视图管理）+ 删除形象（对齐 LuxReal「未命名形象」编辑区） */}
+            {isChar && activeVariantData && (
+              <div className="rounded-xl bg-[#1E1E24] border border-[#2A2A35] p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-[#8B8B9A]">形象视图</span>
+                  <button
+                    onClick={() => viewFileRef.current?.click()}
+                    className="px-2 py-1 rounded bg-[#4C7FF8]/15 text-xs text-[#4C7FF8] hover:bg-[#4C7FF8]/25 flex items-center gap-1"
+                  >
+                    <Plus size={12} /> 新增视图
+                  </button>
+                </div>
+                {variantViews.length === 0 ? (
+                  <div className="text-xs text-[#3A3A4A] py-4 text-center">暂无视图，可「新增视图」为该形象添加多张视图</div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2">
+                    {variantViews.map((u, i) => (
+                      <div key={`${u}-${i}`} className="relative aspect-square rounded overflow-hidden bg-[#16161C] border border-[#2A2A35] group">
+                        <img src={u} alt="" className="w-full h-full object-cover" />
+                        <button
+                          onClick={() => void deleteVariantView(i)}
+                          className="absolute top-1 right-1 w-5 h-5 rounded bg-black/60 text-white/80 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="删除视图"
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  onClick={() => void deleteVariant()}
+                  className="mt-3 w-full px-3 py-1.5 rounded-lg border border-[#3A3A4A] text-xs text-red-400/80 hover:border-red-400/50 hover:text-red-400 transition-colors"
+                >
+                  删除当前形象
+                </button>
+              </div>
+            )}
+
             {/* 底部工具栏 */}
             <div className="flex items-center gap-2 flex-wrap">
               {isChar && (
@@ -596,6 +703,12 @@ export default function AssetDetailDialog({
               <select value={resolution} onChange={(e) => setResolution(e.target.value)} className="px-2 py-1.5 rounded-lg bg-[#1E1E24] border border-[#2A2A35] text-xs text-white/80 outline-none">
                 {RESOLUTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
+              {/* 场景时段（日夜变体，对齐 LuxReal）；仅场景显示 */}
+              {kind === "SCENE" && (
+                <select value={sceneTod} onChange={(e) => setSceneTod(e.target.value)} className="px-2 py-1.5 rounded-lg bg-[#1E1E24] border border-[#2A2A35] text-xs text-white/80 outline-none">
+                  {SCENE_TOD_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              )}
               <button
                 onClick={() => void optimizePrompt()}
                 disabled={optimizing}
@@ -649,25 +762,38 @@ export default function AssetDetailDialog({
               {history.length === 0 ? (
                 <div className="text-center text-xs text-[#3A3A4A] py-8">暂无生成内容</div>
               ) : historyMode === "card" ? (
-                <div className="grid grid-cols-2 gap-2">
-                  {history.map((h) => (
-                    <div key={h.id} className="relative rounded-lg overflow-hidden bg-[#16161C] border border-[#2A2A35] group">
-                      <img src={h.url} alt="" className="w-full aspect-video object-cover" />
-                      <button
-                        onClick={() => void toggleFav(h.id)}
-                        className={`absolute top-1 right-1 w-6 h-6 rounded flex items-center justify-center bg-black/50 ${h.is_favorite ? "text-yellow-300" : "text-white/60"}`}
+                <div className="grid grid-cols-2 gap-2 pb-1">
+                  {history.map((h) => {
+                    const selected = selectedHistoryId === h.id;
+                    return (
+                      <div
+                        key={h.id}
+                        onClick={() => setSelectedHistoryId(selected ? null : h.id)}
+                        className="relative rounded-lg overflow-hidden bg-[#16161C] cursor-pointer transition-all"
+                        style={{
+                          border: selected ? "2px solid #4C7FF8" : "1px solid #2A2A35",
+                          boxShadow: selected ? "0 0 0 2px rgba(76,127,248,0.25)" : undefined,
+                        }}
+                        title="点击选中后可设为主图"
                       >
-                        <Star size={12} fill={h.is_favorite ? "currentColor" : "none"} />
-                      </button>
-                      {/* hover 显示「设为主图」（对齐 LuxReal 历史图切换主图） */}
-                      <button
-                        onClick={() => void setAsMain(h)}
-                        className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-white/80 text-[9px] opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        设为主图
-                      </button>
-                    </div>
-                  ))}
+                        <img src={h.url} alt="" className="w-full aspect-video object-cover" />
+                        {/* 选中角标 */}
+                        {selected && (
+                          <div className="absolute top-1 left-1 w-5 h-5 rounded-full bg-[#4C7FF8] flex items-center justify-center text-white">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3">
+                              <path d="M5 13l4 4L19 7" />
+                            </svg>
+                          </div>
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); void toggleFav(h.id); }}
+                          className={`absolute top-1 right-1 w-6 h-6 rounded flex items-center justify-center bg-black/50 ${h.is_favorite ? "text-yellow-300" : "text-white/60"}`}
+                        >
+                          <Star size={12} fill={h.is_favorite ? "currentColor" : "none"} />
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
@@ -708,6 +834,31 @@ export default function AssetDetailDialog({
                 </div>
               )}
             </div>
+            {/* 选中历史图后的底部操作条（先选图 → 显式确认设为主图） */}
+            {selectedHistoryId != null && historyMode === "card" && (
+              <div className="mt-2 pt-2 border-t border-[#2A2A35] flex items-center gap-2">
+                <span className="text-[10px] text-[#6B7088] flex-1 truncate">已选中 1 张图片</span>
+                <button
+                  onClick={() => setSelectedHistoryId(null)}
+                  className="px-2.5 py-1 rounded-lg text-xs text-[#8B8B9A] hover:text-white bg-[#2A2A35]"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => {
+                    const h = history.find((x) => x.id === selectedHistoryId);
+                    if (h) {
+                      void setAsMain(h);
+                      setSelectedHistoryId(null);
+                    }
+                  }}
+                  className="px-3 py-1 rounded-lg text-xs text-white font-medium"
+                  style={{ background: "linear-gradient(135deg, #4C7FF8, #8B5CF6)" }}
+                >
+                  设为主图
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -726,6 +877,14 @@ export default function AssetDetailDialog({
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) void onPickFile(f, false);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={viewFileRef} type="file" accept="image/*" className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void addVariantView(f);
           e.target.value = "";
         }}
       />

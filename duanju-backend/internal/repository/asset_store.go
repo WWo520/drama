@@ -105,19 +105,36 @@ func (s *AssetStore) SaveGeneratedImage(ctx context.Context, t *AssetTarget, ima
 	// 按类型更新业务表
 	switch t.Kind {
 	case "CHARACTER_VARIANT":
-		// 首次生成：target_id=character.id，无 variant 行 → INSERT 创建；重复生成：先 UPDATE
-		if _, err := tx.Exec(ctx, `
+		// target 双语义：弹窗选中形象/衍生形象任务传 variant.id；角色级生成传 character.id。
+		// ① 先按 variant.id 精确更新（只写该形象）——此前 UPDATE 仅按 character_id 匹配，
+		//    variant.id 零命中导致提取形象的生成图直接丢失（实测 character 163 八个形象全无图）。
+		tag, err := tx.Exec(ctx, `
 			UPDATE character_variants SET generation_status='SUCCESS', main_image_url=$1, point_cost=$2, generation_task_id=$3
-			WHERE character_id=$4 AND deleted_at IS NULL`,
-			imageURL, t.PointCost, taskID, t.TargetID); err != nil {
+			WHERE id=$4 AND deleted_at IS NULL`,
+			imageURL, t.PointCost, taskID, t.TargetID)
+		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO character_variants (character_id, variant_name, generation_status, main_image_url, point_cost, generation_task_id)
-			SELECT $4, COALESCE((SELECT name FROM characters WHERE id=$4), '默认形象'), 'SUCCESS', $1, $2, $3
-			WHERE NOT EXISTS (SELECT 1 FROM character_variants WHERE character_id=$4 AND deleted_at IS NULL)`,
-			imageURL, t.PointCost, taskID, t.TargetID); err != nil {
-			return err
+		if tag.RowsAffected() == 0 {
+			// ② target=character.id：只更新默认形象（最小 id 变体）——
+			//    此前无 WHERE 限制全量 UPDATE，曾把该角色全部形象覆盖成同一张图（形象切换看不到差异）。
+			tag, err = tx.Exec(ctx, `
+				UPDATE character_variants SET generation_status='SUCCESS', main_image_url=$1, point_cost=$2, generation_task_id=$3
+				WHERE id = (SELECT cv.id FROM character_variants cv WHERE cv.character_id=$4 AND cv.deleted_at IS NULL ORDER BY cv.id LIMIT 1)`,
+				imageURL, t.PointCost, taskID, t.TargetID)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() == 0 {
+				// ③ 首次生成：角色尚无任何变体 → INSERT 创建默认形象
+				if _, err := tx.Exec(ctx, `
+					INSERT INTO character_variants (character_id, variant_name, generation_status, main_image_url, point_cost, generation_task_id)
+					SELECT $4, COALESCE((SELECT name FROM characters WHERE id=$4), '默认形象'), 'SUCCESS', $1, $2, $3
+					WHERE NOT EXISTS (SELECT 1 FROM character_variants WHERE character_id=$4 AND deleted_at IS NULL)`,
+					imageURL, t.PointCost, taskID, t.TargetID); err != nil {
+					return err
+				}
+			}
 		}
 	case "SCENE":
 		var todVal, weatherVal any
@@ -197,10 +214,14 @@ func (s *AssetStore) LoadAssetTarget(ctx context.Context, targetKind string, tar
 			FROM characters c WHERE c.id = $1 AND c.deleted_at IS NULL`, targetID).
 			Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID, &t.Prompt)
 		if errors.Is(err, pgx.ErrNoRows) {
-			// 回退：按 variant.id 查
+			// 回退：按 variant.id 查——提示词 = 角色基线 + 变体服装/外观描述
+			// （变体的 clothing_desc/extra_appearance_prompt 必须进提示词，否则所有形象出图相同）
 			err2 := s.pool.QueryRow(ctx, `
 				SELECT cv.point_cost, c.project_id, c.origin_episode_id, cv.asset_id,
-				       COALESCE(c.edited_prompt, c.description_notes, '')
+				       concat_ws('，',
+				           NULLIF(COALESCE(c.edited_prompt, c.description_notes, ''), ''),
+				           NULLIF(COALESCE(cv.clothing_desc, ''), ''),
+				           NULLIF(COALESCE(cv.extra_appearance_prompt, ''), ''))
 				FROM character_variants cv JOIN characters c ON c.id = cv.character_id
 				WHERE cv.id = $1`, targetID).
 				Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID, &t.Prompt)
@@ -211,25 +232,16 @@ func (s *AssetStore) LoadAssetTarget(ctx context.Context, targetKind string, tar
 		}
 		return t, err
 	case "SCENE":
+		// 时段/天气翻译移至 asset_handler（Go 侧完整枚举映射）——
+		// 原 SQL CASE 用旧枚举字面量（DUSK/NIGHT/SUNNY/RAINY/SNOWY），PostgreSQL 会把
+		// WHEN 字面量 cast 为 time_of_day_enum/weather_enum，非法值直接 22P02 报错
+		// （曾致 SCENE_IMAGE_GEN 全部失败）；此处仅返回原始枚举值。
 		err := s.pool.QueryRow(ctx, `
 SELECT point_cost, project_id, origin_episode_id, asset_id,
-       COALESCE(edited_prompt,
-           COALESCE(base_prompt, '') ||
-           CASE time_of_day_variant
-               WHEN 'DAY_BRIGHT' THEN '。白日，明亮阳光，自然光从窗外射入，空气通透度高'
-               WHEN 'DUSK' THEN '。黄昏，暖色调夕阳，天空橙红色渐变，长影效果'
-               WHEN 'NIGHT' THEN '。夜晚，城市夜景灯光，冷色调人工光源，星空点缀'
-               ELSE ''
-           END ||
-           CASE weather
-               WHEN 'SUNNY' THEN '。晴朗天气，光线充足，色彩饱和度高'
-               WHEN 'RAINY' THEN '。细雨朦胧，空气中水汽弥漫，地面湿润反光，雾气较重'
-               WHEN 'SNOWY' THEN '。雪景氛围，飘落雪花，白茫茫覆盖，冷色调'
-               ELSE ''
-           END
-       )
+       COALESCE(edited_prompt, COALESCE(base_prompt,'')),
+       COALESCE(time_of_day_variant::text,''), COALESCE(weather::text,'')
 FROM scenes WHERE id = $1`,
-			targetID).Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID, &t.Prompt)
+			targetID).Scan(&t.PointCost, &t.ProjectID, &t.EpisodeID, &t.AssetID, &t.Prompt, &t.TimeOfDay, &t.Weather)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, asset.ErrTokenExpired
 		}
@@ -340,21 +352,23 @@ func (s *AssetStore) RollbackVersion(ctx context.Context, narrativeUnitID, versi
 				return derr
 			}
 			totalDur := 0
+			shotGlobal := 0 // 单元内全局递增编号（跨块连续，避免按 sort_order 排序时交错重复观感）
 			for gi, sg := range groups {
 				var sgID int64
 				if qerr := tx.QueryRow(ctx, `
-					INSERT INTO shot_groups (narrative_unit_id, project_id, sort_order, group_type, title, duration_sec, shot_count)
-					VALUES ($1, (SELECT project_id FROM narrative_units WHERE id=$1), $2, 'NAMED_SEGMENT', $3, $4, $5) RETURNING id`,
+				INSERT INTO shot_groups (narrative_unit_id, project_id, sort_order, group_type, title, duration_sec, shot_count)
+				VALUES ($1, (SELECT project_id FROM narrative_units WHERE id=$1), $2, 'NAMED_SEGMENT', $3, $4, $5) RETURNING id`,
 					narrativeUnitID, gi+1, sg.Title, int(sg.DurationSec), len(sg.Shots)).Scan(&sgID); qerr != nil {
 					return qerr
 				}
-				for si, sh := range sg.Shots {
+				for _, sh := range sg.Shots {
+					shotGlobal++
 					if _, ierr := tx.Exec(ctx, `
-						INSERT INTO shots (shot_group_id, narrative_unit_id, project_id, sort_order, duration_sec,
-							shot_size, camera_movement, camera_angle, subject_description, background_description,
-							local_light_description, dialogue_text, ambient_sound, prompt_original, prompt_refined)
-						VALUES ($1, $2, (SELECT project_id FROM narrative_units WHERE id=$2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-						sgID, narrativeUnitID, si+1, int(sh.DurationSec), sh.ShotSize, sh.CameraMovement, sh.CameraAngle,
+					INSERT INTO shots (shot_group_id, narrative_unit_id, project_id, sort_order, duration_sec,
+						shot_size, camera_movement, camera_angle, subject_description, background_description,
+						local_light_description, dialogue_text, ambient_sound, prompt_original, prompt_refined)
+					VALUES ($1, $2, (SELECT project_id FROM narrative_units WHERE id=$2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+						sgID, narrativeUnitID, shotGlobal, int(sh.DurationSec), sh.ShotSize, sh.CameraMovement, sh.CameraAngle,
 						sh.SubjectDescription, sh.BackgroundDescription, sh.LocalLightDescription,
 						sh.DialogueText, sh.AmbientSound,
 						sh.SubjectDescription+" "+sh.BackgroundDescription, sh.PromptRefined); ierr != nil {
@@ -389,7 +403,7 @@ func (s *AssetStore) CreateVariant(ctx context.Context, projectID, characterID, 
 	var vid int64
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO character_variants (character_id, variant_name, variant_type, clothing_desc, extra_appearance_prompt, generation_status, point_cost)
-		VALUES ($1, $2, $3, NULLIF($4,''), NULLIF($5,''), 'PENDING', 10) RETURNING id`,
+		VALUES ($1, $2, $3, NULLIF($4,''), NULLIF($5,''), 'QUEUED', 10) RETURNING id`,
 		characterID, variantName, variantType, clothingDesc, extraAppearancePrompt).Scan(&vid); err != nil {
 		return 0, err
 	}
@@ -463,10 +477,126 @@ func (s *AssetStore) CreateAssetTaskWithGen(ctx context.Context, spaceID, userID
 	if err != nil {
 		return 0, err
 	}
+	// 提交即回写资产表 QUEUED（前端进度条/轮询依赖；对齐视频任务预置 RUNNING 的做法）。
+	// 幂等：per_asset_count>1 多任务只置一次；重试任务不覆盖进行中状态。
+	if err := markAssetQueuedTx(ctx, tx, kind, targetID); err != nil {
+		return 0, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, err
 	}
 	return taskID, nil
+}
+
+// markAssetQueuedTx 资产表置 QUEUED（事务内）：角色 upsert 默认变体行，场景/道具直接更新。
+func markAssetQueuedTx(ctx context.Context, tx pgx.Tx, kind string, targetID int64) error {
+	switch kind {
+	case "CHARACTER_VARIANT":
+		// 首次生成无变体行 → INSERT 默认形象（QUEUED）；已有行且非进行中 → 置 QUEUED
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO character_variants (character_id, variant_name, generation_status)
+			SELECT $1, COALESCE((SELECT name FROM characters WHERE id=$1), '默认形象'), 'QUEUED'
+			WHERE NOT EXISTS (SELECT 1 FROM character_variants WHERE character_id=$1 AND deleted_at IS NULL)`,
+			targetID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `
+			UPDATE character_variants SET generation_status='QUEUED'
+			WHERE character_id=$1 AND deleted_at IS NULL AND generation_status NOT IN ('QUEUED','RUNNING')`,
+			targetID)
+		return err
+	case "SCENE":
+		_, err := tx.Exec(ctx, `
+			UPDATE scenes SET generation_status='QUEUED'
+			WHERE id=$1 AND deleted_at IS NULL AND generation_status NOT IN ('QUEUED','RUNNING')`, targetID)
+		return err
+	case "PROP":
+		_, err := tx.Exec(ctx, `
+			UPDATE props SET generation_status='QUEUED'
+			WHERE id=$1 AND deleted_at IS NULL AND generation_status NOT IN ('QUEUED','RUNNING')`, targetID)
+		return err
+	}
+	return nil
+}
+
+// MarkAssetRunning 资产表置 RUNNING（Worker 认领执行时；前端进度条"生成中"）。
+// 幂等：仅 QUEUED/PENDING 可置（兼容存量任务：创建时未回写 QUEUED 的旧数据）。
+// CHARACTER_VARIANT 兼容两种 target：批量生成传 character_id，CreateVariant 传 variant id。
+func (s *AssetStore) MarkAssetRunning(ctx context.Context, targetKind string, targetID int64) error {
+	switch targetKind {
+	case "CHARACTER_VARIANT":
+		_, err := s.pool.Exec(ctx, `
+			UPDATE character_variants SET generation_status='RUNNING'
+			WHERE (character_id=$1 OR id=$1) AND deleted_at IS NULL AND generation_status IN ('QUEUED','PENDING')`, targetID)
+		return err
+	case "SCENE":
+		_, err := s.pool.Exec(ctx, `
+			UPDATE scenes SET generation_status='RUNNING'
+			WHERE id=$1 AND deleted_at IS NULL AND generation_status IN ('QUEUED','PENDING')`, targetID)
+		return err
+	case "PROP":
+		_, err := s.pool.Exec(ctx, `
+			UPDATE props SET generation_status='RUNNING'
+			WHERE id=$1 AND deleted_at IS NULL AND generation_status IN ('QUEUED','PENDING')`, targetID)
+		return err
+	}
+	return nil
+}
+
+// MarkAssetGenFailed 资产表置 FAILED_DEAD（仅 QUEUED/RUNNING 可置；计费冻结失败等即时失败回滚）。
+func (s *AssetStore) MarkAssetGenFailed(ctx context.Context, targetKind string, targetID int64) error {
+	return s.markAssetFailed(ctx, targetKind, targetID)
+}
+
+// MarkAssetDeadByTask 任务死信后回写资产表 FAILED_DEAD（防前端卡"生成中"、按钮死锁）。
+// 仅处理三类图生成任务；只覆盖仍处于 QUEUED/RUNNING 的行（不覆盖后续成功的终态）。
+func (s *AssetStore) MarkAssetDeadByTask(ctx context.Context, taskID int64) error {
+	var taskType string
+	var paramsJSON []byte
+	if err := s.pool.QueryRow(ctx, `
+		SELECT task_type::text, request_params_json FROM generation_tasks WHERE id=$1`, taskID).
+		Scan(&taskType, &paramsJSON); err != nil {
+		return err
+	}
+	switch taskType {
+	case "CHAR_IMAGE_GEN", "SCENE_IMAGE_GEN", "PROP_IMAGE_GEN":
+	default:
+		return nil
+	}
+	var params struct {
+		TargetKind string `json:"target_kind"`
+		TargetID   int64  `json:"target_id"`
+	}
+	if err := json.Unmarshal(paramsJSON, &params); err != nil {
+		return err
+	}
+	if params.TargetID == 0 {
+		return nil
+	}
+	return s.markAssetFailed(ctx, params.TargetKind, params.TargetID)
+}
+
+// markAssetFailed 资产表 QUEUED/RUNNING → FAILED_DEAD（进度条消失、按钮恢复）。
+// CHARACTER_VARIANT 兼容 character_id（批量）与 variant id（CreateVariant）两种 target。
+func (s *AssetStore) markAssetFailed(ctx context.Context, targetKind string, targetID int64) error {
+	switch targetKind {
+	case "CHARACTER_VARIANT":
+		_, err := s.pool.Exec(ctx, `
+			UPDATE character_variants SET generation_status='FAILED_DEAD'
+			WHERE (character_id=$1 OR id=$1) AND deleted_at IS NULL AND generation_status IN ('QUEUED','RUNNING')`, targetID)
+		return err
+	case "SCENE":
+		_, err := s.pool.Exec(ctx, `
+			UPDATE scenes SET generation_status='FAILED_DEAD'
+			WHERE id=$1 AND deleted_at IS NULL AND generation_status IN ('QUEUED','RUNNING')`, targetID)
+		return err
+	case "PROP":
+		_, err := s.pool.Exec(ctx, `
+			UPDATE props SET generation_status='FAILED_DEAD'
+			WHERE id=$1 AND deleted_at IS NULL AND generation_status IN ('QUEUED','RUNNING')`, targetID)
+		return err
+	}
+	return nil
 }
 
 // nullableAssetID *int64 → any（pgx 可空参数）。

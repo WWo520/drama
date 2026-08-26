@@ -23,6 +23,7 @@ import {
   type NuAssetLinkItem,
   type NuVersionItem,
   type ProjectDetail,
+  type ShotLinkedAsset,
   type ShotVideo,
 } from "@duanju/api-client";
 
@@ -49,10 +50,64 @@ function fmtVersionTime(iso: string): string {
 }
 
 // 关联资产就绪判定（对齐后端 LoadShotRefs：参考图 URL 非空即可用）
-const assetReady = (l: NuAssetLinkItem) => !!l.main_image_url;
+const assetReady = (l: { main_image_url?: string }) => !!l.main_image_url;
 
 // 资产类型 → 中文名（chips 提示用）
 const ASSET_KIND_LABEL: Record<string, string> = { CHARACTER: "角色", SCENE: "场景", PROP: "道具" };
+
+// 提示词文本中命中资产名 → @资产 引用高亮（对齐 LuxReal「@资产」引用展示）。
+// 长名优先匹配，避免"陆言-市井"被"陆言"截断命中；资产名 <2 字不参与（与后端建链口径一致）。
+function RefText({ text, assets }: { text: string; assets?: ShotLinkedAsset[] }) {
+  const names = (assets ?? [])
+    .map((a) => a.name?.trim())
+    .filter((n): n is string => !!n && [...n].length >= 2)
+    .sort((a, b) => b.length - a.length);
+  if (!text || names.length === 0) return <>{text}</>;
+  const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const parts = text.split(new RegExp(`(${escaped.join("|")})`, "g"));
+  const nameSet = new Set(names);
+  return (
+    <>
+      {parts.map((p, i) =>
+        nameSet.has(p) ? (
+          <span key={i} className="asset-ref-tag" title="已关联资产，生成视频时作为参考图注入">@{p}</span>
+        ) : (
+          p
+        ),
+      )}
+    </>
+  );
+}
+
+// 镜头关联资产小图（对齐 LuxReal 分镜卡参考图区）：就绪→缩略图；未就绪→名称首字+橙点
+function ShotAssetChips({ assets, onGoAssets }: { assets?: ShotLinkedAsset[]; onGoAssets?: () => void }) {
+  if (!assets || assets.length === 0) return null;
+  return (
+    <>
+      {assets.map((a) => {
+        const ready = assetReady(a);
+        return (
+          <div
+            key={`${a.asset_kind}-${a.asset_id}`}
+            className={`shot-ref-chip ${ready ? "" : "pending"}`}
+            style={ready ? undefined : { background: "#2A2A35" }}
+            title={`${ASSET_KIND_LABEL[a.asset_kind] ?? ""} · ${a.name}${ready ? "" : "（待生成）"}${ready ? "，生成视频时作为参考图注入" : ""}`}
+            onClick={onGoAssets}
+          >
+            {ready ? (
+              <img src={a.main_image_url} alt={a.name} className="w-full h-full object-cover" />
+            ) : (
+              <span className="w-full h-full flex items-center justify-center text-[10px] text-[#8B8B9A] select-none">
+                {(a.name || "?").slice(0, 1)}
+              </span>
+            )}
+            {!ready && <span className="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 rounded-full" style={{ background: "#F5B23C" }} />}
+          </div>
+        );
+      })}
+    </>
+  );
+}
 
 // ===== 关联资产 chip（17 - 工作台对齐：名称引用占位，对齐 LuxReal「关联资产 仓鼠 我 老板 4 +」） =====
 function AssetChip({ link, onGoAssets }: { link: NuAssetLinkItem; onGoAssets: () => void }) {
@@ -80,12 +135,17 @@ function AssetChip({ link, onGoAssets }: { link: NuAssetLinkItem; onGoAssets: ()
 // BeatDetail 展平后的单镜头文案
 type ShotDetailLite = BeatDetail["shot_groups"][number]["shots"][number];
 
-// 视频模型选项（弹窗三选一；积分系数仅用于预估展示，实际计费以后端为准）
+// 视频模型选项（弹窗选择；积分系数仅用于预估展示，实际计费以后端为准）
+// key 同时是提交后端的 model_key：Seedance 系列走默认路由（key 不命中 models 表），
+// MiniMax H3 须命中管理端配置的 models.model_key=MiniMax-H3 才参与路由。
 const MODEL_OPTIONS = [
   { key: "2.5", name: "Seedance 2.5", badge: "PRO", desc: "30秒 · 精修可控", factor: 4 },
   { key: "2.0", name: "Seedance 2.0", badge: "", desc: "15秒 · 高一致性", factor: 3 },
   { key: "1.5", name: "Seedance 1.5", badge: "", desc: "10秒 · 高效批量", factor: 2 },
+  { key: "MiniMax-H3", name: "MiniMax H3", badge: "NEW", desc: "15秒 · 多图参考 · 原生音画", factor: 4 },
 ];
+// MiniMax H3 分辨率枚举（V2 接口仅 768P/2K；自部署仅 768P，2K 需官方 API）
+const H3_RESOLUTIONS = ["768P", "2K"];
 
 // 镜头状态徽章（对齐设计稿配色）
 function ShotStatusBadge({ status }: { status: string }) {
@@ -101,22 +161,118 @@ function ShotStatusBadge({ status }: { status: string }) {
   return <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "#1A1A2E", color: "#6B7088" }}>待生成</span>;
 }
 
+// 景别/运镜/视角 枚举 → 中文（对齐 LuxReal 分镜脚本正文呈现；DB 存英文枚举值）
+const SHOT_SIZE_LABEL: Record<string, string> = {
+  ECU: "大特写", CU: "特写", MCU: "中特写", MS: "中景", FS: "全景",
+  LS: "远景", ELS: "大远景", TWO_SHOT: "双人镜头", OTS: "过肩",
+};
+const CAMERA_MOVE_LABEL: Record<string, string> = {
+  STATIC: "固定", SLOW_PUSH_IN: "慢慢推进", SLOW_PULL_OUT: "慢慢拉远", FAST_PUSH_IN: "快速推进",
+  DOLLY_IN: "推车前进", DOLLY_OUT: "推车后退", PAN_LEFT: "左摇", PAN_RIGHT: "右摇",
+  TRACK_LEFT: "左横移跟拍", TRACK_RIGHT: "右横移跟拍", TILT_UP: "仰摇", TILT_DOWN: "俯摇",
+  CRANE_UP: "升镜头", CRANE_DOWN: "降镜头", HANDHELD_SHAKY: "手持晃动", WIPE_CLIP: "甩镜切换",
+  ZOOM_IN_OPTICAL: "光学变焦推近", SLOW_360_ORBIT: "缓慢环绕",
+};
+const CAMERA_ANGLE_LABEL: Record<string, string> = {
+  EYE_LEVEL_FRONT: "平视", SIDE: "侧面", BACK: "背面", SLIGHT_LOW_ANGLE: "微仰拍",
+  LOW_ANGLE: "仰拍", SLIGHT_HIGH: "微俯拍", HIGH_BIRDVIEW: "鸟瞰俯拍",
+  OTS_LEFT: "左侧过肩", OTS_RIGHT: "右侧过肩", DUTCH_ANGLE: "荷兰角倾斜",
+};
+const shotSizeLabel = (v: string) => SHOT_SIZE_LABEL[v] ?? v;
+const cameraMoveLabel = (v: string) => CAMERA_MOVE_LABEL[v] ?? v;
+const cameraAngleLabel = (v: string) => CAMERA_ANGLE_LABEL[v] ?? v;
+
+// ===== 分镜脚本视图（对齐 LuxReal：8 字段结构化正文 + 尾部全局约束指令） =====
+function StoryboardScriptView({ detail, generating }: { detail?: BeatDetail; generating?: boolean }) {
+  // 展平为全局序号（跨镜头块连续：flatMap 保序 + 全局编号，杜绝组内 sort_order 重复
+  // 造成的"镜头1,1,1…"交错重复观感）
+  const shots = useMemo(() => {
+    const list: { no: number; shot: NonNullable<BeatDetail["shot_groups"][number]["shots"][number]> }[] = [];
+    (detail?.shot_groups ?? []).forEach((g) => g.shots.forEach((s) => list.push({ no: list.length + 1, shot: s })));
+    return list;
+  }, [detail]);
+
+  if (generating) {
+    return (
+      <div className="storyboard-script generating">
+        <Loader2 size={16} className="animate-spin text-[#4C7FF8]" />
+        <span>分镜脚本生成中，请稍候…</span>
+      </div>
+    );
+  }
+  if (!detail) {
+    return <div className="storyboard-script empty">分镜脚本加载中…</div>;
+  }
+  if (shots.length === 0) {
+    return <div className="storyboard-script empty">尚未生成分镜脚本，请先点击上方「生成分镜脚本」。</div>;
+  }
+
+  return (
+    <div className="storyboard-script">
+      {shots.map(({ no, shot: s }) => (
+        <div key={s.shot_id} className="sb-shot">
+          <div className="sb-shot-head">
+            <span className="sb-shot-no">镜头{no}</span>
+            <span className="sb-tag">【时长{s.duration_sec}s】</span>
+            {s.shot_size && <span className="sb-tag">【景别{shotSizeLabel(s.shot_size)}】</span>}
+            {s.camera_movement && <span className="sb-tag">【运镜{cameraMoveLabel(s.camera_movement)}】</span>}
+            {s.camera_angle && <span className="sb-tag">【视角{cameraAngleLabel(s.camera_angle)}】</span>}
+          </div>
+          {/* 该镜头引用的资产（对齐 LuxReal：小图 + @引用标签；生成视频时作为参考图注入） */}
+          {s.linked_assets && s.linked_assets.length > 0 && (
+            <div className="sb-assets">
+              {s.linked_assets.map((a) => (
+                <span key={`${a.asset_kind}-${a.asset_id}`} className={`sb-asset${assetReady(a) ? "" : " pending"}`} title={`${ASSET_KIND_LABEL[a.asset_kind] ?? ""} · ${a.name}${assetReady(a) ? "" : "（待生成）"}`}>
+                  {a.main_image_url ? <img src={a.main_image_url} alt={a.name} /> : <span className="sb-asset-letter">{(a.name || "?").slice(0, 1)}</span>}
+                  <span className="sb-asset-name">@{a.name}</span>
+                </span>
+              ))}
+            </div>
+          )}
+          {s.subject_description && (
+            <div className="sb-line"><span className="sb-field">【主体】</span><span className="sb-text"><RefText text={s.subject_description} assets={s.linked_assets} /></span></div>
+          )}
+          {s.background_description && (
+            <div className="sb-line"><span className="sb-field">【背景】</span><span className="sb-text"><RefText text={s.background_description} assets={s.linked_assets} /></span></div>
+          )}
+          {s.local_light_description && (
+            <div className="sb-line"><span className="sb-field">【光影】</span><span className="sb-text">{s.local_light_description}</span></div>
+          )}
+          {s.dialogue_text && (
+            <div className="sb-line"><span className="sb-field">【台词】</span><span className="sb-text">{s.dialogue_text}</span></div>
+          )}
+          {s.ambient_sound && (
+            <div className="sb-line"><span className="sb-field">【环境音】</span><span className="sb-text">{s.ambient_sound}</span></div>
+          )}
+        </div>
+      ))}
+      {/* 尾部全局约束指令（对齐 LuxReal：Agent 自动追加，生成视频时注入 prompt） */}
+      <div className="sb-constraint">严格按照分镜脚本进行生成，参考上传图的人物形象、场景和道具。不要生成字幕。</div>
+    </div>
+  );
+}
+
 // ===== 镜头卡 =====
 function ShotCard({
   shot,
+  index,
   detail,
   onRegenerate,
   onAddRefImage,
+  onGoAssets,
 }: {
   shot: ShotVideo;
+  index: number; // 单元内全局序号（跨镜头块连续；避免组内 sort_order 重复导致"镜头1"多次出现）
   detail?: ShotDetailLite;
   onRegenerate: (shot: ShotVideo) => void;
   onAddRefImage: (shot: ShotVideo) => void;
+  onGoAssets?: () => void;
 }) {
   const done = shot.video_generation_status === "SUCCESS";
   const running = shot.video_generation_status === "RUNNING";
-  // 参考图 chips：无数据源时按镜头序号轮转渐变色（视觉保真占位）
-  const grads = [`lens-grad-${(shot.sort_order % 6) + 1}`, `lens-grad-${((shot.sort_order + 2) % 6) + 1}`, `lens-grad-${((shot.sort_order + 4) % 6) + 1}`];
+  // 参考图 chips：该镜头引用的资产小图（对齐 LuxReal 分镜卡参考图区）；
+  // 无关联资产时单个虚线占位
+  const linked = shot.linked_assets ?? [];
 
   return (
     <div className="shot-card">
@@ -171,44 +327,65 @@ function ShotCard({
           {/* 镜头号 + 状态 + 模型 */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-white">镜头 {String(shot.sort_order).padStart(2, "0")}</span>
+              <span className="text-sm font-medium text-white">镜头 {String(index).padStart(2, "0")}</span>
               <ShotStatusBadge status={shot.video_generation_status} />
             </div>
             <span className="text-[10px] px-2 py-0.5 rounded" style={{ background: "#1A1A2E", color: "#6B7088" }}>Seedance 2.5 · 1080P</span>
           </div>
-          {/* 参考图 chips */}
+          {/* 参考图 chips：镜头关联资产小图（就绪缩略图 / 未就绪首字+橙点），生成视频时作为参考图注入 */}
           <div className="shot-ref-chips">
-            {grads.map((g) => (
-              <div key={g} className={`shot-ref-chip ${g}`} onClick={() => toast.info("参考图管理将在后续版本开放")} />
-            ))}
-            <div className="shot-ref-chip add" onClick={() => toast.info("添加参考图将在后续版本开放")}>
+            {linked.length > 0 ? (
+              <ShotAssetChips assets={linked} onGoAssets={onGoAssets} />
+            ) : (
+              <div className="shot-ref-chip empty" title="本镜头未关联资产（纯文生视频）">
+                <span className="w-full h-full flex items-center justify-center text-[9px] text-[#6B7088] select-none px-0.5 text-center">无关联资产</span>
+              </div>
+            )}
+            <div className="shot-ref-chip add" onClick={() => onAddRefImage(shot)} title="生成镜头专属参考图（SHOT_REF_IMAGE_GEN）">
               <Plus size={12} />
             </div>
           </div>
-          {/* 提示词描述（景别/运镜/主体动作/台词） */}
+          {/* 提示词描述（景别/运镜/主体动作/台词；主体/背景中资产名 @ 引用高亮） */}
           <div className="shot-desc">
-            {(detail?.shot_scale || detail?.camera_movement || detail?.camera_angle) && (
+            {(detail?.shot_size || detail?.camera_movement || detail?.camera_angle) && (
               <div className="flex flex-wrap gap-1.5 mb-1.5">
-                {detail.shot_scale && (
-                  <span className="text-[10px]"><span style={{ color: "#4C7FF8" }}>【景别】</span><span className="text-white/80">{detail.shot_scale}</span></span>
+                {detail.shot_size && (
+                  <span className="text-[10px]"><span style={{ color: "#4C7FF8" }}>【景别】</span><span className="text-white/80">{shotSizeLabel(detail.shot_size)}</span></span>
                 )}
                 {detail.camera_movement && (
-                  <span className="text-[10px]"><span style={{ color: "#4C7FF8" }}>【运镜】</span><span className="text-white/80">{detail.camera_movement}</span></span>
+                  <span className="text-[10px]"><span style={{ color: "#4C7FF8" }}>【运镜】</span><span className="text-white/80">{cameraMoveLabel(detail.camera_movement)}</span></span>
                 )}
                 {detail.camera_angle && (
-                  <span className="text-[10px]"><span style={{ color: "#4C7FF8" }}>【画面氛围】</span><span className="text-white/80">{detail.camera_angle}</span></span>
+                  <span className="text-[10px]"><span style={{ color: "#4C7FF8" }}>【视角】</span><span className="text-white/80">{cameraAngleLabel(detail.camera_angle)}</span></span>
                 )}
               </div>
             )}
             {detail?.subject_description && (
               <div className="text-[11px] text-white/70 leading-relaxed">
-                <span style={{ color: "#4C7FF8" }}>【主体动作】</span>{detail.subject_description}
+                <span style={{ color: "#4C7FF8" }}>【主体动作】</span><RefText text={detail.subject_description} assets={shot.linked_assets} />
+              </div>
+            )}
+            {detail?.background_description && (
+              <div className="text-[11px] text-white/70 leading-relaxed mt-1">
+                <span style={{ color: "#4C7FF8" }}>【背景】</span><RefText text={detail.background_description} assets={shot.linked_assets} />
               </div>
             )}
             {detail?.dialogue_text && (
               <div className="text-[11px] text-white/70 leading-relaxed mt-1">
                 <span style={{ color: "#4C7FF8" }}>【台词】</span>"{detail.dialogue_text}"
               </div>
+            )}
+            {/* 融合提示词（prompt_refined = 分镜 8 字段润色融合，生成视频即用此提示词）：
+                折叠态显示摘要，点击展开全文，与分镜脚本内容一体呈现 */}
+            {detail?.prompt_refined && (
+              <details className="mt-1.5 group">
+                <summary className="text-[10px] cursor-pointer select-none" style={{ color: "#8B8B9A" }}>
+                  【融合提示词】<span className="group-open:hidden">点击展开（视频生成用）</span><span className="hidden group-open:inline">收起</span>
+                </summary>
+                <div className="text-[11px] text-white/60 leading-relaxed mt-1 p-2 rounded bg-[#16161C] border border-[#2A2A35]">
+                  {detail.prompt_refined}
+                </div>
+              </details>
             )}
           </div>
           {/* 操作行 */}
@@ -274,7 +451,7 @@ function GenVideoModal({
   links: NuAssetLinkItem[];
   submitting: boolean;
   onClose: () => void;
-  onConfirm: (opts: { resolution?: string; video_model?: string; model_key?: string }) => void;
+  onConfirm: (opts: { resolution?: string; video_model?: string; model_key?: string; redo?: boolean }) => void;
 }) {
   const [model, setModel] = useState("2.5");
   const [resolution, setResolution] = useState("1080P");
@@ -287,6 +464,9 @@ function GenVideoModal({
   const totalSec = shots.reduce((acc, s) => acc + (s.duration_sec || 0), 0);
   const factor = MODEL_OPTIONS.find((m) => m.key === model)?.factor ?? 4;
   const estCost = Math.max(totalSec * factor, shots.length * 10);
+  // 全部镜头已成功 = "重新生成"语义：redo 让后端重置 SUCCESS 镜头后全量重建
+  // （否则批量接口只补缺失镜头，会静默创建 0 个任务）
+  const allDone = shots.length > 0 && shots.every((s) => s.video_generation_status === "SUCCESS");
   // 资产就绪度（17 - 工作台对齐）：未全就绪时提示纯文生视频降级（对齐后端 LoadShotRefs 行为）
   const readyCount = links.filter((l) => !!l.main_image_url).length;
   const notReady = links.length > 0 && readyCount < links.length;
@@ -317,7 +497,15 @@ function GenVideoModal({
             </div>
             <div className="gen-model-tabs">
               {MODEL_OPTIONS.map((m) => (
-                <div key={m.key} className={`gen-model-tab ${model === m.key ? "active" : ""}`} onClick={() => setModel(m.key)}>
+                <div
+                  key={m.key}
+                  className={`gen-model-tab ${model === m.key ? "active" : ""}`}
+                  onClick={() => {
+                    setModel(m.key);
+                    // 分辨率枚举随模型切换（H3 仅 768P/2K；Seedance 系 480P/720P/1080P）
+                    setResolution(m.key === "MiniMax-H3" ? "768P" : "1080P");
+                  }}
+                >
                   <div className="gen-model-tab-name">
                     {m.name}
                     {m.badge && <span className="gen-model-tab-badge">{m.badge}</span>}
@@ -336,7 +524,7 @@ function GenVideoModal({
                 分辨率
               </div>
               <div className="gen-segmented">
-                {["480P", "720P", "1080P"].map((r) => (
+                {(model === "MiniMax-H3" ? H3_RESOLUTIONS : ["480P", "720P", "1080P"]).map((r) => (
                   <button key={r} className={`gen-segmented-btn ${resolution === r ? "active" : ""}`} onClick={() => setResolution(r)}>{r}</button>
                 ))}
               </div>
@@ -431,9 +619,18 @@ function GenVideoModal({
             disabled={submitting}
             onClick={() =>
               onConfirm({
-                resolution: resolution === "480P" ? "P480" : resolution === "720P" ? "P720" : "P1080",
+                // H3 直传 V2 枚举（768P/2K）；Seedance 系映射为 P480/P720/P1080
+                resolution:
+                  model === "MiniMax-H3"
+                    ? resolution
+                    : resolution === "480P"
+                      ? "P480"
+                      : resolution === "720P"
+                        ? "P720"
+                        : "P1080",
                 model_key: model,
                 video_model: MODEL_OPTIONS.find((m) => m.key === model)?.name ?? "Seedance 2.5",
+                redo: allDone,
               })
             }
           >
@@ -468,14 +665,16 @@ export default function Step3Page() {
   const [versions, setVersions] = useState<NuVersionItem[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [restoringId, setRestoringId] = useState<number | null>(null);
-  // 重新规划弹窗（3.3.7c）：两个开关为纯 UI 视觉态，后端 replan 目前仅接收 planning_mode
+  // 分镜生成弹窗（3.3.7c / 18 - 视频制作 阶段二）：两个开关为纯 UI 视觉态，后端 replan 接收 planning_mode/skill_prompt
   const [replanTarget, setReplanTarget] = useState<BeatSummary | null>(null);
   const [replanActive, setReplanActive] = useState(false);
   const [replanKeepRefs, setReplanKeepRefs] = useState(true);
   const [replanApplySkill, setReplanApplySkill] = useState(false);
   const [replanSubmitting, setReplanSubmitting] = useState(false);
-  // 重新规划进行中标记：驱动 STORYBOARD_PLAN_V1_LUXCHAT 终态后的分镜刷新
-  const [replanning, setReplanning] = useState(false);
+  // 分镜脚本生成中的单元 beat_id：驱动 STORYBOARD_PLAN_V1_LUXCHAT 终态后的分镜刷新 + 单元级"生成中"状态
+  const [replanningBeatId, setReplanningBeatId] = useState<string | null>(null);
+  // 单元内容 Tab：script=剧本原文 | storyboard=分镜脚本（对齐 LuxReal 分镜脚本正文可视）
+  const [scriptTab, setScriptTab] = useState<Record<string, "script" | "storyboard">>({});
 
   const stepState = useStepState(projectId, proj?.status ?? null);
 
@@ -619,17 +818,18 @@ export default function Step3Page() {
     match: matchTaskTypes(["VIDEO_SEGMENT_GEN", "VIDEO_GROUP_CONCAT"]),
   });
 
-  // 重新规划（STORYBOARD_PLAN_V1_LUXCHAT）终态 → 刷新分镜数据（对齐 LuxReal 独立分镜生成）
+  // 分镜脚本生成（STORYBOARD_PLAN_V1_LUXCHAT）终态 → 刷新分镜数据并切到分镜脚本 Tab（对齐 LuxReal 独立分镜生成）
   useWsDrivenPoll(
     () => {
-      if (!replanning) return;
+      if (!replanningBeatId) return;
       void loadShots(beats);
       void loadDetails(beats);
-      toast.success("重新规划完成，分镜已刷新");
-      setReplanning(false);
+      setScriptTab((prev) => ({ ...prev, [replanningBeatId]: "storyboard" }));
+      toast.success("分镜脚本已生成");
+      setReplanningBeatId(null);
     },
     {
-      active: replanning,
+      active: !!replanningBeatId,
       pollMs: 5000,
       match: matchTaskTypes(["STORYBOARD_PLAN_V1_LUXCHAT"]),
     },
@@ -666,7 +866,7 @@ export default function Step3Page() {
   };
 
   // 提交生成视频（弹窗确认后，弹窗参数随请求落任务表——对齐 LuxReal 参数持久化）
-  const handleGenerate = async (opts?: { resolution?: string; video_model?: string; model_key?: string }) => {
+  const handleGenerate = async (opts?: { resolution?: string; video_model?: string; model_key?: string; redo?: boolean }) => {
     if (!genTarget) return;
     try {
       setSubmitting(true);
@@ -769,17 +969,18 @@ export default function Step3Page() {
     }
   };
 
-  // 确认重新规划（3.3.7c）：后端入队 BEAT_REPLAN 任务（开发期 mock）
+  // 确认生成分镜脚本（3.3.7c / 18 - 视频制作 阶段二）：后端入队 STORYBOARD_PLAN_V1_LUXCHAT 真实任务
   const confirmReplan = async () => {
     if (!replanTarget) return;
     try {
       setReplanSubmitting(true);
       await splitApi.replan(replanTarget.beat_id);
-      toast.success("重新规划任务已提交，请稍候");
+      toast.success("分镜脚本生成任务已提交，请稍候");
+      setScriptTab((prev) => ({ ...prev, [replanTarget.beat_id]: "storyboard" }));
       setReplanTarget(null);
-      setReplanning(true);
+      setReplanningBeatId(replanTarget.beat_id);
     } catch (e) {
-      toast.error(errMsg(e, "提交重新规划失败"));
+      toast.error(errMsg(e, "提交分镜生成失败"));
     } finally {
       setReplanSubmitting(false);
     }
@@ -871,6 +1072,8 @@ export default function Step3Page() {
             const doneCount = shots.filter((s) => s.video_generation_status === "SUCCESS").length;
             const allDone = shots.length > 0 && doneCount === shots.length;
             const showScript = scriptOpen[beat.beat_id] ?? true;
+            const tab = scriptTab[beat.beat_id] ?? "script";
+            const generating = replanningBeatId === beat.beat_id;
             const links = linksMap[beat.beat_id] ?? [];
             const readyCount = links.filter(assetReady).length;
 
@@ -884,9 +1087,19 @@ export default function Step3Page() {
                     <span className="unit-sep">|</span>
                     <span className="unit-name">{beat.title}</span>
                   </div>
-                  {/* 状态横幅：规划完成 / 生成中 / 全部完成 */}
-                  {expanded && shots.length > 0 && (
-                    running ? (
+                  {/* 状态横幅：分镜脚本生成中 → 未生成分镜 → 视频生成中 / 全部完成 / 待生成视频 */}
+                  {expanded && (
+                    generating ? (
+                      <div className="unit-status-banner running">
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>分镜脚本生成中，请稍候…</span>
+                      </div>
+                    ) : shots.length === 0 ? (
+                      <div className="unit-status-banner">
+                        <Sparkles size={13} />
+                        <span>尚未生成 分镜脚本，请先「生成分镜脚本」</span>
+                      </div>
+                    ) : running ? (
                       <div className="unit-status-banner running">
                         <Loader2 size={13} className="animate-spin" />
                         <span>视频生成中（{doneCount}/{shots.length}），请稍候…</span>
@@ -929,18 +1142,32 @@ export default function Step3Page() {
                           <History size={12} />
                           <span>历史版本</span>
                         </div>
-                        <button className="btn-replan" onClick={() => setReplanTarget(beat)}>
-                          <RefreshCw size={12} />
-                          <span>重新规划</span>
-                        </button>
-                        <button
-                          className="btn-generate-video"
-                          disabled={running || submitting}
-                          onClick={() => setGenTarget(beat)}
-                        >
-                          <Clapperboard size={14} />
-                          <span>{allDone ? "重新生成" : "生成视频"}</span>
-                        </button>
+                        {shots.length === 0 || generating ? (
+                          /* 先生成分镜脚本（对齐 LuxReal：手动按单元生成，生成后才可生成视频）；生成中禁用防重复提交 */
+                          <button
+                            className="btn-replan btn-gen-storyboard"
+                            disabled={generating}
+                            onClick={() => setReplanTarget(beat)}
+                          >
+                            <Sparkles size={12} />
+                            <span>{generating ? "分镜生成中…" : "生成分镜脚本"}</span>
+                          </button>
+                        ) : (
+                          <>
+                            <button className="btn-replan" onClick={() => setReplanTarget(beat)}>
+                              <RefreshCw size={12} />
+                              <span>重新生成分镜脚本</span>
+                            </button>
+                            <button
+                              className="btn-generate-video"
+                              disabled={running || submitting}
+                              onClick={() => setGenTarget(beat)}
+                            >
+                              <Clapperboard size={14} />
+                              <span>{allDone ? "重新生成" : "生成视频"}</span>
+                            </button>
+                          </>
+                        )}
                       </>
                     ) : (
                       <button className="btn-gen-prompts" onClick={() => toggleExpand(beat.beat_id)}>
@@ -954,9 +1181,22 @@ export default function Step3Page() {
 
                 {expanded ? (
                   <>
-                    {/* 剧本原文 toggle */}
+                    {/* 剧本原文 / 分镜脚本 Tab（对齐 LuxReal：分镜脚本正文为 Step3 核心可视物） */}
                     <div className="unit-subheader">
-                      <span className="unit-sub-label">剧本原文</span>
+                      <div className="unit-tab-group">
+                        <span
+                          className={`unit-tab ${tab === "script" ? "active" : ""}`}
+                          onClick={() => setScriptTab((prev) => ({ ...prev, [beat.beat_id]: "script" }))}
+                        >
+                          剧本原文
+                        </span>
+                        <span
+                          className={`unit-tab ${tab === "storyboard" ? "active" : ""}`}
+                          onClick={() => setScriptTab((prev) => ({ ...prev, [beat.beat_id]: "storyboard" }))}
+                        >
+                          分镜脚本{shots.length > 0 ? ` · ${shots.length}镜头` : ""}
+                        </span>
+                      </div>
                       <div
                         className="unit-toggle"
                         onClick={() => setScriptOpen((prev) => ({ ...prev, [beat.beat_id]: !showScript }))}
@@ -965,22 +1205,29 @@ export default function Step3Page() {
                         <span>{showScript ? "收起" : "展开"}</span>
                       </div>
                     </div>
-                    {showScript && <div className="script-preview">{beat.script_text}</div>}
+                    {showScript && tab === "script" && <div className="script-preview">{beat.script_text}</div>}
+                    {showScript && tab === "storyboard" && (
+                      <StoryboardScriptView detail={detailsMap[beat.beat_id]} generating={generating} />
+                    )}
                     {/* 镜头网格 */}
                     {shots.length > 0 ? (
                       <div className="shots-grid">
-                        {shots.map((s) => (
+                        {shots.map((s, si) => (
                           <ShotCard
                             key={s.shot_uuid}
                             shot={s}
+                            index={si + 1}
                             detail={detailOf(beat.beat_id, s.sort_order)}
                             onRegenerate={(shot) => void handleRegenerateShot(shot)}
                             onAddRefImage={(shot) => void handleAddRefImage(shot)}
+                            onGoAssets={() => stepState.goStep(2)}
                           />
                         ))}
                       </div>
                     ) : (
-                      <div className="px-5 pb-5 text-xs text-[#6B7088]">该单元暂无镜头数据，可尝试重新规划。</div>
+                      <div className="px-5 pb-5 text-xs text-[#6B7088]">
+                        尚未生成 分镜脚本 — 点击上方「生成分镜脚本」生成该单元的分镜（含镜头描述与参考图），后再生成视频。
+                      </div>
                     )}
                   </>
                 ) : (
@@ -1100,40 +1347,54 @@ export default function Step3Page() {
         </div>
       )}
 
-      {/* 重新规划确认弹窗（3.3.7c，DOM 对齐设计稿 modalReplan） */}
-      {replanTarget && (
-        <div
-          className={`replan-modal-overlay ${replanActive ? "active" : ""}`}
-          onClick={() => !replanSubmitting && setReplanTarget(null)}
-        >
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-title">重新规划分镜</div>
-            </div>
-            <div className="modal-body">
-              <div className="confirm-message">重新规划将覆盖当前分镜方案，确定要继续吗？</div>
-              <div className="setting-row">
-                <div className="setting-label-group">
-                  <span className="setting-label">保留已生成的参考图</span>
-                </div>
-                <div className={`toggle-switch ${replanKeepRefs ? "on" : ""}`} onClick={() => setReplanKeepRefs(!replanKeepRefs)} />
+      {/* 分镜脚本生成弹窗（3.3.7c / 18 - 视频制作 阶段二，DOM 对齐设计稿 modalReplan）
+          语义区分：首次生成（标准生成流）/ 重新生成（新版本快照，可历史回滚） */}
+      {replanTarget && (() => {
+        const firstTime = (shotsMap[replanTarget.beat_id] ?? []).length === 0;
+        return (
+          <div
+            className={`replan-modal-overlay ${replanActive ? "active" : ""}`}
+            onClick={() => !replanSubmitting && setReplanTarget(null)}
+          >
+            <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <div className="modal-title">{firstTime ? "生成分镜脚本" : "重新生成分镜脚本"}</div>
               </div>
-              <div className="setting-row">
-                <div className="setting-label-group">
-                  <span className="setting-label">应用新的Agent技能</span>
+              <div className="modal-body">
+                <div className="confirm-message">
+                  {firstTime
+                    ? "将根据剧本原文与时长预设，为本单元生成 8 字段分镜脚本（景别/运镜/视角/主体/背景/光影/台词/环境音）。"
+                    : "将重新生成本单元的分镜脚本并保存为新版本，旧版本可通过「历史版本」回滚。"}
                 </div>
-                <div className={`toggle-switch ${replanApplySkill ? "on" : ""}`} onClick={() => setReplanApplySkill(!replanApplySkill)} />
+                {!firstTime && (
+                  <div className="setting-row">
+                    <div className="setting-label-group">
+                      <span className="setting-label">保留已生成的参考图</span>
+                    </div>
+                    <div className={`toggle-switch ${replanKeepRefs ? "on" : ""}`} onClick={() => setReplanKeepRefs(!replanKeepRefs)} />
+                  </div>
+                )}
+                <div className="setting-row">
+                  <div className="setting-label-group">
+                    <span className="setting-label">应用新的Agent技能</span>
+                  </div>
+                  <div className={`toggle-switch ${replanApplySkill ? "on" : ""}`} onClick={() => setReplanApplySkill(!replanApplySkill)} />
+                </div>
               </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-modal-cancel" onClick={() => !replanSubmitting && setReplanTarget(null)}>取消</button>
-              <button className="btn-modal-warning" disabled={replanSubmitting} onClick={() => void confirmReplan()}>
-                {replanSubmitting ? "提交中…" : "重新规划"}
-              </button>
+              <div className="modal-footer">
+                <button className="btn-modal-cancel" onClick={() => !replanSubmitting && setReplanTarget(null)}>取消</button>
+                <button
+                  className={firstTime ? "btn-modal-primary" : "btn-modal-warning"}
+                  disabled={replanSubmitting}
+                  onClick={() => void confirmReplan()}
+                >
+                  {replanSubmitting ? "提交中…" : firstTime ? "生成分镜脚本" : "重新生成"}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </WorkbenchShell>
   );
 }

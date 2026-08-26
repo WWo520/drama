@@ -90,6 +90,20 @@ const ASSET_TYPE_LABEL: Record<string, string> = {
   GENERIC: "通用素材",
 };
 
+// 场景时段枚举 → 中文标签（对齐 time_of_day_enum）
+const SCENE_TOD_LABEL: Record<string, string> = {
+  DAWN_BLUE_HOUR: "黎明",
+  MORNING_SUNRISE: "清晨",
+  NOON_HIGH_SUN: "正午",
+  DAY_BRIGHT: "白天",
+  AFTERNOON_GOLDEN_HOUR: "午后",
+  SUNSET_DUSK: "黄昏",
+  NIGHT_CANDLELIT: "夜晚·烛光",
+  NIGHT_NEON: "夜晚·霓虹",
+  OVERCAST_DAY: "阴天",
+  STORM_NIGHT: "暴风雨夜",
+};
+
 // ===== 角色卡（三态：已生成 / 生成中 / 未生成）=====
 function CharacterCard({
   ch,
@@ -163,47 +177,47 @@ function CharacterCard({
           AI 生图
         </div>
       )}
-      {/* 主图：当前形象一张（对齐 LuxReal 一人一张图），点击进入详情看多形象 */}
+      {/* 形象名条（图片上方，点击切换不同形象，对齐 LuxReal） */}
+      {variants.length > 0 && (
+        <div className="px-3 pb-2 flex items-center gap-1.5 flex-wrap">
+          {variants.map((v) => (
+            <button
+              key={v.id}
+              onClick={() => setActiveVariantId(v.id === activeVariantId ? null : v.id)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] whitespace-nowrap border transition-colors ${
+                activeVariantId === v.id
+                  ? "border-[#4C7FF8] bg-[#4C7FF8]/10 text-white"
+                  : "border-[#2A2A35] bg-[#16161C] text-[#8B8B9A] hover:border-[#3A3A4A]"
+              }`}
+            >
+              {v.main_image_url && <img src={v.main_image_url} alt="" className="w-4 h-4 rounded object-cover" />}
+              {v.name || `形象${v.id}`}
+            </button>
+          ))}
+        </div>
+      )}
+      {/* 主图：16:9 完整显示三视图（对齐 LuxReal 一人一张图），点击进入详情看多形象 */}
       <div className="px-3 pb-3">
         {done && currentImg ? (
-          <div className="aspect-[3/4] rounded-lg overflow-hidden relative cursor-pointer" onClick={() => onOpenDialog(ch)}>
-            <img src={currentImg} alt={currentName} className="absolute inset-0 w-full h-full object-cover" />
+          <div className="aspect-video rounded-lg overflow-hidden relative cursor-pointer bg-[#16161C]" onClick={() => onOpenDialog(ch)}>
+            <img src={currentImg} alt={currentName} className="absolute inset-0 w-full h-full object-contain" />
             {/* 当前形象名 */}
             <div className="absolute top-1 left-1 right-1 text-[10px] text-white/90 text-center bg-black/45 rounded px-1 py-0.5">
               {currentName}
             </div>
           </div>
         ) : running ? (
-          <div className="aspect-[3/4] rounded-lg char-silhouette overflow-hidden relative">
+          <div className="aspect-video rounded-lg char-silhouette overflow-hidden relative">
             <div className="absolute inset-0 flex items-center justify-center">
               <User size={32} className="text-[#8B5CF8]/30" />
             </div>
           </div>
         ) : (
           <div
-            className="aspect-[3/4] rounded-lg bg-[#1A1A24] border border-dashed border-[#2A2A35] flex items-center justify-center cursor-pointer hover:border-[#4C7FF8]/50 transition-colors"
+            className="aspect-video rounded-lg bg-[#1A1A24] border border-dashed border-[#2A2A35] flex items-center justify-center cursor-pointer hover:border-[#4C7FF8]/50 transition-colors"
             onClick={onRegen}
           >
             <Plus size={20} className="text-[#3A3A4A]" />
-          </div>
-        )}
-        {/* 形象名条：图片上方展示形象名，点击切换（多形象时显示） */}
-        {variants.length > 0 && (
-          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-            {variants.map((v) => (
-              <button
-                key={v.id}
-                onClick={() => setActiveVariantId(v.id === activeVariantId ? null : v.id)}
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] whitespace-nowrap border transition-colors ${
-                  activeVariantId === v.id
-                    ? "border-[#4C7FF8] bg-[#4C7FF8]/10 text-white"
-                    : "border-[#2A2A35] bg-[#16161C] text-[#8B8B9A] hover:border-[#3A3A4A]"
-                }`}
-              >
-                {v.main_image_url && <img src={v.main_image_url} alt="" className="w-4 h-4 rounded object-cover" />}
-                {v.name || `形象${v.id}`}
-              </button>
-            ))}
           </div>
         )}
       </div>
@@ -256,13 +270,21 @@ function SceneCard({
   const running = isRunning(sc.generation_status);
   const done = sc.generation_status === "SUCCESS";
   const Icon = SCENE_ICONS[index % SCENE_ICONS.length];
+  // 场景时段变体（对齐 LuxReal 场景日夜多态）：可切换不同时段主图
+  const todVariants = sc.tod_variants ?? [];
+  const [activeTod, setActiveTod] = useState<number | null>(null);
+  const todVariant = activeTod != null ? todVariants[activeTod] ?? null : null;
+  const curImg = todVariant?.url || sc.main_image_url || "";
+  const curTod = todVariant ? (SCENE_TOD_LABEL[todVariant.time_of_day] || todVariant.time_of_day) : "主图";
   return (
     <div className="bg-[#1E1E24] rounded-xl border border-[#2A2A35] overflow-hidden hover:border-[#3A3A4A] transition-colors cursor-pointer">
       {/* Scene Image (16:9) */}
-      {done && sc.main_image_url ? (
+      {done && curImg ? (
         <div className="aspect-video relative overflow-hidden" onClick={() => onOpenDialog(sc)}>
-          <img src={sc.main_image_url} alt={sc.base_name} className="absolute inset-0 w-full h-full object-cover" />
+          <img src={curImg} alt={sc.base_name} className="absolute inset-0 w-full h-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent"></div>
+          {/* 当前时段标签 */}
+          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/50 text-white text-[10px]">{curTod}</div>
         </div>
       ) : (
         <div className="aspect-video scene-placeholder relative overflow-hidden">
@@ -282,14 +304,25 @@ function SceneCard({
         </div>
       )}
       <div className="p-3">
-        {/* 3D Studio Button */}
-        <button
-          onClick={() => toast.info("3D 片场为 Beta 功能，将在后续版本开放")}
-          className="w-full flex items-center justify-center gap-1.5 text-xs bg-[#4C7FF8]/10 text-[#4C7FF8] rounded-lg px-2 py-1.5 hover:bg-[#4C7FF8]/20 transition-colors mb-2"
-        >
-          <Box size={14} />
-          生成3D片场
-        </button>
+        {/* 场景时段变体条：点击切换不同时段主图 */}
+        {todVariants.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap mb-2">
+            {todVariants.map((v, i) => (
+              <button
+                key={v.time_of_day}
+                onClick={() => setActiveTod(i === activeTod ? null : i)}
+                className={`px-2 py-1 rounded-md text-[10px] border transition-colors ${
+                  activeTod === i
+                    ? "border-[#4C7FF8] bg-[#4C7FF8]/10 text-white"
+                    : "border-[#2A2A35] bg-[#16161C] text-[#8B8B9A] hover:border-[#3A3A4A]"
+                }`}
+              >
+                {SCENE_TOD_LABEL[v.time_of_day] || v.time_of_day}
+              </button>
+            ))}
+          </div>
+        )}
+        {/* 3D Studio Button —— 已隐藏（Beta 功能暂缓，需求：暂时移除该入口） */}
         {/* Action Buttons */}
         <div className="flex items-center gap-1.5 mb-2">
           <button
@@ -714,6 +747,7 @@ export default function Step2Page() {
         episode_id: activeEpisode,
         items,
         model_code: batchModel || undefined,
+        style_name: batchStyle || undefined,
         per_asset_count: batchCount,
       });
       toast.success(`已提交 ${data.created} 个生成任务`);
@@ -998,7 +1032,7 @@ export default function Step2Page() {
             key={key}
             disabled={disabled}
             onClick={() => !disabled && setTab(key as TabKey)}
-            title={disabled ? "后续版本开放" : undefined}
+            title={disabled ? "后续版本开放" : key === "shots" ? "智能镜头（HeroShotGroup 预制镜头方案）待开发，当前为镜头状态只读汇总" : undefined}
             className={`px-4 py-3 text-sm border-b-2 transition-colors ${
               disabled
                 ? "text-[#3A3A4A] border-transparent cursor-not-allowed"
@@ -1008,6 +1042,11 @@ export default function Step2Page() {
             }`}
           >
             {label}
+            {key === "shots" && (
+              <span className="ml-1.5 text-[9px] px-1 py-0.5 rounded align-middle" style={{ background: "rgba(245,178,60,0.15)", color: "#F5B23C" }}>
+                待开发
+              </span>
+            )}
           </button>
         ))}
       </div>

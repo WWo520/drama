@@ -3,7 +3,9 @@
 param([string]$Role = "api")
 
 # 模型密钥加密主密钥：与 Worker 侧保持一致（从仓库根 .env 读取，缺失则回退 JWT_SECRET）
-$rootEnv = Join-Path $PSScriptRoot "..\.env"
+# 用 $PSCommandPath 定位脚本目录（$PSScriptRoot 在部分宿主环境可能为 NULL）
+$scriptDir = Split-Path -Parent $PSCommandPath
+$rootEnv = Join-Path $scriptDir "..\.env"
 if (Test-Path $rootEnv) {
   $line = Select-String -Path $rootEnv -Pattern "^MODEL_KEY_ENC_SECRET=(.+)$" | Select-Object -First 1
   if ($line) { $env:MODEL_KEY_ENC_SECRET = $line.Matches[0].Groups[1].Value.Trim() }
@@ -20,7 +22,7 @@ $env:S3_SECRET_KEY = "duanju_dev_pwd"
 $env:S3_BUCKET = "duanju"
 $env:S3_USE_SSL = "false"
 
-Set-Location "$PSScriptRoot\..\duanju-backend"
+Set-Location "$scriptDir\..\duanju-backend"
 
 if ($Role -eq "worker") {
     go run ./cmd/worker -role split

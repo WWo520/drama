@@ -18,7 +18,11 @@ type fakeVideoStore struct {
 	saves            map[int64]string // shotID → videoURL
 	shots            map[int64]*ShotInfo
 	doneShotGroupIDs []int64
-	progress         []struct{ TaskID int64; Pct int; Msg string }
+	progress         []struct {
+		TaskID int64
+		Pct    int
+		Msg    string
+	}
 }
 
 func newFakeVideoStore() *fakeVideoStore {
@@ -43,6 +47,17 @@ func (f *fakeVideoStore) LoadShot(_ context.Context, shotID int64) (*ShotInfo, e
 // LoadShotRefs 测试桩（F10：参考图列表为空）。
 func (f *fakeVideoStore) LoadShotRefs(_ context.Context, _ int64, _ int64) ([]string, error) {
 	return nil, nil
+}
+
+// LoadShotRefAssets 测试桩（参考资产配对；默认无关联资产）。
+func (f *fakeVideoStore) LoadShotRefAssets(_ context.Context, _ int64, _ int64) []RefAsset {
+	return nil
+}
+
+// ConcatShotGroup 测试桩（镜头块拼接）。
+func (f *fakeVideoStore) ConcatShotGroup(_ context.Context, shotGroupID int64) error {
+	f.doneShotGroupIDs = append(f.doneShotGroupIDs, shotGroupID)
+	return nil
 }
 
 func (f *fakeVideoStore) SaveShotVideo(_ context.Context, shotID int64, videoURL string, _ int, _ int64) error {
@@ -78,10 +93,12 @@ func (f *fakeVideoStore) UpdateShotGroupStatus(_ context.Context, shotGroupID in
 
 func shotTask(shotID int64) *task.Task {
 	return &task.Task{
-		ID:                shotID,
-		TaskType:          "VIDEO_SEGMENT_GEN",
+		ID:       shotID,
+		TaskType: "VIDEO_SEGMENT_GEN",
 		RequestParamsJSON: []byte(`{"shot_id":` + func() string {
-			if shotID == 0 { return "0" }
+			if shotID == 0 {
+				return "0"
+			}
 			return fmt.Sprintf("%d", shotID)
 		}() + `}`),
 	}

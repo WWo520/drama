@@ -67,13 +67,17 @@ export interface GenParams {
   resolution?: string;
   use_default_composition?: boolean;
   ref_image_urls?: string[];
+  // 场景时段/天气（场景日夜变体）
+  time_of_day?: string;
+  weather?: string;
 }
 
 export interface BatchGenerateReq {
   episode_id: string;
   items: { kind: "CHARACTER_VARIANT" | "SCENE" | "PROP"; target_id: number; gen?: GenParams }[];
-  // 批量弹窗顶层参数：选中的图片模型 / 每个资产生成张数（≥1）
+  // 批量弹窗顶层参数：选中的图片模型 / 公共风格（27 项风格库）/ 每个资产生成张数（≥1）
   model_code?: string;
+  style_name?: string;
   per_asset_count?: number;
 }
 

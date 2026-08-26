@@ -108,6 +108,7 @@ func (s *StoryboardService) listShotsOfGroup(c *gin.Context, groupID int64) []ma
 	}
 	defer rows.Close()
 	out := make([]map[string]any, 0)
+	ids := make([]int64, 0, 4)
 	for rows.Next() {
 		var id int64
 		var shotUUID, size, move, angle, subj, bg, light, dialog, sound, prompt, vStatus, vURL string
@@ -122,7 +123,24 @@ func (s *StoryboardService) listShotsOfGroup(c *gin.Context, groupID int64) []ma
 			"local_light_description": light, "dialogue_text": dialog,
 			"ambient_sound": sound, "prompt_refined": prompt,
 			"video_generation_status": vStatus, "generated_video_url": vURL,
+			"_shot_numeric_id": id,
 		})
+		ids = append(ids, id)
+	}
+	// 附带每镜头关联资产（分镜脚本视图资产小图与 @ 引用；失败不阻断）
+	if refs, rerr := s.repo.ShotAssetRefsByIDs(c.Request.Context(), ids); rerr == nil {
+		for _, m := range out {
+			if id, ok := m["_shot_numeric_id"].(int64); ok {
+				if la := refs[id]; len(la) > 0 {
+					m["linked_assets"] = la
+				}
+			}
+			delete(m, "_shot_numeric_id")
+		}
+	} else {
+		for _, m := range out {
+			delete(m, "_shot_numeric_id")
+		}
 	}
 	return out
 }
@@ -673,7 +691,9 @@ func (s *StoryboardService) VideoTTS(c *gin.Context, videoUUID string) {
 
 // EpisodeAssetLinks GET /episodes/:episode_id/asset-links（17 - 工作台对齐）。
 // 返回剧集下各叙事单元的关联资产清单（nu_asset_links JOIN 名称/参考图/生成状态），
-// 供 Step3「关联资产」名称占位展示与单元级就绪度判断；JOIN 口径与 LoadShotRefs 一致。
+// 供 Step3「关联资产」名称占位展示与单元级就绪度判断。
+// 取图口径（业务表，与 LoadShotRefs 一致）：角色→首个变体、场景/道具→自身 main_image_url；
+// assets 表为通用注册表（无 main_image_url 列），不可作取图来源。
 func (s *StoryboardService) EpisodeAssetLinks(c *gin.Context, epUUID string) {
 	uid := userID(c)
 	if uid == 0 {
@@ -686,17 +706,25 @@ func (s *StoryboardService) EpisodeAssetLinks(c *gin.Context, epUUID string) {
 		return
 	}
 	rows, err := s.repo.pool.Query(c.Request.Context(), `
-		SELECT nu.nu_uuid::text, nal.asset_kind::text, nal.asset_id,
-		       COALESCE(ch.name, sc.base_name, p.name, ''),
-		       COALESCE(a.main_image_url, ''), COALESCE(a.generation_status::text, '')
-		FROM nu_asset_links nal
-		JOIN narrative_units nu ON nu.id = nal.narrative_unit_id AND nu.deleted_at IS NULL
-		LEFT JOIN characters ch ON nal.asset_kind = 'CHARACTER' AND nal.asset_id = ch.id
-		LEFT JOIN scenes sc ON nal.asset_kind = 'SCENE' AND nal.asset_id = sc.id
-		LEFT JOIN props p ON nal.asset_kind = 'PROP' AND nal.asset_id = p.id
-		LEFT JOIN assets a ON a.id = COALESCE(ch.asset_id, sc.asset_id, p.asset_id)
+		SELECT nu.nu_uuid::text, t.kind, t.asset_id, t.name, t.main_image_url, t.generation_status
+		FROM (
+			SELECT nal.narrative_unit_id, nal.asset_kind::text AS kind, nal.asset_id,
+			       COALESCE(c.name, sc.base_name, p.name, '') AS name,
+			       COALESCE(cv.main_image_url, sc.main_image_url, p.main_image_url, '') AS main_image_url,
+			       COALESCE(cv.generation_status, sc.generation_status::text, p.generation_status::text, '') AS generation_status,
+			       CASE nal.asset_kind WHEN 'CHARACTER' THEN 1 WHEN 'SCENE' THEN 2 ELSE 3 END AS ord, nal.id AS rid
+			FROM nu_asset_links nal
+			LEFT JOIN characters c ON nal.asset_kind='CHARACTER' AND c.id=nal.asset_id AND c.deleted_at IS NULL
+			LEFT JOIN LATERAL (
+			    SELECT main_image_url, generation_status::text AS generation_status
+			    FROM character_variants WHERE character_id=c.id AND deleted_at IS NULL ORDER BY id LIMIT 1
+			) cv ON TRUE
+			LEFT JOIN scenes sc ON nal.asset_kind='SCENE' AND sc.id=nal.asset_id AND sc.deleted_at IS NULL
+			LEFT JOIN props p ON nal.asset_kind='PROP' AND p.id=nal.asset_id AND p.deleted_at IS NULL
+		) t
+		JOIN narrative_units nu ON nu.id = t.narrative_unit_id AND nu.deleted_at IS NULL
 		WHERE nu.episode_id = $1
-		ORDER BY nu.sort_order ASC, nal.id ASC`, epID)
+		ORDER BY nu.sort_order ASC, t.ord, t.rid`, epID)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取关联资产失败")
 		return

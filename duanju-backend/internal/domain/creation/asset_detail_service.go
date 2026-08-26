@@ -95,7 +95,7 @@ func (s *AssetDetailService) VariantDetail(c *gin.Context, variantIDStr string) 
 	if err := s.repo.pool.QueryRow(c.Request.Context(), `
 		SELECT cv.id, cv.character_id, ch.project_id, COALESCE(cv.variant_name,''),
 		       COALESCE(cv.variant_type::text,''), COALESCE(cv.clothing_desc,''),
-		       COALESCE(cv.main_image_url,''), COALESCE(cv.multi_view_images_json::text,'[]'),
+		       COALESCE(cv.main_image_url,''), COALESCE(CASE WHEN jsonb_typeof(cv.multi_view_images_json)='array' THEN cv.multi_view_images_json::text ELSE '[]' END),
 		       COALESCE(cv.image_resolution,''), COALESCE(cv.aspect_ratio,''),
 		       COALESCE(cv.generation_status::text,''), COALESCE(cv.point_cost,0)
 		FROM character_variants cv JOIN characters ch ON ch.id=cv.character_id
@@ -116,6 +116,116 @@ func (s *AssetDetailService) VariantDetail(c *gin.Context, variantIDStr string) 
 		"image_resolution": res, "aspect_ratio": aspect,
 		"generation_status": status, "point_cost": pointCost,
 	})
+}
+
+// ---- 未命名形象 对齐 LuxReal：形象删除 & 多视图管理 ----
+
+// variantForMut 解析形象变体 → (variantID, projectID)，供删除/视图操作做权限校验前置。
+func (s *AssetDetailService) variantForMut(ctx context.Context, variantIDStr string) (int64, int64, error) {
+	var variantID, projectID int64
+	err := s.repo.pool.QueryRow(ctx, `
+		SELECT cv.id, ch.project_id FROM character_variants cv
+		JOIN characters ch ON ch.id=cv.character_id
+		WHERE cv.id=$1 AND cv.deleted_at IS NULL`, variantIDStr).Scan(&variantID, &projectID)
+	return variantID, projectID, err
+}
+
+// readVariantViews 读取形象多视图数组（multi_view_images_json）。
+func (s *AssetDetailService) readVariantViews(ctx context.Context, variantID int64) []string {
+	var raw string
+	_ = s.repo.pool.QueryRow(ctx, `
+		SELECT COALESCE(multi_view_images_json::text,'[]') FROM character_variants WHERE id=$1`, variantID).Scan(&raw)
+	var views []string
+	if json.Unmarshal([]byte(raw), &views) != nil {
+		return []string{}
+	}
+	return views
+}
+
+// saveVariantViews 写回形象多视图数组。
+func (s *AssetDetailService) saveVariantViews(ctx context.Context, variantID int64, views []string) error {
+	out, _ := json.Marshal(views)
+	_, err := s.repo.pool.Exec(ctx, `
+		UPDATE character_variants SET multi_view_images_json=$1::jsonb, updated_at=NOW() WHERE id=$2`, string(out), variantID)
+	return err
+}
+
+// DeleteCharacterVariant DELETE /character-variants/:variant_id：删除形象（软删，对齐 LuxReal「删除形象」）。
+func (s *AssetDetailService) DeleteCharacterVariant(c *gin.Context, variantIDStr string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	variantID, projectID, err := s.variantForMut(c.Request.Context(), variantIDStr)
+	if err != nil || s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid) != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "形象不存在")
+		return
+	}
+	if _, err := s.repo.pool.Exec(c.Request.Context(), `
+		UPDATE character_variants SET deleted_at=NOW(), updated_at=NOW() WHERE id=$1`, variantID); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "删除形象失败")
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// AddVariantView POST /character-variants/:variant_id/views：新增形象视图（对齐 LuxReal「新增视图」）。
+func (s *AssetDetailService) AddVariantView(c *gin.Context, variantIDStr string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	variantID, projectID, err := s.variantForMut(c.Request.Context(), variantIDStr)
+	if err != nil || s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid) != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "形象不存在")
+		return
+	}
+	var req struct {
+		ImageURL string `json:"image_url" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误：image_url 必填")
+		return
+	}
+	views := s.readVariantViews(c.Request.Context(), variantID)
+	views = append(views, req.ImageURL)
+	if err := s.saveVariantViews(c.Request.Context(), variantID, views); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "新增视图失败")
+		return
+	}
+	httpx.OK(c, gin.H{"multi_view_images": views})
+}
+
+// DeleteVariantView DELETE /character-variants/:variant_id/views/:index：删除指定视图。
+func (s *AssetDetailService) DeleteVariantView(c *gin.Context, variantIDStr, indexStr string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	variantID, projectID, err := s.variantForMut(c.Request.Context(), variantIDStr)
+	if err != nil || s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid) != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "形象不存在")
+		return
+	}
+	idx, err := strconv.Atoi(indexStr)
+	if err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误：index 非法")
+		return
+	}
+	views := s.readVariantViews(c.Request.Context(), variantID)
+	if idx < 0 || idx >= len(views) {
+		httpx.OK(c, gin.H{"multi_view_images": views})
+		return
+	}
+	views = append(views[:idx], views[idx+1:]...)
+	if err := s.saveVariantViews(c.Request.Context(), variantID, views); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "删除视图失败")
+		return
+	}
+	httpx.OK(c, gin.H{"multi_view_images": views})
 }
 
 // ---- 3.2.11 修改场景描述 ----

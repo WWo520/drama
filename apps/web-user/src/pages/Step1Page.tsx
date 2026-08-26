@@ -263,6 +263,22 @@ export default function Step1Page() {
   };
 
   const splittingNow = proj?.status === "SCRIPT_SPLITTING";
+
+  // 拆分等待动画（需求1.1）：LLM 单次调用无真实进度，确定性缓动 5%→95% + 阶段文案轮换。
+  // 拆分结束（splittingNow 变 false）时组件卸载，叙事单元卡片自然接管展示。
+  const [splitPct, setSplitPct] = useState(5);
+  const splitPhase = splitPct < 25 ? "读取剧本原文" : splitPct < 55 ? "AI 分析剧情结构" : splitPct < 85 ? "划分叙事单元与镜头" : "润色分镜提示词";
+  useEffect(() => {
+    if (!splittingNow) return;
+    let cur = 5;
+    setSplitPct(cur);
+    const timer = setInterval(() => {
+      const delta = Math.max(0.3, (95 - cur) * 0.04);
+      cur = Math.min(95, cur + delta);
+      setSplitPct(Math.round(cur));
+    }, 400);
+    return () => clearInterval(timer);
+  }, [splittingNow]);
   const isDraft = proj?.status === "DRAFT";
   const splitFailed = proj?.status === "SCRIPT_SPLIT_FAILED";
   // 可重新拆分阶段：拆分成功后的资产阶段（后端状态机限定；视频阶段后不可重拆）
@@ -393,13 +409,23 @@ export default function Step1Page() {
             </div>
           )}
 
-          {/* 拆分中状态卡 */}
+          {/* 拆分中状态卡：动态百分比进度条（SCRIPT_SPLIT 为 LLM 单次调用无真实进度，
+              采用确定性缓动动画：5% → 95% 逼近，完成跳 100%；阶段文案随进度轮换） */}
           {splittingNow && (
             <div className="unit-card rounded-2xl overflow-hidden">
               <div className="px-5 py-4">
-                <div className="flex items-center gap-2 text-xs" style={{ color: "#4C7FF8" }}>
-                  <Loader2 size={14} className="animate-spin" />
-                  正在拆解剧本《{proj?.title ?? ""}》，AI 分析剧情结构中，预计 30s…
+                <div className="flex items-center justify-between text-xs" style={{ color: "#4C7FF8" }}>
+                  <div className="flex items-center gap-2">
+                    <Loader2 size={14} className="animate-spin" />
+                    正在拆解剧本《{proj?.title ?? ""}》 · {splitPhase}…
+                  </div>
+                  <span className="tabular-nums" style={{ color: "#8B8B9A" }}>{splitPct}%</span>
+                </div>
+                <div className="asset-progress" style={{ marginTop: 12 }}>
+                  <div
+                    className="asset-progress-bar"
+                    style={{ width: `${splitPct}%`, right: "auto", animation: "none", transition: "width 0.35s cubic-bezier(0.4, 0, 0.2, 1)" }}
+                  />
                 </div>
                 <div className="mt-4 space-y-2">
                   {[0, 1, 2].map((i) => (

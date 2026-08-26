@@ -284,6 +284,9 @@ func (h *Handler) registerExtraRoutes(rg *gin.RouterGroup, extra *ExtraServices,
 	// ---- 角色/场景/道具/资产/剧集 ----
 	rg.PATCH("/characters/:character_id", func(c *gin.Context) { extra.AssetDetail.UpdateCharacter(c, c.Param("character_id")) })
 	rg.GET("/character-variants/:variant_id", func(c *gin.Context) { extra.AssetDetail.VariantDetail(c, c.Param("variant_id")) })
+	rg.DELETE("/character-variants/:variant_id", func(c *gin.Context) { extra.AssetDetail.DeleteCharacterVariant(c, c.Param("variant_id")) })
+	rg.POST("/character-variants/:variant_id/views", func(c *gin.Context) { extra.AssetDetail.AddVariantView(c, c.Param("variant_id")) })
+	rg.DELETE("/character-variants/:variant_id/views/:index", func(c *gin.Context) { extra.AssetDetail.DeleteVariantView(c, c.Param("variant_id"), c.Param("index")) })
 	rg.PATCH("/scenes/:scene_id", func(c *gin.Context) { extra.AssetDetail.UpdateScene(c, c.Param("scene_id")) })
 	rg.PATCH("/props/:prop_id", func(c *gin.Context) { extra.AssetDetail.UpdateProp(c, c.Param("prop_id")) })
 	epGroup := rg.Group("/episodes")
@@ -356,9 +359,11 @@ func (h *Handler) registerExtraRoutes(rg *gin.RouterGroup, extra *ExtraServices,
 		admX.GET("/providers", extra.AdminExtra.ModelProvidersList)
 		admX.POST("/providers", extra.AdminExtra.ModelProviderCreate)
 		admX.PUT("/providers/:provider_id", func(c *gin.Context) { extra.AdminExtra.ModelProviderUpdate(c, c.Param("provider_id")) })
-		admX.GET("/model-list", extra.AdminExtra.ModelListAdmin)   // 11.39 模型列表（含厂商）
-		admX.POST("/model-create", extra.AdminExtra.ModelCreate)   // 新建模型
-		admX.GET("/model-key-list", extra.AdminExtra.ModelKeyList) // 11.43 密钥列表（隐藏密文）
+		admX.DELETE("/providers/:provider_id", func(c *gin.Context) { extra.AdminExtra.ModelProviderDelete(c, c.Param("provider_id")) }) // 删除厂商（级联软删模型与密钥）
+		admX.GET("/model-list", extra.AdminExtra.ModelListAdmin)                                                                         // 11.39 模型列表（含厂商）
+		admX.POST("/model-create", extra.AdminExtra.ModelCreate)                                                                         // 新建模型
+		admX.DELETE("/model-delete/:model_id", func(c *gin.Context) { extra.AdminExtra.ModelDelete(c, c.Param("model_id")) })            // 删除模型（软删除）
+		admX.GET("/model-key-list", extra.AdminExtra.ModelKeyList)                                                                       // 11.43 密钥列表（隐藏密文）
 		admX.POST("/model-key-create", extra.AdminExtra.ModelKeyCreate)
 		admX.PUT("/model-key-update/:key_id", func(c *gin.Context) { extra.AdminExtra.ModelKeyUpdate(c, c.Param("key_id")) })
 		admX.POST("/model-key-revoke/:key_id", func(c *gin.Context) { extra.AdminExtra.ModelKeyRevoke(c, c.Param("key_id")) })

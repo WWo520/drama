@@ -85,17 +85,18 @@ type ShotGroup struct {
 }
 
 type Shot struct {
-	DurationSec           FlexInt `json:"duration_sec"`
-	ShotSize              string  `json:"shot_size"`
-	CameraMovement        string  `json:"camera_movement"`
-	CameraAngle           string  `json:"camera_angle"`
-	SubjectDescription    string  `json:"subject_description"`
-	BackgroundDescription string  `json:"background_description"`
-	LocalLightDescription string  `json:"local_light_description"`
-	DialogueText          string  `json:"dialogue_text"`
-	AmbientSound          string  `json:"ambient_sound"`
-	PromptRefined         string  `json:"prompt_refined,omitempty"`
-	ReferenceImageURL     string  `json:"reference_image_url,omitempty"` // 镜头级参考图（对齐 LuxReal「镜头N的参考图」）
+	DurationSec           FlexInt  `json:"duration_sec"`
+	ShotSize              string   `json:"shot_size"`
+	CameraMovement        string   `json:"camera_movement"`
+	CameraAngle           string   `json:"camera_angle"`
+	SubjectDescription    string   `json:"subject_description"`
+	BackgroundDescription string   `json:"background_description"`
+	LocalLightDescription string   `json:"local_light_description"`
+	DialogueText          string   `json:"dialogue_text"`
+	AmbientSound          string   `json:"ambient_sound"`
+	PromptRefined         string   `json:"prompt_refined,omitempty"`
+	ReferenceImageURL     string   `json:"reference_image_url,omitempty"` // 镜头级参考图（对齐 LuxReal「镜头N的参考图」）
+	RefAssetNames         []string `json:"ref_assets,omitempty"`          // 镜头显式引用资产名（对齐 LuxReal shots.ref_assets @引用列表）
 }
 
 // 镜头枚举 → 中文（对齐 LuxReal：分镜提示词为中文；用于润色 seed 与 LLM 失败回退）。

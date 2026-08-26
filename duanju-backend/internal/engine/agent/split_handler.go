@@ -76,7 +76,7 @@ const splitSystemPrompt = `你是短剧分镜拆解专家。将用户提供的�
 7. shot_size 仅限 ECU/CU/MCU/MS/FS/LS/ELS/TWO_SHOT/OTS；
 8. camera_movement 仅限 STATIC/SLOW_PUSH_IN/SLOW_PULL_OUT/FAST_PUSH_IN/DOLLY_IN/DOLLY_OUT/PAN_LEFT/PAN_RIGHT/TRACK_LEFT/TRACK_RIGHT/TILT_UP/TILT_DOWN/CRANE_UP/CRANE_DOWN/HANDHELD_SHAKY/WIPE_CLIP/ZOOM_IN_OPTICAL/SLOW_360_ORBIT；
 9. camera_angle 仅限 EYE_LEVEL_FRONT/SIDE/BACK/SLIGHT_LOW_ANGLE/LOW_ANGLE/SLIGHT_HIGH/HIGH_BIRDVIEW/OTS_LEFT/OTS_RIGHT/DUTCH_ANGLE；
-10. 角色≤6 人、场景≤8 个；scenes 每项 code/base_name、props 每项 code/name 均不得为空；
+10. 角色≤6 人、场景≤8 个；scenes 每项 code/base_name、props 每项 code/name 均不得为空；scenes 的 base_name 必须为 2~6 字场景简称（如"公寓"、"办公室"、"古玩街"，须与剧本中的地点称呼一致），禁止写成短语或长句描述（详细环境描述只写进 base_prompt）；
 11. 角色/场景/道具按集抽取：每项必须携带 origin_episode_id（首次出现集数的 1-based 序号），不区分叙事单元；category 仅限 WEAPON/CLOTHING_ACCESSORY/FOOD_DRINK/STATIONERY_BOOK/JEWELRY_ORNAMENT/FURNITURE_DECOR/ELECTRONIC_APPLIANCE/VEHICLE/TOOL_MUSICAL_INSTRUMENT/TOY/PLANT_FLOWER/ANIMAL_PET/LIGHTING_SOURCE/DOCUMENT_SCROLL_MAP/FLAG_BANNER/OTHER；
 12. 只输出合法 JSON，不要任何解释文字。`
 
@@ -92,7 +92,7 @@ const polishSystemPrompt = `你是资深短剧分镜与视频提示词专家。�
 【光影】...
 【台词】...（无台词填"无"）
 【音效】<...>（无音效填"无"）
-要求：主体描述包含人物动作/表情/道具互动细节；光影细化光线方向与明暗对比；忠于给定景别/运镜/视角；台词保留角色名。`
+要求：主体描述包含人物动作/表情/道具互动细节；光影细化光线方向与明暗对比；忠于给定景别/运镜/视角；台词保留角色名；主体/背景中出现的角色名、场景名、道具名保持原文，不得改写或省略（供参考图引用匹配）。`
 
 // LLMClient 拆分/润色所需的模型能力（由 ModelEngine 实现注入）。
 type LLMClient interface {

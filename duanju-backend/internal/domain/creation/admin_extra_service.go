@@ -21,8 +21,10 @@ type ModelConfigStore interface {
 	ListProviders(ctx context.Context) ([]map[string]any, error)
 	CreateProvider(ctx context.Context, name, displayName string, capabilities []string, baseURL string, enabled bool) (int64, error)
 	UpdateProvider(ctx context.Context, id int64, displayName string, capabilities []string, baseURL string, enabled bool) error
+	DeleteProvider(ctx context.Context, id int64) error
 	CreateModel(ctx context.Context, providerID int64, modelKey, name, capability string, costPoints int, enabled bool) (int64, error)
 	UpdateModelByKey(ctx context.Context, modelKey, name, capability string, costPoints int, enabled bool) error
+	DeleteModel(ctx context.Context, id int64) error
 	CreateModelKey(ctx context.Context, providerID int64, name, apiKey string, rpm, qps, concurrent int, enabled bool, priority int) (int64, string, error)
 	UpdateModelKey(ctx context.Context, id int64, rpm, qps, concurrent int, enabled bool, priority int) error
 	RevokeModelKey(ctx context.Context, id int64) error
@@ -50,25 +52,25 @@ func (s *AdminExtraService) adminList(c *gin.Context, table, orderBy string) {
 	// 表名白名单：静态 SQL 硬编码，拒绝一切动态拼接
 	staticSQL := map[string]struct{ count, list string }{
 		"marketing_activities": {`SELECT count(*) FROM marketing_activities`, `SELECT to_jsonb(t) FROM marketing_activities t ORDER BY id DESC LIMIT $1 OFFSET $2`},
-		"agent_memory":        {`SELECT count(*) FROM agent_memory`, `SELECT to_jsonb(t) FROM agent_memory t ORDER BY id DESC LIMIT $1 OFFSET $2`},
-		"categories":          {`SELECT count(*) FROM categories`, `SELECT to_jsonb(t) FROM categories t ORDER BY sort_order ASC, id ASC LIMIT $1 OFFSET $2`},
-		"courses":             {`SELECT count(*) FROM courses`, `SELECT to_jsonb(t) FROM courses t ORDER BY sort_order ASC, id ASC LIMIT $1 OFFSET $2`},
-		"directive_skills":    {`SELECT count(*) FROM directive_skills`, `SELECT to_jsonb(t) FROM directive_skills t ORDER BY id ASC LIMIT $1 OFFSET $2`},
-		"languages":           {`SELECT count(*) FROM languages`, `SELECT to_jsonb(t) FROM languages t ORDER BY id ASC LIMIT $1 OFFSET $2`},
-		"task_queues":         {`SELECT count(*) FROM task_queues`, `SELECT to_jsonb(t) FROM task_queues t ORDER BY id ASC LIMIT $1 OFFSET $2`},
-		"rate_limits":         {`SELECT count(*) FROM rate_limits`, `SELECT to_jsonb(t) FROM rate_limits t ORDER BY id ASC LIMIT $1 OFFSET $2`},
-		"themes":              {`SELECT count(*) FROM themes`, `SELECT to_jsonb(t) FROM themes t ORDER BY id ASC LIMIT $1 OFFSET $2`},
-		"think_levels":        {`SELECT count(*) FROM think_levels`, `SELECT to_jsonb(t) FROM think_levels t ORDER BY id ASC LIMIT $1 OFFSET $2`},
-		"model_keys":          {`SELECT count(*) FROM model_keys`, `SELECT to_jsonb(t) FROM model_keys t ORDER BY id ASC LIMIT $1 OFFSET $2`},
-		"model_providers":     {`SELECT count(*) FROM model_providers`, `SELECT to_jsonb(t) FROM model_providers t ORDER BY id ASC LIMIT $1 OFFSET $2`},
-		"platform_configs":    {`SELECT count(*) FROM platform_configs`, `SELECT to_jsonb(t) FROM platform_configs t ORDER BY id ASC LIMIT $1 OFFSET $2`},
-		"point_packages":      {`SELECT count(*) FROM point_packages`, `SELECT to_jsonb(t) FROM point_packages t ORDER BY sort_order ASC, id ASC LIMIT $1 OFFSET $2`},
-		"style_library":       {`SELECT count(*) FROM style_library`, `SELECT to_jsonb(t) FROM style_library t ORDER BY sort_order ASC, id ASC LIMIT $1 OFFSET $2`},
-		"hints":               {`SELECT count(*) FROM hints`, `SELECT to_jsonb(t) FROM hints t ORDER BY id ASC LIMIT $1 OFFSET $2`},
-		"announcements":       {`SELECT count(*) FROM announcements`, `SELECT to_jsonb(t) FROM announcements t ORDER BY id ASC LIMIT $1 OFFSET $2`},
-		"banners":             {`SELECT count(*) FROM banners`, `SELECT to_jsonb(t) FROM banners t ORDER BY id ASC LIMIT $1 OFFSET $2`},
-		"packages":            {`SELECT count(*) FROM packages`, `SELECT to_jsonb(t) FROM packages t ORDER BY id ASC LIMIT $1 OFFSET $2`},
-		"models":              {`SELECT count(*) FROM models`, `SELECT to_jsonb(t) FROM models t ORDER BY id ASC LIMIT $1 OFFSET $2`},
+		"agent_memory":         {`SELECT count(*) FROM agent_memory`, `SELECT to_jsonb(t) FROM agent_memory t ORDER BY id DESC LIMIT $1 OFFSET $2`},
+		"categories":           {`SELECT count(*) FROM categories`, `SELECT to_jsonb(t) FROM categories t ORDER BY sort_order ASC, id ASC LIMIT $1 OFFSET $2`},
+		"courses":              {`SELECT count(*) FROM courses`, `SELECT to_jsonb(t) FROM courses t ORDER BY sort_order ASC, id ASC LIMIT $1 OFFSET $2`},
+		"directive_skills":     {`SELECT count(*) FROM directive_skills`, `SELECT to_jsonb(t) FROM directive_skills t ORDER BY id ASC LIMIT $1 OFFSET $2`},
+		"languages":            {`SELECT count(*) FROM languages`, `SELECT to_jsonb(t) FROM languages t ORDER BY id ASC LIMIT $1 OFFSET $2`},
+		"task_queues":          {`SELECT count(*) FROM task_queues`, `SELECT to_jsonb(t) FROM task_queues t ORDER BY id ASC LIMIT $1 OFFSET $2`},
+		"rate_limits":          {`SELECT count(*) FROM rate_limits`, `SELECT to_jsonb(t) FROM rate_limits t ORDER BY id ASC LIMIT $1 OFFSET $2`},
+		"themes":               {`SELECT count(*) FROM themes`, `SELECT to_jsonb(t) FROM themes t ORDER BY id ASC LIMIT $1 OFFSET $2`},
+		"think_levels":         {`SELECT count(*) FROM think_levels`, `SELECT to_jsonb(t) FROM think_levels t ORDER BY id ASC LIMIT $1 OFFSET $2`},
+		"model_keys":           {`SELECT count(*) FROM model_keys`, `SELECT to_jsonb(t) FROM model_keys t ORDER BY id ASC LIMIT $1 OFFSET $2`},
+		"model_providers":      {`SELECT count(*) FROM model_providers`, `SELECT to_jsonb(t) FROM model_providers t ORDER BY id ASC LIMIT $1 OFFSET $2`},
+		"platform_configs":     {`SELECT count(*) FROM platform_configs`, `SELECT to_jsonb(t) FROM platform_configs t ORDER BY id ASC LIMIT $1 OFFSET $2`},
+		"point_packages":       {`SELECT count(*) FROM point_packages`, `SELECT to_jsonb(t) FROM point_packages t ORDER BY sort_order ASC, id ASC LIMIT $1 OFFSET $2`},
+		"style_library":        {`SELECT count(*) FROM style_library`, `SELECT to_jsonb(t) FROM style_library t ORDER BY sort_order ASC, id ASC LIMIT $1 OFFSET $2`},
+		"hints":                {`SELECT count(*) FROM hints`, `SELECT to_jsonb(t) FROM hints t ORDER BY id ASC LIMIT $1 OFFSET $2`},
+		"announcements":        {`SELECT count(*) FROM announcements`, `SELECT to_jsonb(t) FROM announcements t ORDER BY id ASC LIMIT $1 OFFSET $2`},
+		"banners":              {`SELECT count(*) FROM banners`, `SELECT to_jsonb(t) FROM banners t ORDER BY id ASC LIMIT $1 OFFSET $2`},
+		"packages":             {`SELECT count(*) FROM packages`, `SELECT to_jsonb(t) FROM packages t ORDER BY id ASC LIMIT $1 OFFSET $2`},
+		"models":               {`SELECT count(*) FROM models`, `SELECT to_jsonb(t) FROM models t ORDER BY id ASC LIMIT $1 OFFSET $2`},
 	}
 	q, ok := staticSQL[table]
 	if !ok {
@@ -98,7 +100,9 @@ func (s *AdminExtraService) adminList(c *gin.Context, table, orderBy string) {
 }
 
 // ---- 11.79 活动管理 ----
-func (s *AdminExtraService) Activities(c *gin.Context) { s.adminList(c, "marketing_activities", "id DESC") }
+func (s *AdminExtraService) Activities(c *gin.Context) {
+	s.adminList(c, "marketing_activities", "id DESC")
+}
 
 // ---- 11.61 智能体记忆管理 ----
 func (s *AdminExtraService) AgentMemory(c *gin.Context) {
@@ -192,7 +196,9 @@ func (s *AdminExtraService) AuthPermissions(c *gin.Context) {
 }
 
 // ---- 11.18 分类/标签列表 ----
-func (s *AdminExtraService) Categories(c *gin.Context) { s.adminList(c, "categories", "sort_order ASC, id ASC") }
+func (s *AdminExtraService) Categories(c *gin.Context) {
+	s.adminList(c, "categories", "sort_order ASC, id ASC")
+}
 
 // ---- 11.24 评论管理 ----
 func (s *AdminExtraService) Comments(c *gin.Context) {
@@ -227,7 +233,9 @@ func (s *AdminExtraService) Comments(c *gin.Context) {
 }
 
 // ---- 11.87 课程管理 ----
-func (s *AdminExtraService) Courses(c *gin.Context) { s.adminList(c, "courses", "sort_order ASC, id ASC") }
+func (s *AdminExtraService) Courses(c *gin.Context) {
+	s.adminList(c, "courses", "sort_order ASC, id ASC")
+}
 
 // ---- 11.1 平台概览 Dashboard 指标 ----
 func (s *AdminExtraService) DashboardSummary(c *gin.Context) {
@@ -246,7 +254,9 @@ func (s *AdminExtraService) DashboardSummary(c *gin.Context) {
 }
 
 // ---- 11.57 导演叙事技能库 ----
-func (s *AdminExtraService) DirectiveSkills(c *gin.Context) { s.adminList(c, "directive_skills", "id ASC") }
+func (s *AdminExtraService) DirectiveSkills(c *gin.Context) {
+	s.adminList(c, "directive_skills", "id ASC")
+}
 
 // ---- 11.69 多语言配置 ----
 func (s *AdminExtraService) Languages(c *gin.Context) { s.adminList(c, "languages", "id ASC") }
@@ -275,10 +285,14 @@ func (s *AdminExtraService) ModelKeys(c *gin.Context) {
 }
 
 // ---- 11.75 平台配置列表 ----
-func (s *AdminExtraService) PlatformConfig(c *gin.Context) { s.adminList(c, "platform_configs", "id ASC") }
+func (s *AdminExtraService) PlatformConfig(c *gin.Context) {
+	s.adminList(c, "platform_configs", "id ASC")
+}
 
 // ---- 11.30 积分包管理 ----
-func (s *AdminExtraService) PointPackages(c *gin.Context) { s.adminList(c, "point_packages", "sort_order ASC, id ASC") }
+func (s *AdminExtraService) PointPackages(c *gin.Context) {
+	s.adminList(c, "point_packages", "sort_order ASC, id ASC")
+}
 
 // ---- 11.35 模型厂商管理 ----
 func (s *AdminExtraService) Providers(c *gin.Context) { s.adminList(c, "model_providers", "id ASC") }
@@ -411,7 +425,9 @@ func (s *AdminExtraService) Trends(c *gin.Context) {
 }
 
 // ---- 11.53 风格库管理 ----
-func (s *AdminExtraService) StyleLibrary(c *gin.Context) { s.adminList(c, "style_library", "sort_order ASC, id ASC") }
+func (s *AdminExtraService) StyleLibrary(c *gin.Context) {
+	s.adminList(c, "style_library", "sort_order ASC, id ASC")
+}
 
 // ---- 11.65 界面主题配置 ----
 func (s *AdminExtraService) Themes(c *gin.Context) { s.adminList(c, "themes", "id ASC") }
@@ -442,7 +458,7 @@ func (s *AdminExtraService) UserDetail(c *gin.Context, userUUID string) {
 	httpx.OK(c, gin.H{
 		"user_uuid": userUUID, "nickname": nickname, "email": email, "phone": phone,
 		"status": status, "created_at": createdAt,
-		"points": gin.H{"current_balance": points, "frozen_balance": frozen},
+		"points":          gin.H{"current_balance": points, "frozen_balance": frozen},
 		"membership_plan": planCode,
 	})
 }
@@ -450,8 +466,8 @@ func (s *AdminExtraService) UserDetail(c *gin.Context, userUUID string) {
 // ---- 11.5 开通/变更用户会员套餐 ----
 func (s *AdminExtraService) UserMembership(c *gin.Context, userUUID string) {
 	var req struct {
-		PlanCode   string `json:"plan_code" binding:"required"`
-		Days       int    `json:"days" binding:"required,min=1,max=3650"`
+		PlanCode      string `json:"plan_code" binding:"required"`
+		Days          int    `json:"days" binding:"required,min=1,max=3650"`
 		RenewStrategy string `json:"renew_strategy"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -494,9 +510,9 @@ func (s *AdminExtraService) UserMembership(c *gin.Context, userUUID string) {
 func (s *AdminExtraService) UserPoints(c *gin.Context, userUUID string) {
 	uid := userID(c)
 	var req struct {
-		Amount  int    `json:"amount" binding:"required"`
-		Reason  string `json:"reason" binding:"required,min=1,max=200"`
-		Freeze  bool   `json:"freeze"`
+		Amount int    `json:"amount" binding:"required"`
+		Reason string `json:"reason" binding:"required,min=1,max=200"`
+		Freeze bool   `json:"freeze"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
@@ -772,6 +788,42 @@ func (s *AdminExtraService) ModelCreate(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"id": id})
+}
+
+// ModelProviderDelete 删除厂商（软删除，级联软删其下模型与密钥，DELETE /admin/providers/:id）。
+func (s *AdminExtraService) ModelProviderDelete(c *gin.Context, idStr string) {
+	if s.modelStore == nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "模型配置服务未初始化")
+		return
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "id 非法")
+		return
+	}
+	if err := s.modelStore.DeleteProvider(c.Request.Context(), id); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "删除厂商失败："+err.Error())
+		return
+	}
+	httpx.OK(c, nil)
+}
+
+// ModelDelete 删除模型（软删除，路由立即失效，DELETE /admin/model-delete/:id）。
+func (s *AdminExtraService) ModelDelete(c *gin.Context, idStr string) {
+	if s.modelStore == nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "模型配置服务未初始化")
+		return
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "id 非法")
+		return
+	}
+	if err := s.modelStore.DeleteModel(c.Request.Context(), id); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "删除模型失败："+err.Error())
+		return
+	}
+	httpx.OK(c, nil)
 }
 
 // ModelKeyList 模型 API Key 列表（隐藏密文，11.43）。
@@ -1099,10 +1151,10 @@ func (s *AdminExtraService) AdminCreateUser(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Email    string   `json:"email" binding:"required,email,max=128"`
-		Password string   `json:"password" binding:"required,min=8,max=64"`
-		Nickname string   `json:"nickname" binding:"required,min=2,max=64"`
-		Points   int      `json:"points"`
+		Email     string   `json:"email" binding:"required,email,max=128"`
+		Password  string   `json:"password" binding:"required,min=8,max=64"`
+		Nickname  string   `json:"nickname" binding:"required,min=2,max=64"`
+		Points    int      `json:"points"`
 		RoleCodes []string `json:"role_codes"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {

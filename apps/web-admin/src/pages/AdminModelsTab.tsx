@@ -126,6 +126,10 @@ export default function AdminModelsTab() {
   const [revokeTarget, setRevokeTarget] = useState<KeyRow | null>(null);
   const [revoking, setRevoking] = useState(false);
 
+  // 删除确认（厂商 / 模型，软删除）
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: "provider" | "model"; row: ProviderRow | ModelRow } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   const loadAll = useCallback(async () => {
     try {
       const [pv, md, ky] = await Promise.all([
@@ -383,6 +387,29 @@ export default function AdminModelsTab() {
     }
   };
 
+  // 删除（软删除）：厂商级联软删其下模型与密钥；模型删除后路由立即失效
+  const submitDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      if (deleteTarget.kind === "provider") {
+        const row = deleteTarget.row as ProviderRow;
+        await api.delete(`/admin/providers/${row.id}`);
+        toast(`已删除厂商 ${row.display_name}（其下模型与密钥一并移除）`, "success");
+      } else {
+        const row = deleteTarget.row as ModelRow;
+        await api.delete(`/admin/model-delete/${row.id}`);
+        toast(`已删除模型 ${row.name}`, "success");
+      }
+      setDeleteTarget(null);
+      void loadAll();
+    } catch (e) {
+      toast(errMessage(e), "error");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // ---------- 渲染 ----------
 
   if (!loaded) {
@@ -448,6 +475,13 @@ export default function AdminModelsTab() {
                         >
                           {p.enabled ? "停用" : "启用"}
                         </a>
+                        <a
+                          href="#"
+                          onClick={(e) => { e.preventDefault(); setDeleteTarget({ kind: "provider", row: p }); }}
+                          className="action-link-danger"
+                        >
+                          删除
+                        </a>
                       </div>
                     </td>
                   </tr>
@@ -512,14 +546,23 @@ export default function AdminModelsTab() {
                     <td className={`${TD} text-right font-mono text-amber-gold`}>{fmtNum(m.cost_points_per_call)}</td>
                     <td className={`${TD} text-center`}><EnabledTag enabled={m.enabled} /></td>
                     <td className={`${TD} text-center`}>
-                      <a
-                        href="#"
-                        onClick={(e) => { e.preventDefault(); void toggleModel(m); }}
-                        className="action-link"
-                        style={{ color: m.enabled ? "#f59e0b" : "#22c55e" }}
-                      >
-                        {m.enabled ? "停用" : "启用"}
-                      </a>
+                      <div className="flex items-center justify-center gap-3 text-xs">
+                        <a
+                          href="#"
+                          onClick={(e) => { e.preventDefault(); void toggleModel(m); }}
+                          className="action-link"
+                          style={{ color: m.enabled ? "#f59e0b" : "#22c55e" }}
+                        >
+                          {m.enabled ? "停用" : "启用"}
+                        </a>
+                        <a
+                          href="#"
+                          onClick={(e) => { e.preventDefault(); setDeleteTarget({ kind: "model", row: m }); }}
+                          className="action-link-danger"
+                        >
+                          删除
+                        </a>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -867,6 +910,47 @@ export default function AdminModelsTab() {
             className="px-4 py-2 bg-gradient-to-r from-amber-gold to-amber-dim rounded-lg text-sm text-[#0B0B1A] font-semibold hover:shadow-lg hover:shadow-amber-gold/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {savingKey ? "保存中…" : keyForm?.editing ? "保存限额" : "创建密钥"}
+          </button>
+        </div>
+      </Modal>
+
+      {/* ====== 删除确认弹窗（厂商 / 模型） ====== */}
+      <Modal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title={deleteTarget?.kind === "provider" ? "删除厂商" : "删除模型"}
+        width={420}
+      >
+        {deleteTarget?.kind === "provider" ? (
+          <>
+            <p className="text-sm text-white">
+              确定删除厂商 <span className="text-amber-gold">{(deleteTarget.row as ProviderRow).display_name}</span> 吗？
+            </p>
+            <p className="text-xs text-text-muted mt-2">
+              其下全部模型与 API 密钥将一并移除，模型路由立即失效。软删除可在数据库中恢复，但界面不再展示。
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-white">
+              确定删除模型 <span className="text-amber-gold">{(deleteTarget?.row as ModelRow | undefined)?.name}</span> 吗？
+            </p>
+            <p className="text-xs text-text-muted mt-2">删除后该模型的调用路由立即失效（软删除，可在数据库中恢复）。</p>
+          </>
+        )}
+        <div className="flex items-center justify-end gap-3 mt-6">
+          <button
+            onClick={() => setDeleteTarget(null)}
+            className="px-4 py-2 bg-bg-card border border-[#2A2A3E] rounded-lg text-sm text-text-secondary hover:border-[#3A3A4E] hover:text-white transition-colors"
+          >
+            取消
+          </button>
+          <button
+            onClick={submitDelete}
+            disabled={deleting}
+            className="px-4 py-2 bg-red-500/90 hover:bg-red-500 rounded-lg text-sm text-white font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {deleting ? "删除中…" : "确认删除"}
           </button>
         </div>
       </Modal>

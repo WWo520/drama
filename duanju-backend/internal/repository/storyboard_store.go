@@ -24,7 +24,11 @@ func NewStoryboardStore(pool *pgxpool.Pool) *StoryboardStore {
 
 var _ agent.StoryboardPlanStore = (*StoryboardStore)(nil)
 
-// LoadBeatForPlan 加载单元剧本/时长预设/关联资产名（优先 nu_asset_links，空则回退项目级资产）。
+// LoadBeatForPlan 加载单元剧本/时长预设/可用资产清单。
+// 资产 = 单元关联资产（nu_asset_links，角色→场景→道具序）优先 + 项目其余资产补全：
+// 单元级建链按名称匹配会漏场景（复合名如"林晚公寓"不在剧本原文中逐字出现），
+// 分镜 LLM 需全量清单才能在 ref_assets 中显式声明场景等单元链未命中的资产
+// （对齐 LuxReal：分镜规划时 Agent 基于完整资产库声明每镜头引用）。
 func (s *StoryboardStore) LoadBeatForPlan(ctx context.Context, narrativeUnitID int64) (*agent.BeatPlanInput, error) {
 	var in agent.BeatPlanInput
 	err := s.pool.QueryRow(ctx, `
@@ -37,9 +41,10 @@ func (s *StoryboardStore) LoadBeatForPlan(ctx context.Context, narrativeUnitID i
 	if err != nil {
 		return nil, err
 	}
-	// 关联资产名（角色/场景优先，供 prompt 显式引用 → 参考图命中）
+	// ① 单元关联资产（角色/场景优先，供 prompt 显式引用 → 参考图命中）
+	seen := map[string]bool{}
 	rows, err := s.pool.Query(ctx, `
-		SELECT COALESCE(ch.name, sc.base_name, p.name, '')
+		SELECT nal.asset_kind, COALESCE(ch.name, sc.base_name, p.name, '')
 		FROM nu_asset_links nal
 		LEFT JOIN characters ch ON nal.asset_kind='CHARACTER' AND nal.asset_id=ch.id
 		LEFT JOIN scenes sc ON nal.asset_kind='SCENE' AND nal.asset_id=sc.id
@@ -48,23 +53,28 @@ func (s *StoryboardStore) LoadBeatForPlan(ctx context.Context, narrativeUnitID i
 		ORDER BY CASE nal.asset_kind WHEN 'CHARACTER' THEN 1 WHEN 'SCENE' THEN 2 ELSE 3 END, nal.id ASC
 		LIMIT 20`, narrativeUnitID)
 	if err == nil {
-		defer rows.Close()
 		for rows.Next() {
-			var name string
-			if err := rows.Scan(&name); err == nil && name != "" {
-				in.AssetNames = append(in.AssetNames, name)
+			var kind, name string
+			if rerr := rows.Scan(&kind, &name); rerr == nil && name != "" {
+				k := kind + "#" + name
+				if !seen[k] {
+					seen[k] = true
+					in.Assets = append(in.Assets, agent.BeatPlanAsset{Kind: kind, Name: name})
+				}
 			}
 		}
+		rows.Close()
 	}
-	// 回退：单元无链（存量项目）时用项目级资产名，保证 prompt 仍可显式引用主体
-	if len(in.AssetNames) == 0 {
-		assets, aerr := loadProjectAssets(ctx, s.pool, in.ProjectID)
-		if aerr == nil {
-			for i, a := range assets {
-				if i >= 20 {
-					break
-				}
-				in.AssetNames = append(in.AssetNames, a.Name)
+	// ② 项目其余资产补全（角色≤6 + 场景≤8 + 道具，总量截断 30；去重）
+	if assets, aerr := loadProjectAssets(ctx, s.pool, in.ProjectID); aerr == nil {
+		for _, a := range assets {
+			if len(in.Assets) >= 30 {
+				break
+			}
+			k := a.Kind + "#" + a.Name
+			if !seen[k] {
+				seen[k] = true
+				in.Assets = append(in.Assets, agent.BeatPlanAsset{Kind: a.Kind, Name: a.Name})
 			}
 		}
 	}
@@ -100,9 +110,12 @@ func (s *StoryboardStore) SaveStoryboardPlan(ctx context.Context, narrativeUnitI
 	if _, err := tx.Exec(ctx, `UPDATE shot_groups SET deleted_at=NOW() WHERE narrative_unit_id=$1 AND deleted_at IS NULL`, narrativeUnitID); err != nil {
 		return nil, err
 	}
-	// 插入新分镜（收集镜头文本供资产链重建）
+	// 插入新分镜（收集镜头文本供资产链重建）。
+	// sort_order 用单元内全局递增编号（跨镜头块连续），避免每块从 1 重编号导致
+	// 列表按 sort_order 排序时出现"镜头1,1,1…2,2,2"交错（用户观感为镜头重复）。
 	shotTexts := make([]ShotTextInput, 0, 16)
 	unitText := ""
+	shotGlobal := 0
 	for gi, sg := range groups {
 		var sgID int64
 		if err := tx.QueryRow(ctx, `
@@ -112,14 +125,15 @@ func (s *StoryboardStore) SaveStoryboardPlan(ctx context.Context, narrativeUnitI
 			return nil, err
 		}
 		stats.Groups++
-		for si, sh := range sg.Shots {
+		for _, sh := range sg.Shots {
+			shotGlobal++
 			var shotID int64
 			if err := tx.QueryRow(ctx, `
 				INSERT INTO shots (shot_group_id, narrative_unit_id, project_id, sort_order, duration_sec,
 					shot_size, camera_movement, camera_angle, subject_description, background_description,
 					local_light_description, dialogue_text, ambient_sound, prompt_original, prompt_refined)
 				VALUES ($1, $2, (SELECT project_id FROM narrative_units WHERE id=$2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
-				sgID, narrativeUnitID, si+1, int(sh.DurationSec), sh.ShotSize, sh.CameraMovement, sh.CameraAngle,
+				sgID, narrativeUnitID, shotGlobal, int(sh.DurationSec), sh.ShotSize, sh.CameraMovement, sh.CameraAngle,
 				sh.SubjectDescription, sh.BackgroundDescription, sh.LocalLightDescription,
 				sh.DialogueText, sh.AmbientSound,
 				sh.SubjectDescription+" "+sh.BackgroundDescription, sh.PromptRefined).Scan(&shotID); err != nil {
@@ -128,7 +142,10 @@ func (s *StoryboardStore) SaveStoryboardPlan(ctx context.Context, narrativeUnitI
 			stats.Shots++
 			totalDuration += int(sh.DurationSec)
 			text := ShotMatchText(sh.SubjectDescription, sh.BackgroundDescription, sh.DialogueText, sh.AmbientSound)
-			shotTexts = append(shotTexts, ShotTextInput{ShotID: shotID, NarrativeUnitID: narrativeUnitID, Text: text})
+			shotTexts = append(shotTexts, ShotTextInput{
+				ShotID: shotID, NarrativeUnitID: narrativeUnitID, Text: text,
+				RefNames: sh.RefAssetNames, // LLM 显式引用（对齐 LuxReal shots.ref_assets）
+			})
 			unitText += " " + text
 		}
 	}
@@ -138,7 +155,7 @@ func (s *StoryboardStore) SaveStoryboardPlan(ctx context.Context, narrativeUnitI
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO narrative_unit_versions (narrative_unit_id, version_num, label, script_snapshot, storyboard_json_snapshot, created_from)
 		SELECT $1, COALESCE((SELECT MAX(version_num) FROM narrative_unit_versions WHERE narrative_unit_id=$1),0)+1,
-		       '分镜重生成', COALESCE(nu.script_original_text,''), $2::jsonb, 'AGENT_STORYBOARD_PLAN'
+		       '分镜重生成', COALESCE(nu.script_original_text,''), $2::jsonb, 'AGENT_REPLAN'
 		FROM narrative_units nu WHERE nu.id=$1`,
 		narrativeUnitID, string(sbJSON)); err != nil {
 		return nil, err
@@ -168,12 +185,30 @@ func (s *StoryboardStore) SaveStoryboardPlan(ctx context.Context, narrativeUnitI
 	}
 	if len(assets) > 0 {
 		units := []UnitTextInput{{NarrativeUnitID: narrativeUnitID, Text: unitText}}
-		ul, sl, lerr := LinkAssetsInTx(ctx, tx, units, shotTexts, assets)
+		ul, sl, shotAssets, lerr := LinkAssetsInTx(ctx, tx, units, shotTexts, assets)
 		if lerr != nil {
 			return nil, lerr
 		}
 		stats.AssetUnitLinks = ul
 		stats.AssetShotLinks = sl
+		// 提示词 @ 标记（对齐 LuxReal @引用）：关联资产名写入 prompt_refined 时加 @ 前缀，
+		// 用户在分镜脚本/融合提示词中即可看到 @资产名；视频生成侧幂等（已 @ 的不再重复标记）。
+		for shotID, matched := range shotAssets {
+			names := make([]string, 0, len(matched))
+			for _, a := range matched {
+				names = append(names, a.Name)
+			}
+			var pr string
+			if qerr := tx.QueryRow(ctx,
+				`SELECT COALESCE(prompt_refined,'') FROM shots WHERE id=$1`, shotID).Scan(&pr); qerr != nil || pr == "" {
+				continue
+			}
+			if tagged := agent.TagAssetsInPrompt(pr, names); tagged != pr {
+				if _, uerr := tx.Exec(ctx, `UPDATE shots SET prompt_refined=$2 WHERE id=$1`, shotID, tagged); uerr != nil {
+					return nil, uerr
+				}
+			}
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {

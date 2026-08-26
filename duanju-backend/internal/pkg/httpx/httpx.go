@@ -75,16 +75,37 @@ func maskSensitive(v any) any {
 			out[key] = maskSensitive(val)
 		}
 		return out
-	case reflect.Slice, reflect.Array:
+	case reflect.Slice:
 		// []byte（含 json.RawMessage）原样透传：逐字节拆包会变 []any，类型不匹配导致零值（2026-08-20 实测）
 		if rv.Type().Elem().Kind() == reflect.Uint8 {
 			return v
 		}
-		out := make([]any, rv.Len())
+		// 保持原切片类型（修复：[]struct DTO 字段经 Struct 分支回填时 []any 不可
+		// AssignableTo 原 slice 类型 → Set 被静默跳过 → linked_assets 等字段丢失）
+		out := reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
 		for i := 0; i < rv.Len(); i++ {
-			out[i] = maskSensitive(rv.Index(i).Interface())
+			masked := maskSensitive(rv.Index(i).Interface())
+			mv := reflect.ValueOf(masked)
+			if !mv.IsValid() || !mv.Type().AssignableTo(rv.Type().Elem()) {
+				// 元素脱敏后类型变化（理论不可达，保险 fallback []any）
+				outa := make([]any, rv.Len())
+				for j := 0; j < rv.Len(); j++ {
+					outa[j] = maskSensitive(rv.Index(j).Interface())
+				}
+				return outa
+			}
+			out.Index(i).Set(mv)
 		}
-		return out
+		return out.Interface()
+	case reflect.Array:
+		out := reflect.New(rv.Type()).Elem()
+		for i := 0; i < rv.Len(); i++ {
+			masked := maskSensitive(rv.Index(i).Interface())
+			if mv := reflect.ValueOf(masked); mv.IsValid() && mv.Type().AssignableTo(rv.Type().Elem()) {
+				out.Index(i).Set(mv)
+			}
+		}
+		return out.Interface()
 	case reflect.Ptr:
 		if rv.IsNil() {
 			return v

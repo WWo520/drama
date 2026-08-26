@@ -275,15 +275,16 @@ func (s *Service) GenerateVideos(c *gin.Context, beatUUID string) {
 		return
 	}
 	var req struct {
-		Resolution string `json:"resolution"`  // P480/P720/P1080
-		VideoModel string `json:"video_model"` // 模型展示名（Seedance 2.5/2.0/1.5）
+		Resolution string `json:"resolution"`  // P480/P720/P1080；MiniMax H3 为 768P/2K
+		VideoModel string `json:"video_model"` // 模型展示名（Seedance 2.5/2.0/1.5、MiniMax H3）
 		ModelKey   string `json:"model_key"`   // 模型 key（命中 models.model_key 才参与路由）
+		Redo       bool   `json:"redo"`        // 重新生成：重置 SUCCESS 镜头后全量重建（默认 false 只补缺失）
 	}
 	_ = c.ShouldBindJSON(&req)
 	switch strings.TrimSpace(req.Resolution) {
-	case "P480", "P720", "P1080":
+	case "P480", "P720", "P1080", "768P", "2K":
 	default:
-		req.Resolution = "" // 非法值回落默认 P720
+		req.Resolution = "" // 非法值回落默认 P720（H3 Provider 内归一化为 768P）
 	}
 	opts := VideoGenOpts{
 		Resolution: strings.TrimSpace(req.Resolution),
@@ -315,6 +316,19 @@ func (s *Service) GenerateVideos(c *gin.Context, beatUUID string) {
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取镜头失败")
 		return
+	}
+	// 重新生成模式（redo=true）：重置已 SUCCESS 镜头/镜头块（清旧视频）后全量重建，
+	// 否则 CreateVideoTasks 跳过 SUCCESS 镜头会静默创建 0 个任务（"重新生成"按钮语义缺陷）。
+	if req.Redo {
+		if rerr := s.repo.ResetBeatShotVideos(c.Request.Context(), beatID); rerr != nil {
+			httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "重置镜头状态失败")
+			return
+		}
+		for i := range shots {
+			if shots[i].VideoStatus == "SUCCESS" {
+				shots[i].VideoStatus = "PENDING"
+			}
+		}
 	}
 	spaceID, err := s.repo.SpaceIDByProject(c.Request.Context(), projectID)
 	if err != nil {

@@ -4,7 +4,9 @@
 param([string]$Role = "split")
 
 # 模型密钥加密主密钥：与 API 侧保持一致（从仓库根 .env 读取，缺失则回退 JWT_SECRET）
-$rootEnv = Join-Path $PSScriptRoot "..\.env"
+# 用 $PSCommandPath 定位脚本目录（$PSScriptRoot 在部分宿主环境可能为 NULL）
+$scriptDir = Split-Path -Parent $PSCommandPath
+$rootEnv = Join-Path $scriptDir "..\.env"
 if (Test-Path $rootEnv) {
   $line = Select-String -Path $rootEnv -Pattern "^MODEL_KEY_ENC_SECRET=(.+)$" | Select-Object -First 1
   if ($line) { $env:MODEL_KEY_ENC_SECRET = $line.Matches[0].Groups[1].Value.Trim() }
@@ -23,17 +25,17 @@ $env:S3_SECRET_KEY = "duanju_dev_pwd"
 $env:S3_BUCKET = "duanju"
 $env:S3_USE_SSL = "false"
 
-Set-Location "$PSScriptRoot\..\duanju-backend"
+Set-Location "$scriptDir\..\duanju-backend"
 
 switch ($Role) {
   "asset" { go run ./cmd/worker -role asset }
   "video" { go run ./cmd/worker -role video }
   "export" { go run ./cmd/worker -role export }
   "all" {
-    Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$PSScriptRoot\start-worker.ps1", "-Role", "split"
-    Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$PSScriptRoot\start-worker.ps1", "-Role", "asset"
-    Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$PSScriptRoot\start-worker.ps1", "-Role", "video"
-    Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$PSScriptRoot\start-worker.ps1", "-Role", "export"
+    Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$scriptDir\start-worker.ps1", "-Role", "split"
+    Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$scriptDir\start-worker.ps1", "-Role", "asset"
+    Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$scriptDir\start-worker.ps1", "-Role", "video"
+    Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$scriptDir\start-worker.ps1", "-Role", "export"
     Write-Output "4 worker processes started (split/asset/video/export)"
   }
   default { go run ./cmd/worker -role split }

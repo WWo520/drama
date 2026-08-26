@@ -16,9 +16,11 @@ import (
 )
 
 // storyboardPlanSystemPrompt 分镜脚本生成技能（LuxReal「剧情细腻刻画」模板结构）。
+// ref_assets（对齐 LuxReal shots.ref_assets @引用资产列表）：LLM 逐镜头显式声明画面中
+// 出现的资产，替代纯文本名称匹配（场景复合名/道具别名文本匹配必然失配）。
 const storyboardPlanSystemPrompt = `你是短剧分镜编剧。根据叙事单元剧本原文与时长预设，编写该单元的分镜脚本。
 输出 JSON 结构（只输出 JSON，不要任何解释文字）：
-{"shot_groups":[{"title":"镜头块标题","duration_sec":秒数,"shots":[{"duration_sec":秒,"shot_size":"景别","camera_movement":"运镜","camera_angle":"视角","subject_description":"主体描述","background_description":"背景描述","local_light_description":"光影描述","dialogue_text":"台词","ambient_sound":"环境音"}]}]}
+{"shot_groups":[{"title":"镜头块标题","duration_sec":秒数,"shots":[{"duration_sec":秒,"shot_size":"景别","camera_movement":"运镜","camera_angle":"视角","subject_description":"主体描述","background_description":"背景描述","local_light_description":"光影描述","dialogue_text":"台词","ambient_sound":"环境音","ref_assets":["资产名"]}]}]}
 
 【规则】
 1. 全部镜头 duration_sec 加总须接近单元时长预设 %d 秒（误差 ±20%% 以内）；
@@ -27,11 +29,18 @@ const storyboardPlanSystemPrompt = `你是短剧分镜编剧。根据叙事单�
 4. camera_movement 仅限 STATIC/SLOW_PUSH_IN/SLOW_PULL_OUT/FAST_PUSH_IN/DOLLY_IN/DOLLY_OUT/PAN_LEFT/PAN_RIGHT/TRACK_LEFT/TRACK_RIGHT/TILT_UP/TILT_DOWN/CRANE_UP/CRANE_DOWN/HANDHELD_SHAKY/WIPE_CLIP/ZOOM_IN_OPTICAL/SLOW_360_ORBIT；
 5. camera_angle 仅限 EYE_LEVEL_FRONT/SIDE/BACK/SLIGHT_LOW_ANGLE/LOW_ANGLE/SLIGHT_HIGH/HIGH_BIRDVIEW/OTS_LEFT/OTS_RIGHT/DUTCH_ANGLE；
 6. 台词格式：【角色名 情感修饰】：台词（如【陆言 激昂】：各位看官！）；无台词留空字符串；
-7. subject_description 必须显式使用剧本中出现的角色名与场景名（单元关联资产清单：%s），保证后续参考图引用可命中；主体描述包含人物动作/表情/道具互动细节；
-8. 分镜须完整覆盖剧本原文的全部情节，忠于原文不得新增剧情。`
+7. 资产清单：%s。subject_description 必须显式使用清单中的完整资产名（主体角色写进主体描述），background_description 必须写明所在场景的完整场景名，保证后续参考图引用可命中；主体描述包含人物动作/表情/道具互动细节；
+8. ref_assets：该镜头画面中实际出现的资产名数组，必须从资产清单原样引用完整名称（清单为"林晚公寓"不得简写为"公寓"）；涵盖主体角色、所在场景、出镜或互动的道具；剧本以别名提及清单资产时（如"玉佩"即清单中的"引魂佩"）须引用清单名；画面未出现任何清单资产时留空数组；
+9. 分镜须完整覆盖剧本原文的全部情节，忠于原文不得新增剧情。`
 
 // ErrBeatBusy 单元存在 RUNNING 视频任务，拒绝重规划（防外键/状态残留）。
 var ErrBeatBusy = errors.New("storyboard: narrative unit has running video tasks")
+
+// BeatPlanAsset 分镜规划可用资产（Kind: CHARACTER/SCENE/PROP）。
+type BeatPlanAsset struct {
+	Kind string
+	Name string
+}
 
 // BeatPlanInput 分镜规划输入。
 type BeatPlanInput struct {
@@ -39,7 +48,7 @@ type BeatPlanInput struct {
 	ProjectID          int64
 	ScriptOriginalText string
 	PresetDurationSec  int
-	AssetNames         []string // 关联资产名清单（角色/场景，注入 prompt 供显式引用）
+	Assets             []BeatPlanAsset // 单元关联资产优先 + 项目其余资产补全（供显式引用与 ref_assets 声明）
 }
 
 // StoryboardPlanStore 分镜规划数据边界。
@@ -85,10 +94,7 @@ func (h *StoryboardPlanHandler) Execute(ctx context.Context, t *task.Task) ([]by
 		return nil, errors.New("叙事单元剧本原文为空，无法生成分镜")
 	}
 
-	assetList := "无"
-	if len(beat.AssetNames) > 0 {
-		assetList = strings.Join(beat.AssetNames, "、")
-	}
+	assetList := formatPlanAssetList(beat.Assets)
 	systemPrompt := fmt.Sprintf(storyboardPlanSystemPrompt, beat.PresetDurationSec, assetList)
 	if params.SkillPrompt != "" {
 		systemPrompt += "\n分镜风格技能（与上述规则冲突时以技能要求为准）：" + params.SkillPrompt
@@ -133,6 +139,30 @@ func (h *StoryboardPlanHandler) Execute(ctx context.Context, t *task.Task) ([]by
 	return out, nil
 }
 
+// formatPlanAssetList 资产清单格式化（按 角色/场景/道具 分组，注入 prompt 供 LLM 原样引用）。
+func formatPlanAssetList(assets []BeatPlanAsset) string {
+	byKind := map[string][]string{"CHARACTER": {}, "SCENE": {}, "PROP": {}}
+	for _, a := range assets {
+		if name := strings.TrimSpace(a.Name); name != "" {
+			byKind[a.Kind] = append(byKind[a.Kind], name)
+		}
+	}
+	var parts []string
+	if len(byKind["CHARACTER"]) > 0 {
+		parts = append(parts, "角色："+strings.Join(byKind["CHARACTER"], "、"))
+	}
+	if len(byKind["SCENE"]) > 0 {
+		parts = append(parts, "场景："+strings.Join(byKind["SCENE"], "、"))
+	}
+	if len(byKind["PROP"]) > 0 {
+		parts = append(parts, "道具："+strings.Join(byKind["PROP"], "、"))
+	}
+	if len(parts) == 0 {
+		return "无"
+	}
+	return strings.Join(parts, "；")
+}
+
 // parseStoryboardGroups 解析并校验 LLM 分镜输出（复用拆分枚举真源）。
 func parseStoryboardGroups(raw string) ([]ShotGroup, error) {
 	clean := extractJSON(raw)
@@ -164,7 +194,27 @@ func parseStoryboardGroups(raw string) ([]ShotGroup, error) {
 			}
 		}
 	}
+	sanitizeRefAssets(wrapped.ShotGroups)
 	return wrapped.ShotGroups, nil
+}
+
+// sanitizeRefAssets ref_assets 清洗：去空白/空名、截断上限、去重。
+// 非法引用不致命（失配项在建链时被忽略，仍有文本匹配兜底），不触发整轮重试。
+func sanitizeRefAssets(groups []ShotGroup) {
+	for gi := range groups {
+		for si := range groups[gi].Shots {
+			s := &groups[gi].Shots[si]
+			seen := make(map[string]bool, len(s.RefAssetNames))
+			clean := make([]string, 0, len(s.RefAssetNames))
+			for _, n := range s.RefAssetNames {
+				if n = strings.TrimSpace(n); n != "" && !seen[n] && len(clean) < 8 {
+					seen[n] = true
+					clean = append(clean, n)
+				}
+			}
+			s.RefAssetNames = clean
+		}
+	}
 }
 
 // polishGroups 逐镜头润色（与拆分 polishAll 同款技能，单镜头失败不中断）。

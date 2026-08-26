@@ -1,6 +1,15 @@
 // 视频域 API：3.3.7a 批量生成镜头视频 / 单镜头列表轮询。
 import { api } from "../index";
 
+// 镜头关联资产（shot_asset_refs JOIN 业务表；Step3 镜头卡资产小图与 @ 引用展示）
+export interface ShotLinkedAsset {
+  asset_kind: "CHARACTER" | "SCENE" | "PROP";
+  asset_id: number;
+  name: string;
+  main_image_url: string;
+  generation_status: string;
+}
+
 export interface ShotVideo {
   shot_id: number;
   shot_uuid: string;
@@ -8,6 +17,7 @@ export interface ShotVideo {
   duration_sec: number;
   video_generation_status: string; // PENDING / RUNNING / SUCCESS / FAILED
   generated_video_url: string;
+  linked_assets?: ShotLinkedAsset[]; // 该镜头引用的资产（角色→场景→道具排序）
 }
 
 // 叙事单元 ↔ 资产关联（17 - 工作台对齐：Step3 关联资产名称占位 + 单元级就绪度）
@@ -30,14 +40,16 @@ export const VideoStatusMeta: Record<string, { label: string; tone: string }> = 
 
 export const videoApi = {
   // 3.3.7a 批量生成 beat 下全部镜头视频（18 - 视频制作：弹窗参数随请求提交落任务表）
+  // redo=true：重新生成——重置已成功镜头后全量重建（默认只补缺失镜头）
   generateBeat: (
     beatId: string,
-    opts?: { resolution?: string; video_model?: string; model_key?: string },
+    opts?: { resolution?: string; video_model?: string; model_key?: string; redo?: boolean },
   ) =>
     api.post<{ created: number; total: number }>(`/beats/${beatId}/generate-videos`, {
       resolution: opts?.resolution,
       video_model: opts?.video_model,
       model_key: opts?.model_key,
+      redo: opts?.redo,
     }),
   // 单镜头视频状态轮询（Step3）
   beatShots: (beatId: string) => api.get<{ items: ShotVideo[] }>(`/beats/${beatId}/shots`),

@@ -134,7 +134,7 @@ export default function HomePage() {
   const [stylePos, setStylePos] = useState<{ top: number; left: number } | null>(null);
   const [styleName, setStyleName] = useState("通用写实");
   const [styleCode, setStyleCode] = useState<string>("");
-  const [styleLib, setStyleLib] = useState<{ code: string; name: string }[]>([]);
+  const [styleLib, setStyleLib] = useState<{ code: string; name: string; thumb?: string }[]>([]);
   // 项目卡 … 下拉菜单（打开/重命名/复制/导出/删除）
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -612,11 +612,12 @@ export default function HomePage() {
   }, []);
 
   // 风格库（GET /style-library）：前 5 项归「风格库」，其余归「公共库」（设计稿分组）
+  // thumbnail_url 为火山生成的真实风格预览图（无图回退 CSS 渐变占位）
   useEffect(() => {
     (async () => {
       try {
-        const data = await api.get<{ items: { style_code: string; name: string }[] }>("/style-library");
-        const items = (data.items ?? []).map((s) => ({ code: s.style_code, name: s.name }));
+        const data = await api.get<{ items: { style_code: string; name: string; thumbnail_url?: string }[] }>("/style-library");
+        const items = (data.items ?? []).map((s) => ({ code: s.style_code, name: s.name, thumb: s.thumbnail_url || "" }));
         setStyleLib(items.length > 0 ? items : FALLBACK_STYLES);
       } catch {
         setStyleLib(FALLBACK_STYLES);
@@ -939,7 +940,7 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
 
   // 风格弹层选中态：未选择时默认首项（对齐设计稿「通用写实」默认选中）
   const selectedStyleCode = styleCode || styleLib[0]?.code || "";
-  const renderStyleCard = (s: { code: string; name: string }, idx: number) => (
+  const renderStyleCard = (s: { code: string; name: string; thumb?: string }, idx: number) => (
     <div
       key={s.code}
       className={`style-card ${s.code === selectedStyleCode ? "selected" : ""}`}
@@ -950,6 +951,9 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
       }}
     >
       <div className={`style-card-preview ${STYLE_PREVIEW_CLASSES[idx % STYLE_PREVIEW_CLASSES.length]}`}>
+        {s.thumb ? (
+          <img src={s.thumb} alt={s.name} loading="lazy" className="style-card-thumb" />
+        ) : null}
         <div className="style-card-check">
           <Check size={12} />
         </div>

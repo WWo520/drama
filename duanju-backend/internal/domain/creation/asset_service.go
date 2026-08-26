@@ -27,6 +27,8 @@ type AssetOps interface {
 	CreateAssetTask(ctx context.Context, spaceID, userID, projectID, episodeID int64, kind string, targetID int64, cost int) (int64, error)
 	// CreateAssetTaskWithGen 建资产生成任务（携带弹窗生成参数）。
 	CreateAssetTaskWithGen(ctx context.Context, spaceID, userID, projectID, episodeID int64, kind string, targetID int64, cost int, gen *agent.GenParams) (int64, error)
+	// MarkAssetGenFailed 资产表置 FAILED_DEAD（任务即时失败回滚，防前端卡"生成中"）。
+	MarkAssetGenFailed(ctx context.Context, kind string, targetID int64) error
 	// IsAssetUsedBefore 跨集复用判定：同项目该资产已生成过 → 本次豁免（S2-B06）。
 	IsAssetUsedBefore(ctx context.Context, projectID int64, kind string, targetID int64) (bool, error)
 	// ListVariants 角色变体列表（3.2.7）。
@@ -106,6 +108,7 @@ type BatchGenerateReq struct {
 	} `json:"items" binding:"required,min=1,max=20"`
 	EpisodeID     string `json:"episode_id" binding:"required"` // episode_uuid
 	ModelCode     string `json:"model_code"`                    // 批量弹窗选中的图片模型（透传到每个生成任务）
+	StyleName     string `json:"style_name"`                    // 批量弹窗选中的公共风格（透传到每个生成任务；此前纯 UI 未透传）
 	PerAssetCount int    `json:"per_asset_count"`               // 每个资产生成的张数（≥1；默认 1）
 }
 
@@ -689,14 +692,17 @@ func (s *AssetService) BatchGenerate(c *gin.Context, req *BatchGenerateReq) {
 		if reused, _ := s.ops.IsAssetUsedBefore(c.Request.Context(), projectID, item.Kind, item.TargetID); reused {
 			cost = 0
 		}
-		// 批量弹窗顶层模型透传：item 无独立 gen 时套用全批量模型
+		// 批量弹窗顶层模型/风格透传：item 无独立 gen 时套用全批量参数
 		gen := item.Gen.toAgent()
-		if req.ModelCode != "" {
+		if req.ModelCode != "" || req.StyleName != "" {
 			if gen == nil {
 				gen = &agent.GenParams{}
 			}
-			if gen.ModelCode == "" {
+			if req.ModelCode != "" && gen.ModelCode == "" {
 				gen.ModelCode = req.ModelCode
+			}
+			if req.StyleName != "" && gen.StyleName == "" {
+				gen.StyleName = req.StyleName
 			}
 		}
 		// 每张数量：同一目标创建 count 个任务（各自计费），实现「每资产多张」
@@ -714,6 +720,8 @@ func (s *AssetService) BatchGenerate(c *gin.Context, req *BatchGenerateReq) {
 					SpaceID: spaceID, OperatorUserID: uid, ProjectID: &projectID, Description: "资产生成",
 				}); ferr != nil {
 					_ = s.repo.MarkTaskFailed(c.Request.Context(), taskID, "积分不足或冻结失败："+ferr.Error())
+					// 回滚资产状态：任务建时已置 QUEUED，即时失败需解除"生成中"
+					_ = s.ops.MarkAssetGenFailed(c.Request.Context(), item.Kind, item.TargetID)
 					continue
 				}
 				frozen++

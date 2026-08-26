@@ -111,45 +111,22 @@ func (s *SplitStore) SaveSplitResult(ctx context.Context, projectID int64, resul
 				return nil, err
 			}
 			stats.Beats++
-			// 版本 v1 快照（S2-B05）：拆分成功即写 narrative_unit_versions，供 Step3 历史版本弹窗使用
-			sbJSON, _ := json.Marshal(beat.ShotGroups)
+			// 版本 v1 快照（S2-B05）：拆分成功即写 narrative_unit_versions，供 Step3 历史版本弹窗使用。
+			// 分镜快照存空数组：拆分不直出分镜（回滚 v1 仅恢复剧本原文，不恢复分镜）
+			sbJSON, _ := json.Marshal([]agent.ShotGroup{})
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO narrative_unit_versions (narrative_unit_id, version_num, label, script_snapshot, storyboard_json_snapshot, created_from)
 				VALUES ($1, 1, '拆分快照', $2, $3::jsonb, 'AGENT_AUTO_SPLIT')`,
 				nuID, beat.ScriptOriginalText, string(sbJSON)); err != nil {
 				return nil, err
 			}
-			// 单元文本收集（原文 + 镜头文案拼接，供资产建链匹配）
+			// 单元文本收集（原文，供资产建链匹配）
 			unitTexts = append(unitTexts, UnitTextInput{NarrativeUnitID: nuID, Text: beat.ScriptOriginalText})
-			nuText := &unitTexts[len(unitTexts)-1]
-			for gi, sg := range beat.ShotGroups {
-				var sgID int64
-				if err := tx.QueryRow(ctx, `
-					INSERT INTO shot_groups (narrative_unit_id, project_id, sort_order, group_type, title, duration_sec, shot_count)
-					VALUES ($1, $2, $3, 'NAMED_SEGMENT', $4, $5, $6) RETURNING id`,
-					nuID, projectID, gi+1, sg.Title, int(sg.DurationSec), len(sg.Shots)).Scan(&sgID); err != nil {
-					return nil, err
-				}
-				stats.Groups++
-				for si, sh := range sg.Shots {
-					var shotID int64
-					if err := tx.QueryRow(ctx, `
-						INSERT INTO shots (shot_group_id, narrative_unit_id, project_id, sort_order, duration_sec,
-							shot_size, camera_movement, camera_angle, subject_description, background_description,
-							local_light_description, dialogue_text, ambient_sound, prompt_original, prompt_refined)
-						VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
-						sgID, nuID, projectID, si+1, int(sh.DurationSec), sh.ShotSize, sh.CameraMovement, sh.CameraAngle,
-						sh.SubjectDescription, sh.BackgroundDescription, sh.LocalLightDescription,
-						sh.DialogueText, sh.AmbientSound, promptOriginal(sh), sh.PromptRefined).Scan(&shotID); err != nil {
-						return nil, err
-					}
-					stats.Shots++
-					totalDuration += int(sh.DurationSec)
-					shotText := ShotMatchText(sh.SubjectDescription, sh.BackgroundDescription, sh.DialogueText, sh.AmbientSound)
-					shotTexts = append(shotTexts, ShotTextInput{ShotID: shotID, NarrativeUnitID: nuID, Text: shotText})
-					nuText.Text += " " + shotText
-				}
-			}
+			// 拆分不再直出分镜（对齐 LuxReal 手动生成流程）：拆分只产出 集→单元 两层 + 资产；
+			// 分镜脚本由用户在 Step3 逐单元手动点「生成分镜脚本」（STORYBOARD_PLAN 任务）产出，
+			// 生成时按单元剧本 + 关联资产重新规划并重建资产链。LLM 产出的 ShotGroups 仅留档于
+			// v1 版本快照（storyboard_json_snapshot），不再写 shots/shot_groups 表。
+			totalDuration += int(beat.DurationSec)
 		}
 	}
 
@@ -217,7 +194,7 @@ func (s *SplitStore) SaveSplitResult(ctx context.Context, projectID int64, resul
 	// 资产自动建链（U5/F10，18 - 视频制作 阶段一）：单元/镜头文本实体匹配 →
 	// nu_asset_links + shot_asset_refs + shots.linked_assets_json，供视频生成注入参考图。
 	if len(linkAssets) > 0 {
-		unitLinks, shotLinks, lerr := LinkAssetsInTx(ctx, tx, unitTexts, shotTexts, linkAssets)
+		unitLinks, shotLinks, _, lerr := LinkAssetsInTx(ctx, tx, unitTexts, shotTexts, linkAssets)
 		if lerr != nil {
 			return nil, lerr
 		}

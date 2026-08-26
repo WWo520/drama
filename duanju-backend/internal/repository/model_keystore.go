@@ -168,6 +168,49 @@ func (s *ModelKeyStore) UpdateModelByKey(ctx context.Context, modelKey, name, ca
 	return err
 }
 
+// DeleteModel 删除模型（按 id 软删除，路由立即失效，可在库内恢复）。
+func (s *ModelKeyStore) DeleteModel(ctx context.Context, id int64) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE models SET deleted_at=NOW(), enabled=FALSE, updated_at=NOW()
+		WHERE id=$1 AND deleted_at IS NULL`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("模型不存在或已删除")
+	}
+	return nil
+}
+
+// DeleteProvider 删除厂商（软删除，级联停用并软删其下模型与密钥，单事务）。
+func (s *ModelKeyStore) DeleteProvider(ctx context.Context, id int64) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `
+		UPDATE model_providers SET deleted_at=NOW(), enabled=FALSE, updated_at=NOW()
+		WHERE id=$1 AND deleted_at IS NULL`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("厂商不存在或已删除")
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE models SET deleted_at=NOW(), enabled=FALSE, updated_at=NOW()
+		WHERE provider_id=$1 AND deleted_at IS NULL`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE model_keys SET deleted_at=NOW(), enabled=FALSE, updated_at=NOW()
+		WHERE provider_id=$1 AND deleted_at IS NULL`, id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // CreateModelKey 新建 API Key（密文入库）。
 func (s *ModelKeyStore) CreateModelKey(ctx context.Context, providerID int64, name, apiKey string, rpm, qps, concurrent int, enabled bool, priority int) (int64, string, error) {
 	encrypted, err := encryptKey(apiKey, s.encKey)

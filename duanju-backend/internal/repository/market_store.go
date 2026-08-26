@@ -79,20 +79,20 @@ func (s *MarketStore) ApplyTemplate(ctx context.Context, templateUUID string) (s
 
 func (s *MarketStore) ListStyles(ctx context.Context) ([]map[string]any, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT style_code, name, COALESCE(prompt_suffix_static,''), used_count, is_default
-		FROM style_library WHERE enabled=TRUE ORDER BY sort_order`)
+		SELECT style_code, name, COALESCE(prompt_suffix_static,''), COALESCE(thumbnail_url,''), used_count, is_default
+		FROM style_library WHERE enabled=TRUE AND deleted_at IS NULL ORDER BY sort_order`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := make([]map[string]any, 0)
 	for rows.Next() {
-		var code, name, suffix string
+		var code, name, suffix, thumb string
 		var used int
 		var def bool
-		rows.Scan(&code, &name, &suffix, &used, &def)
+		rows.Scan(&code, &name, &suffix, &thumb, &used, &def)
 		out = append(out, map[string]any{
-			"style_code": code, "name": name, "prompt_suffix": suffix, "used_count": used, "is_default": def,
+			"style_code": code, "name": name, "prompt_suffix": suffix, "thumbnail_url": thumb, "used_count": used, "is_default": def,
 		})
 	}
 	return out, rows.Err()

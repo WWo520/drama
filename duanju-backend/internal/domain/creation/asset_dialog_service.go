@@ -3,6 +3,7 @@ package creation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -95,16 +96,20 @@ func (s *AssetDetailService) DialogData(c *gin.Context, kind, targetIDStr string
 	// 角色：变体 tab 列表
 	if kind == "CHARACTER_VARIANT" {
 		variants, verr := s.repo.pool.Query(c.Request.Context(), `
-			SELECT id, COALESCE(variant_name,''), COALESCE(main_image_url,''), COALESCE(generation_status::text,'')
+			SELECT id, COALESCE(variant_name,''), COALESCE(main_image_url,''), COALESCE(generation_status::text,''),
+			       CASE WHEN jsonb_typeof(multi_view_images_json)='array' THEN multi_view_images_json::text ELSE '[]' END
 			FROM character_variants WHERE character_id=$1 AND deleted_at IS NULL ORDER BY id`, targetID)
 		if verr == nil {
 			defer variants.Close()
 			items := make([]gin.H, 0)
 			for variants.Next() {
 				var vid int64
-				var vname, vimg, vst string
-				_ = variants.Scan(&vid, &vname, &vimg, &vst)
-				items = append(items, gin.H{"id": vid, "name": vname, "main_image_url": vimg, "generation_status": vst})
+				var vname, vimg, vst, vviews string
+				_ = variants.Scan(&vid, &vname, &vimg, &vst, &vviews)
+				items = append(items, gin.H{
+					"id": vid, "name": vname, "main_image_url": vimg,
+					"generation_status": vst, "multi_view_images": json.RawMessage(vviews),
+				})
 			}
 			resp["variants"] = items
 		}
@@ -186,7 +191,7 @@ func (s *AssetDetailService) OptimizePrompt(c *gin.Context, kind, targetIDStr st
 		return
 	}
 	resp, cerr := s.llm.Chat(c.Request.Context(), model.CapLLM, &model.ChatRequest{
-		Prompt:      req.Prompt,
+		Prompt: req.Prompt,
 		System: `你是短剧资产提示词优化专家。请将以下描述重写为适合图像生成模型的中文提示词：
 
 【必须保留的要素】

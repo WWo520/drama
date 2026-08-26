@@ -327,35 +327,97 @@ func (r *Repo) ListEpisodes(ctx context.Context, projectID int64) ([]EpisodeDTO,
 
 // ShotVideoDTO 单镜头视频状态（3.3.7a 触发/轮询用）。
 type ShotVideoDTO struct {
-	ShotID            int64  `json:"shot_id"`
-	ShotUUID          string `json:"shot_uuid"`
-	SortOrder         int    `json:"sort_order"`
-	DurationSec       int    `json:"duration_sec"`
-	VideoStatus       string `json:"video_generation_status"`
-	GeneratedVideoURL string `json:"generated_video_url"`
+	ShotID            int64                `json:"shot_id"`
+	ShotUUID          string               `json:"shot_uuid"`
+	SortOrder         int                  `json:"sort_order"`
+	DurationSec       int                  `json:"duration_sec"`
+	VideoStatus       string               `json:"video_generation_status"`
+	GeneratedVideoURL string               `json:"generated_video_url"`
+	LinkedAssets      []ShotLinkedAssetDTO `json:"linked_assets,omitempty"`
+}
+
+// ShotLinkedAssetDTO 镜头关联资产（shot_asset_refs JOIN 业务表：名称/参考图/生成状态，
+// 供 Step3 镜头卡资产小图与 @ 引用展示；口径与 LoadShotRefs 一致）。
+type ShotLinkedAssetDTO struct {
+	AssetKind        string `json:"asset_kind"`
+	AssetID          int64  `json:"asset_id"`
+	Name             string `json:"name"`
+	MainImageURL     string `json:"main_image_url"`
+	GenerationStatus string `json:"generation_status"`
+}
+
+// ShotAssetRefsByIDs 批量查询镜头关联资产（按 shot_id 分组；角色→场景→道具排序）。
+// 取图口径（业务表）：角色→首个变体、场景/道具→自身 main_image_url。
+func (r *Repo) ShotAssetRefsByIDs(ctx context.Context, shotIDs []int64) (map[int64][]ShotLinkedAssetDTO, error) {
+	out := make(map[int64][]ShotLinkedAssetDTO)
+	if len(shotIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT sar.shot_id, sar.asset_kind::text, sar.asset_id,
+		       COALESCE(c.name, sc.base_name, p.name, ''),
+		       COALESCE(cv.main_image_url, sc.main_image_url, p.main_image_url, ''),
+		       COALESCE(cv.generation_status, sc.generation_status::text, p.generation_status::text, '')
+		FROM shot_asset_refs sar
+		LEFT JOIN characters c ON sar.asset_kind='CHARACTER' AND c.id=sar.asset_id AND c.deleted_at IS NULL
+		LEFT JOIN LATERAL (
+		    SELECT main_image_url, generation_status::text AS generation_status
+		    FROM character_variants WHERE character_id=c.id AND deleted_at IS NULL ORDER BY id LIMIT 1
+		) cv ON TRUE
+		LEFT JOIN scenes sc ON sar.asset_kind='SCENE' AND sc.id=sar.asset_id AND sc.deleted_at IS NULL
+		LEFT JOIN props p ON sar.asset_kind='PROP' AND p.id=sar.asset_id AND p.deleted_at IS NULL
+		WHERE sar.shot_id = ANY($1)
+		ORDER BY CASE sar.asset_kind WHEN 'CHARACTER' THEN 1 WHEN 'SCENE' THEN 2 ELSE 3 END, sar.id`, shotIDs)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var shotID int64
+		var a ShotLinkedAssetDTO
+		if err := rows.Scan(&shotID, &a.AssetKind, &a.AssetID, &a.Name, &a.MainImageURL, &a.GenerationStatus); err != nil {
+			continue
+		}
+		out[shotID] = append(out[shotID], a)
+	}
+	return out, rows.Err()
 }
 
 // ListShotsByBeat beat 下全部单镜头（Step3 分镜视频列表；3.3.7a）。
+// 附带每镜头关联资产（linked_assets，资产小图/@引用展示；失败不阻断列表）。
 func (r *Repo) ListShotsByBeat(ctx context.Context, beatID int64) ([]ShotVideoDTO, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT sh.id, sh.shot_uuid::text, sh.sort_order, sh.duration_sec,
 		       COALESCE(sh.video_generation_status::text, 'PENDING'),
 		       COALESCE(sh.generated_video_url, '')
-		FROM shots sh WHERE sh.narrative_unit_id=$1 AND sh.deleted_at IS NULL ORDER BY sh.sort_order`,
+		FROM shots sh
+		LEFT JOIN shot_groups sg ON sg.id = sh.shot_group_id
+		WHERE sh.narrative_unit_id=$1 AND sh.deleted_at IS NULL
+		ORDER BY COALESCE(sg.sort_order, 0), sh.sort_order, sh.id`,
 		beatID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := make([]ShotVideoDTO, 0)
+	ids := make([]int64, 0, 8)
 	for rows.Next() {
 		var s ShotVideoDTO
 		if err := rows.Scan(&s.ShotID, &s.ShotUUID, &s.SortOrder, &s.DurationSec, &s.VideoStatus, &s.GeneratedVideoURL); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
+		ids = append(ids, s.ShotID)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if refs, rerr := r.ShotAssetRefsByIDs(ctx, ids); rerr == nil {
+		for i := range out {
+			out[i].LinkedAssets = refs[out[i].ShotID]
+		}
+	}
+	return out, nil
 }
 
 // ListShotsByGroup 镜头块下全部镜头（3.3.7b 镜头块批量生成用）。
@@ -455,18 +517,47 @@ func (r *Repo) MarkTaskFailed(ctx context.Context, taskID int64, reason string) 
 }
 
 // BeatAssetReadiness 单元关联资产就绪度（F10 门控，18 - 视频制作 阶段一.3）：
-// linked=关联资产数；ready=参考图（assets.main_image_url）非空数。
+// linked=关联资产数；ready=参考图非空数（业务表口径：角色→首个变体、场景/道具→自身 main_image_url，
+// 与 LoadShotRefs 一致；assets 表为通用注册表无 main_image_url 列）。
 // linked>0 且 ready<linked → 引导回 Step2（对齐 LuxReal code=6002）；无关联资产则放行纯 T2V。
 func (r *Repo) BeatAssetReadiness(ctx context.Context, beatID int64) (linked, ready int, err error) {
+	var l, rd int64
 	err = r.pool.QueryRow(ctx, `
-		SELECT count(*), count(*) FILTER (WHERE COALESCE(a.main_image_url,'') != '')
-		FROM nu_asset_links nal
-		LEFT JOIN characters c ON nal.asset_kind='CHARACTER' AND nal.asset_id=c.id
-		LEFT JOIN scenes sc ON nal.asset_kind='SCENE' AND nal.asset_id=sc.id
-		LEFT JOIN props p ON nal.asset_kind='PROP' AND nal.asset_id=p.id
-		LEFT JOIN assets a ON a.id=COALESCE(c.asset_id, sc.asset_id, p.asset_id)
-		WHERE nal.narrative_unit_id=$1`, beatID).Scan(&linked, &ready)
-	return
+		SELECT count(*), count(*) FILTER (WHERE t.url != '') FROM (
+			SELECT COALESCE(cv.main_image_url, sc.main_image_url, p.main_image_url, '') AS url
+			FROM nu_asset_links nal
+			LEFT JOIN characters c ON nal.asset_kind='CHARACTER' AND c.id=nal.asset_id AND c.deleted_at IS NULL
+			LEFT JOIN LATERAL (
+			    SELECT main_image_url FROM character_variants
+			    WHERE character_id=c.id AND deleted_at IS NULL ORDER BY id LIMIT 1
+			) cv ON TRUE
+			LEFT JOIN scenes sc ON nal.asset_kind='SCENE' AND sc.id=nal.asset_id AND sc.deleted_at IS NULL
+			LEFT JOIN props p ON nal.asset_kind='PROP' AND p.id=nal.asset_id AND p.deleted_at IS NULL
+			WHERE nal.narrative_unit_id=$1
+		) t`, beatID).Scan(&l, &rd)
+	return int(l), int(rd), err
+}
+
+// ResetBeatShotVideos 重置 beat 下全部已 SUCCESS 镜头与镜头块（PENDING + 清旧视频 URL）。
+// "重新生成"语义（redo）：批量接口默认只补缺失镜头，redo=true 时先重置已成功镜头再全量重建
+// （对齐单镜头 RegenerateShot 的重置语义；镜头块状态一并回退避免残留 COMPOSED/SUCCESS）。
+func (r *Repo) ResetBeatShotVideos(ctx context.Context, beatID int64) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `
+		UPDATE shots SET video_generation_status='PENDING', generated_video_url=NULL, updated_at=NOW()
+		WHERE narrative_unit_id=$1 AND video_generation_status='SUCCESS' AND deleted_at IS NULL`, beatID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE shot_groups SET video_generation_status='PENDING', updated_at=NOW()
+		WHERE narrative_unit_id=$1 AND video_generation_status='SUCCESS' AND deleted_at IS NULL`, beatID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // ResolveVideoModelKey 校验模型 key（models.model_key，T2V 能力、启用中）：

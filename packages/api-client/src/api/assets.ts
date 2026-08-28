@@ -109,6 +109,12 @@ export const assetsApi = {
   // 3.2.19 批量生成资产图
   batchGenerate: (req: BatchGenerateReq) =>
     api.post<{ task_uuids: string[]; created: number }>("/assets/batch-generate", req),
+  // Step3 补充缺失资产：创建角色/场景/道具并挂到叙事单元（同名幂等复用；origin 归属所在剧集）
+  createLinkedAsset: (nuId: string, body: { asset_kind: "CHARACTER" | "SCENE" | "PROP"; name: string; description?: string }) =>
+    api.post<{ asset_id: number; asset_kind: "CHARACTER" | "SCENE" | "PROP"; episode_sort_order: number }>(
+      `/narrative-units/${nuId}/assets/create`,
+      body,
+    ),
   // 3.4.4 预签名上传
   presign: (data: { biz_type: string; file_name: string; content_type: string; size: number }) =>
     api.post<PresignResp>("/uploads/presign", data),

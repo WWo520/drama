@@ -1,4 +1,4 @@
-﻿// video_store 实现 agent.VideoStore：镜头加载/视频回写（CAS 幂等）/ 进度更新/镜头块状态。
+// video_store 实现 agent.VideoStore：镜头加载/视频回写（CAS 幂等）/ 进度更新/镜头块状态。
 package repository
 
 import (
@@ -308,34 +308,97 @@ func (s *VideoStore) ConcatShotGroup(ctx context.Context, shotGroupID int64) err
 	return err
 }
 
-// CompleteVideoIfAllDone 项目下全部镜头 SUCCESS 后推进状态：VIDEO_GENERATING/PARTIAL_VIDEOS → ALL_VIDEOS_READY。
-func (s *VideoStore) CompleteVideoIfAllDone(ctx context.Context, projectID int64) error {
-	var remaining int
-	if err := s.pool.QueryRow(ctx, `
-		SELECT count(*) FROM shots
-		WHERE project_id=$1 AND deleted_at IS NULL AND video_generation_status != 'SUCCESS'`,
-		projectID).Scan(&remaining); err != nil {
+// LoadCard 加载成片卡信息（card 模式生成入口；deleted_at 过滤）。
+func (s *VideoStore) LoadCard(ctx context.Context, cardID int64) (*agent.CardInfo, error) {
+	var info agent.CardInfo
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, project_id, narrative_unit_id, duration_sec, COALESCE(title,''), COALESCE(prompt_text,'')
+		FROM video_cards WHERE id=$1 AND deleted_at IS NULL`, cardID).
+		Scan(&info.CardID, &info.ProjectID, &info.NarrativeUnitID, &info.DurationSec, &info.Title, &info.PromptText)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, agent.ErrProjectNotFound
+	}
+	return &info, err
+}
+
+// LoadCardShots 按顺序加载卡内镜头（sort_order 单元内全局递增；含 8 字段分镜结构）。
+func (s *VideoStore) LoadCardShots(ctx context.Context, cardID int64) ([]*agent.ShotInfo, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT sh.id, sh.shot_group_id, sh.project_id, sh.narrative_unit_id, sh.duration_sec,
+		       COALESCE(sh.prompt_refined, ''), COALESCE(sh.reference_image_url, ''),
+		       COALESCE(sh.shot_size::text,''), COALESCE(sh.camera_movement::text,''),
+		       COALESCE(sh.camera_angle::text,''),
+		       COALESCE(sh.subject_description,''), COALESCE(sh.background_description,''),
+		       COALESCE(sh.local_light_description,''), COALESCE(sh.dialogue_text,''),
+		       COALESCE(sh.ambient_sound,'')
+		FROM shots sh WHERE sh.video_card_id=$1 AND sh.deleted_at IS NULL
+		ORDER BY sh.sort_order, sh.id`, cardID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*agent.ShotInfo, 0, 4)
+	for rows.Next() {
+		info := &agent.ShotInfo{}
+		if err := rows.Scan(&info.ShotID, &info.ShotGroupID, &info.ProjectID, &info.NarrativeUnitID,
+			&info.DurationSec, &info.PromptRefined, &info.ReferenceImageURL,
+			&info.ShotSize, &info.CameraMovement, &info.CameraAngle,
+			&info.Subject, &info.Background, &info.Light, &info.Dialogue, &info.AmbientSound); err != nil {
+			continue
+		}
+		out = append(out, info)
+	}
+	return out, rows.Err()
+}
+
+// SaveCardVideo 回调幂等：卡片非 SUCCESS 才写入；成功时卡内 shots 同步置 SUCCESS
+// （Step4 展平 / CompleteVideoIfAllDone 按镜头统计，保持兼容）。
+func (s *VideoStore) SaveCardVideo(ctx context.Context, cardID int64, videoURL string, progressPct int, taskID int64) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE video_cards SET generated_video_url=$2, generation_status='SUCCESS', generation_task_id=$3, updated_at=NOW()
+		WHERE id=$1 AND generation_status!='SUCCESS' AND deleted_at IS NULL`,
+		cardID, videoURL, taskID)
+	if err != nil {
 		return err
 	}
-	if remaining == 0 {
-		_, err := s.pool.Exec(ctx, `
-			UPDATE projects SET status='ALL_VIDEOS_READY', current_step='FINAL_PREVIEW'
-			WHERE id=$1 AND status IN ('VIDEO_GENERATING','PARTIAL_VIDEOS')`, projectID)
+	if tag.RowsAffected() == 0 {
+		return nil // 已 SUCCESS（重复回调/乱序），幂等跳过
+	}
+	// 卡内镜头同步置成功（视频为整段连续画面，天然覆盖全部卡内镜头）
+	if _, err := s.pool.Exec(ctx, `
+		UPDATE shots SET generated_video_url=$2, video_generation_status='SUCCESS', updated_at=NOW()
+		WHERE video_card_id=$1 AND deleted_at IS NULL AND video_generation_status != 'SUCCESS'`,
+		cardID, videoURL); err != nil {
 		return err
 	}
-	// 有失败镜头 → PARTIAL_VIDEOS（仅当此前处于 VIDEO_GENERATING 且存在非 SUCCESS 非 PENDING）
-	var failed int
-	if err := s.pool.QueryRow(ctx, `
-		SELECT count(*) FROM shots
-		WHERE project_id=$1 AND deleted_at IS NULL AND video_generation_status='FAILED'`,
-		projectID).Scan(&failed); err != nil {
-		return err
-	}
-	if failed > 0 {
-		_, err := s.pool.Exec(ctx, `
-			UPDATE projects SET status='PARTIAL_VIDEOS', current_step='VIDEO_PRODUCTION'
-			WHERE id=$1 AND status='VIDEO_GENERATING'`, projectID)
-		return err
+	var projectID int64
+	if err := s.pool.QueryRow(ctx, `SELECT project_id FROM video_cards WHERE id=$1`, cardID).Scan(&projectID); err == nil {
+		_ = s.CompleteVideoIfAllDone(ctx, projectID)
 	}
 	return nil
+}
+
+// CompleteVideoIfAllDone 出片进度驱动的项目状态机推进（修复合成按钮禁用缺口）：
+//   - 项目内任一镜头 SUCCESS 且尚未进入导出阶段 → PARTIAL_VIDEOS（Step4 可预览与合成）
+//   - 全部镜头 SUCCESS → ALL_VIDEOS_READY（含 PARTIAL_ASSETS 兜底，防状态断链）
+//   - 永不回退 EXPORTING/COMPLETED/ARCHIVED 等后续状态
+//
+// 幂等：无 SUCCESS 镜头时不动任何状态。
+func (s *VideoStore) CompleteVideoIfAllDone(ctx context.Context, projectID int64) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE projects p SET
+		  status = CASE WHEN EXISTS (
+		      SELECT 1 FROM shots s WHERE s.project_id=p.id AND s.deleted_at IS NULL
+		        AND s.video_generation_status::text <> 'SUCCESS'
+		  ) THEN 'PARTIAL_VIDEOS'::project_status_enum
+		      ELSE 'ALL_VIDEOS_READY'::project_status_enum END,
+		  current_step = CASE WHEN EXISTS (
+		      SELECT 1 FROM shots s WHERE s.project_id=p.id AND s.deleted_at IS NULL
+		        AND s.video_generation_status::text <> 'SUCCESS'
+		  ) THEN 'VIDEO_PRODUCTION'::project_step_enum ELSE 'FINAL_PREVIEW'::project_step_enum END,
+		  updated_at = NOW()
+		WHERE p.id=$1 AND p.status='VIDEO_GENERATING'
+		  AND EXISTS (SELECT 1 FROM shots s WHERE s.project_id=p.id AND s.deleted_at IS NULL
+		        AND s.video_generation_status::text='SUCCESS')`, projectID)
+	return err
 }

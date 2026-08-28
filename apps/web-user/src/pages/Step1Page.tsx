@@ -27,6 +27,7 @@ import AgentSkillModal from "../components/AgentSkillModal";
 import ProjectLoadError from "../components/ProjectLoadError";
 import { useStepState } from "../hooks/useStepState";
 import { matchTaskTypes, useWsDrivenPoll } from "../hooks/useWsDrivenPoll";
+import { wsClient } from "../hooks/useWebSocket";
 import "../layouts/shell.css";
 
 // 单元状态 → 徽标（后端无专用枚举，按通用规则映射）
@@ -264,21 +265,43 @@ export default function Step1Page() {
 
   const splittingNow = proj?.status === "SCRIPT_SPLITTING";
 
-  // 拆分等待动画（需求1.1）：LLM 单次调用无真实进度，确定性缓动 5%→95% + 阶段文案轮换。
-  // 拆分结束（splittingNow 变 false）时组件卸载，叙事单元卡片自然接管展示。
+  // 拆分等待进度：优先消费后端真实上报（Worker 阶段化文案：读剧本→逐集镜头设计→
+  // 资产扩写→润色→入库，WS TASK_PROGRESS 推送 + 断线时项目轮询同步）；无真实进度时
+  // 回退确定性缓动动画。拆分结束（splittingNow 变 false）组件卸载。
   const [splitPct, setSplitPct] = useState(5);
-  const splitPhase = splitPct < 25 ? "读取剧本原文" : splitPct < 55 ? "AI 分析剧情结构" : splitPct < 85 ? "划分叙事单元与镜头" : "润色分镜提示词";
+  const [splitPhase, setSplitPhase] = useState("读取剧本原文");
+  const [realProgress, setRealProgress] = useState(false); // 收到过后端真实进度标记
   useEffect(() => {
     if (!splittingNow) return;
+    setRealProgress(false);
+    setSplitPct(5);
+    setSplitPhase("读取剧本原文");
     let cur = 5;
-    setSplitPct(cur);
     const timer = setInterval(() => {
+      if (realProgressRef.current) return; // 真实进度接管后停用假动画
       const delta = Math.max(0.3, (95 - cur) * 0.04);
       cur = Math.min(95, cur + delta);
       setSplitPct(Math.round(cur));
     }, 400);
     return () => clearInterval(timer);
   }, [splittingNow]);
+  const realProgressRef = useRef(realProgress);
+  realProgressRef.current = realProgress;
+
+  // WS 实时进度（TASK_PROGRESS）：拆分任务推送 → 更新百分比与阶段文案
+  useEffect(() => {
+    return wsClient.addMessageListener((msg) => {
+      if (msg.type !== "TASK_PROGRESS") return;
+      const tt = msg.data?.task_type;
+      if (tt && tt !== "SCRIPT_SPLIT") return;
+      const pct = Number(msg.data?.progress_pct);
+      const message = typeof msg.data?.progress_message === "string" ? msg.data.progress_message : "";
+      if (!Number.isFinite(pct) || pct <= 0) return;
+      setRealProgress(true);
+      setSplitPct(Math.min(99, Math.round(pct)));
+      if (message) setSplitPhase(message);
+    });
+  }, []);
   const isDraft = proj?.status === "DRAFT";
   const splitFailed = proj?.status === "SCRIPT_SPLIT_FAILED";
   // 可重新拆分阶段：拆分成功后的资产阶段（后端状态机限定；视频阶段后不可重拆）

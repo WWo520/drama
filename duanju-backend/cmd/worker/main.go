@@ -9,12 +9,18 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+
 	"github.com/duanju/backend/internal/config"
+	"github.com/duanju/backend/internal/domain/creation"
 	"github.com/duanju/backend/internal/engine/agent"
 	"github.com/duanju/backend/internal/engine/billing"
 	"github.com/duanju/backend/internal/engine/model"
@@ -27,10 +33,20 @@ import (
 	"github.com/duanju/backend/internal/repository"
 )
 
+// envOr 环境变量兜底读取（worker 全局；main 内赋值实现）。
+var envOr func(key, def string) string
+
 func main() {
 	role := flag.String("role", "split", "worker 角色: split/asset/video/export")
 	concurrency := flag.Int("c", 2, "消费并发数")
 	flag.Parse()
+
+	envOr = func(key, def string) string {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+		return def
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -123,8 +139,71 @@ func main() {
 	shotRefHandler := agent.NewShotRefImageHandler(videoStore, modelEngine, cfg.App.Env)
 
 	// Worker-Export（S1-B08）：Step4 导出 MP4
+	// 真实合成：MinIO + ffmpeg（FFMPEG_PATH 覆盖可执行路径）；S3 未配置时回退 mock 链路。
 	exportStore := repository.NewExportStore(pool)
 	exportHandler := agent.NewExportHandler(exportStore)
+	if cfg.S3.Endpoint != "" && cfg.S3.Bucket != "" {
+		mc, merr := minio.New(cfg.S3.Endpoint, &minio.Options{
+			Creds:  credentials.NewStaticV4(cfg.S3.AccessKey, cfg.S3.SecretKey, ""),
+			Secure: cfg.S3.UseSSL,
+		})
+		if merr != nil {
+			lg.Warn("S3 客户端初始化失败，导出回退 mock", logger.F("err", merr.Error())...)
+		} else {
+			exportHandler.SetComposer(exportStore, agent.NewFFmpegConcat(exportStore, mc, cfg.S3.Bucket))
+			lg.Info("导出真实合成已装配（ffmpeg+MinIO）", logger.F("bucket", cfg.S3.Bucket, "endpoint", cfg.S3.Endpoint)...)
+			// 资产图持久化（ENABLE_IMAGE_PERSIST=1 开启）：生成图转存到「远端视频 GPU 可达」
+			// 的对象存储，固定 URL 永不过期（火山 TOS 签名 24h 过期 → 图裂的根因）。
+			// 存储目标默认复用 S3_*；用 IMGSTORE_* 可指向独立桶——典型场景为火山 TOS 的
+			// S3 兼容端点（tos-s3-{region}.volces.com），云端 AutoDL 直接拉取。
+			if os.Getenv("ENABLE_IMAGE_PERSIST") == "1" {
+				imgEp := envOr("IMGSTORE_ENDPOINT", cfg.S3.Endpoint)
+				imgAK := envOr("IMGSTORE_ACCESS_KEY", cfg.S3.AccessKey)
+				imgSK := envOr("IMGSTORE_SECRET_KEY", cfg.S3.SecretKey)
+				imgBK := envOr("IMGSTORE_BUCKET", cfg.S3.Bucket)
+				imgRegion := envOr("IMGSTORE_REGION", "cn-beijing")
+				imgPublic := envOr("IMGSTORE_PUBLIC_BASE",
+					fmt.Sprintf("https://{bucket}.tos-%s.volces.com", imgRegion)) // TOS 虚拟主机式默认
+				if strings.Contains(imgEp, "volces.com") || strings.Contains(imgPublic, "volces.com") {
+					// 火山 TOS：minio-go 签名不兼容（实测 SignatureDoesNotMatch），走官方 SDK。
+					mp, terr := agent.NewTOSImagePersist(imgRegion, imgEp, imgAK, imgSK, imgBK, imgPublic)
+					if terr != nil {
+						lg.Warn("TOS 客户端初始化失败，参考图走厂商原始 URL", logger.F("err", terr.Error())...)
+					} else {
+						if perr := mp.EnsurePublicRead(ctx); perr != nil {
+							lg.Warn("桶匿名读策略设置失败（可在控制台手动设为公共读，不影响上传转存）", logger.F("err", perr.Error())...)
+						}
+						assetHandler.SetPersister(mp)
+						shotRefHandler.SetPersister(mp)
+						lg.Info("资产图持久化已装配(TOS)", logger.F(
+							"endpoint", imgEp, "bucket", imgBK, "public_base", imgPublic)...)
+					}
+				} else {
+					imgSSL := strings.EqualFold(os.Getenv("IMGSTORE_USE_SSL"), "true")
+					imgMC, imerr := minio.New(imgEp, &minio.Options{
+						Creds:  credentials.NewStaticV4(imgAK, imgSK, ""),
+						Secure: imgSSL,
+					})
+					if imerr != nil {
+						lg.Warn("图存客户端初始化失败，参考图走厂商原始 URL", logger.F("err", imerr.Error())...)
+					} else {
+						mp := agent.NewMinIOImagePersist(imgMC, imgBK, imgPublic)
+						if perr := mp.EnsurePublicRead(ctx); perr != nil {
+							lg.Warn("桶匿名读策略设置失败（可在控制台手动设为公共读，不影响上传转存）", logger.F("err", perr.Error())...)
+						}
+						assetHandler.SetPersister(mp)
+						shotRefHandler.SetPersister(mp)
+						lg.Info("资产图持久化已装配(MinIO)", logger.F(
+							"endpoint", imgEp, "bucket", imgBK, "public_base", imgPublic)...)
+					}
+				}
+			} else {
+				lg.Info("资产图持久化未启用（ENABLE_IMAGE_PERSIST!=1），保留厂商原始 URL")
+			}
+		}
+	} else {
+		lg.Info("S3 未配置，导出走 mock 链路")
+	}
 
 	// Dispatcher：Outbox → Redis ZADD（仅 split 角色启动，避免多角色重复投递竞争）
 	if *role == "split" {
@@ -157,8 +236,7 @@ func main() {
 	}
 	worker := task.NewWorker(store, queue, handlers)
 
-	// 任务终态 WS 推送（跨进程桥：Redis Pub/Sub → API 进程 Hub → 用户 WS；轮询对齐 LuxReal 的 WS 驱动基础）
-	// 注意：WS 订阅 topic 真源是 user:{user_uuid}（JWT uid 即 user_uuid），数字 id 需换查 UUID。
+	// WS 订阅 topic 真源是 user:{user_uuid}（JWT uid 即 user_uuid），数字 id 需换查 UUID。
 	userUUID := func(ctx context.Context, id int64) string {
 		var u string
 		if err := pool.QueryRow(ctx, `SELECT user_uuid::text FROM users WHERE id=$1`, id).Scan(&u); err != nil {
@@ -166,6 +244,52 @@ func main() {
 		}
 		return u
 	}
+
+	// 拆分真实进度上报（阶段化文案：读剧本→逐集镜头设计→资产扩写→润色→入库）。
+	// 写 task progress（断线轮询可见）+ Redis WS 桥推 TASK_PROGRESS（在线即时可见）；
+	// 2s 节流防进度风暴。当前执行任务 ID 由 Worker 回调 OnTaskStart 原子设置。
+	var curTaskID atomic.Int64
+	worker.OnTaskStart = func(t *task.Task) {
+		if t.TaskType == "SCRIPT_SPLIT" {
+			curTaskID.Store(t.ID)
+		}
+	}
+	if *role == "split" {
+		var lastPush int64 // unix nano，atomic 节流
+		splitHandler.SetProgressReporter(func(pct int, msg string) {
+			taskID := curTaskID.Load()
+			if taskID == 0 {
+				return
+			}
+			_, _ = pool.Exec(ctx, `UPDATE generation_tasks SET progress_pct=$2, progress_message=$3 WHERE id=$1`, taskID, pct, msg)
+			now := time.Now().UnixNano()
+			last := atomic.LoadInt64(&lastPush)
+			if now-last < 2*time.Second.Nanoseconds() || !atomic.CompareAndSwapInt64(&lastPush, last, now) {
+				return
+			}
+			var userID int64
+			var taskUUID string
+			if err := pool.QueryRow(ctx,
+				`SELECT user_id, task_uuid::text FROM generation_tasks WHERE id=$1`, taskID).Scan(&userID, &taskUUID); err != nil {
+				return
+			}
+			if uuid := userUUID(ctx, userID); uuid != "" {
+				_ = notify.PublishPush(ctx, rdb, cfg.App.Env, notify.PushEnvelope{
+					UserID: uuid,
+					Type:   notify.TypeTaskProgress,
+					Data: map[string]any{
+						"task_type":        "SCRIPT_SPLIT",
+						"task_uuid":        taskUUID,
+						"status":           "RUNNING",
+						"progress_pct":     pct,
+						"progress_message": msg,
+					},
+				})
+			}
+		})
+	}
+
+	// 任务终态 WS 推送（跨进程桥：Redis Pub/Sub → API 进程 Hub → 用户 WS）
 	worker.Notifier = func(ctx context.Context, t *task.Task, status, reason string) {
 		if status == task.StatusFailedDead && t.TaskType == splitHandler.Name() && t.ProjectID != nil {
 			// 拆分任务死信兜底回滚：Execute 内部已回滚，但 SaveSplitResult DB 异常等路径漏回滚时，
@@ -251,6 +375,15 @@ func main() {
 			}
 		}
 		return nil
+	}
+	// 业务对象终败归位（OnDead）：视频任务死信 → 卡片/镜头 FAILED，防止前端永久"生成中"
+	creationRepo := creation.NewRepo(pool)
+	worker.OnDead = func(ctx context.Context, t *task.Task, reason string) {
+		switch t.TaskType {
+		case "VIDEO_SEGMENT_GEN", "VIDEO_GROUP_CONCAT":
+			creationRepo.MarkVideoFailedByTask(ctx, t.RequestParamsJSON)
+			lg.Warn("视频任务死信归位", logger.F("task_id", t.ID, "type", t.TaskType, "reason", reason)...)
+		}
 	}
 	for i := 0; i < *concurrency; i++ {
 		go worker.Run(ctx)

@@ -28,10 +28,14 @@ type ShotRefImageStore interface {
 
 // ShotRefImageHandler 实现 task.Handler（task_type=SHOT_REF_IMAGE_GEN）。
 type ShotRefImageHandler struct {
-	store  ShotRefImageStore
-	engine ImageGenClient // 可为 nil：未注入时降级 mock（开发期）
-	env    string
+	store   ShotRefImageStore
+	engine  ImageGenClient // 可为 nil：未注入时降级 mock（开发期）
+	env     string
+	persist ImagePersister // 可选：参考图转存自有 MinIO
 }
+
+// SetPersister 注入图片持久化（nil 不转存）。
+func (h *ShotRefImageHandler) SetPersister(p ImagePersister) { h.persist = p }
 
 // NewShotRefImageHandler 构造处理器。
 func NewShotRefImageHandler(store ShotRefImageStore, engine ImageGenClient, env string) *ShotRefImageHandler {
@@ -91,6 +95,10 @@ func (h *ShotRefImageHandler) Execute(ctx context.Context, t *task.Task) ([]byte
 	if imageURL == "" {
 		imageURL = fmt.Sprintf("%s/shot-ref-placeholder.png?shot=%d&t=%d",
 			mockCDNBase(), params.ShotID, time.Now().UnixMilli())
+	}
+	// 真实参考图转存自有 MinIO（同资产图：TOS 签名 24h 过期根因）
+	if !isMock {
+		imageURL = persistGeneratedImage(ctx, h.persist, shot.ProjectID, "SHOT", params.ShotID, imageURL)
 	}
 	if err := h.store.SaveShotRefImage(ctx, params.ShotID, imageURL, t.ID); err != nil {
 		return nil, err

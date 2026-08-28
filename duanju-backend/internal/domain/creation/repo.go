@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -127,13 +128,32 @@ func (r *Repo) ListProjects(ctx context.Context, spaceID int64, page, pageSize i
 		return nil, 0, err
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT p.id, p.project_uuid::text, p.title, p.cover_image_url, p.project_type::text,
+		SELECT p.id, p.project_uuid::text, p.title, COALESCE(p.cover_image_url, fb.url), p.project_type::text,
 		       p.current_step::text, p.status::text, p.total_episode_count, p.total_duration_sec,
 		       to_char(p.last_opened_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		       to_char(p.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		       to_char(p.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		       s.space_uuid::text
 		FROM projects p JOIN spaces s ON s.id = p.space_id
+		LEFT JOIN LATERAL (
+			SELECT url FROM (
+				(SELECT sh.reference_image_url AS url FROM shots sh
+				  WHERE sh.project_id = p.id AND sh.deleted_at IS NULL
+				    AND COALESCE(sh.reference_image_url, '') <> ''
+				  ORDER BY sh.id LIMIT 1)
+				UNION ALL
+				(SELECT sc.main_image_url FROM scenes sc
+				  WHERE sc.project_id = p.id AND sc.deleted_at IS NULL
+				    AND COALESCE(sc.main_image_url, '') <> ''
+				  ORDER BY sc.id LIMIT 1)
+				UNION ALL
+				(SELECT cv.main_image_url FROM characters ch
+				  JOIN character_variants cv ON cv.character_id = ch.id
+				 WHERE ch.project_id = p.id AND ch.deleted_at IS NULL AND cv.deleted_at IS NULL
+				   AND COALESCE(cv.main_image_url, '') <> ''
+				 ORDER BY cv.id LIMIT 1)
+			) t LIMIT 1
+		) fb ON TRUE
 		WHERE p.space_id = $1 AND p.deleted_at IS NULL
 		ORDER BY p.last_opened_at DESC
 		LIMIT $2 OFFSET $3`,
@@ -325,7 +345,7 @@ func (r *Repo) ListEpisodes(ctx context.Context, projectID int64) ([]EpisodeDTO,
 	return out, rows.Err()
 }
 
-// ShotVideoDTO 单镜头视频状态（3.3.7a 触发/轮询用）。
+// ShotVideoDTO 单镜头视频状态（3.3.7a 触发/轮询用；成片卡内嵌摘要）。
 type ShotVideoDTO struct {
 	ShotID            int64                `json:"shot_id"`
 	ShotUUID          string               `json:"shot_uuid"`
@@ -334,6 +354,10 @@ type ShotVideoDTO struct {
 	VideoStatus       string               `json:"video_generation_status"`
 	GeneratedVideoURL string               `json:"generated_video_url"`
 	LinkedAssets      []ShotLinkedAssetDTO `json:"linked_assets,omitempty"`
+	ShotGroupID       int64                `json:"shot_group_id,omitempty"`
+	// 摘要字段（仅成片卡视图填充；ListShotsByBeat 不返回）
+	SubjectDescription string `json:"subject_description,omitempty"`
+	DialogueText       string `json:"dialogue_text,omitempty"`
 }
 
 // ShotLinkedAssetDTO 镜头关联资产（shot_asset_refs JOIN 业务表：名称/参考图/生成状态，
@@ -389,7 +413,8 @@ func (r *Repo) ListShotsByBeat(ctx context.Context, beatID int64) ([]ShotVideoDT
 	rows, err := r.pool.Query(ctx, `
 		SELECT sh.id, sh.shot_uuid::text, sh.sort_order, sh.duration_sec,
 		       COALESCE(sh.video_generation_status::text, 'PENDING'),
-		       COALESCE(sh.generated_video_url, '')
+		       COALESCE(sh.generated_video_url, ''),
+		       COALESCE(sh.shot_group_id, 0)
 		FROM shots sh
 		LEFT JOIN shot_groups sg ON sg.id = sh.shot_group_id
 		WHERE sh.narrative_unit_id=$1 AND sh.deleted_at IS NULL
@@ -403,7 +428,8 @@ func (r *Repo) ListShotsByBeat(ctx context.Context, beatID int64) ([]ShotVideoDT
 	ids := make([]int64, 0, 8)
 	for rows.Next() {
 		var s ShotVideoDTO
-		if err := rows.Scan(&s.ShotID, &s.ShotUUID, &s.SortOrder, &s.DurationSec, &s.VideoStatus, &s.GeneratedVideoURL); err != nil {
+		if err := rows.Scan(&s.ShotID, &s.ShotUUID, &s.SortOrder, &s.DurationSec,
+			&s.VideoStatus, &s.GeneratedVideoURL, &s.ShotGroupID); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -506,6 +532,492 @@ func (r *Repo) CreateVideoTasks(ctx context.Context, projectID, spaceID, userID,
 		return nil, err
 	}
 	return taskIDs, nil
+}
+
+// VideoCardDTO 成片卡（对齐 LuxReal「成片卡」：一次视频生成任务 = 2~4 个连续分镜镜头的合并段）。
+type VideoCardDTO struct {
+	CardID            int64          `json:"card_id"`
+	CardUUID          string         `json:"card_uuid"`
+	Title             string         `json:"title"`
+	SortOrder         int            `json:"sort_order"`
+	DurationSec       int            `json:"duration_sec"`
+	ShotCount         int            `json:"shot_count"`
+	Status            string         `json:"generation_status"` // PENDING/QUEUED/RUNNING/SUCCESS
+	GeneratedVideoURL string         `json:"generated_video_url"`
+	PromptText        string         `json:"prompt_text"`
+	Shots             []ShotVideoDTO `json:"shots,omitempty"`
+}
+
+// ListCardsByBeat 单元下全部成片卡（含卡内镜头摘要与关联资产；Step3 卡片网格数据源）。
+func (r *Repo) ListCardsByBeat(ctx context.Context, beatID int64) ([]VideoCardDTO, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT vc.id, vc.card_uuid::text, COALESCE(vc.title,''), vc.sort_order, vc.duration_sec, vc.shot_count,
+		       vc.generation_status::text, COALESCE(vc.generated_video_url,''), COALESCE(vc.prompt_text,'')
+		FROM video_cards vc
+		WHERE vc.narrative_unit_id=$1 AND vc.deleted_at IS NULL
+		ORDER BY vc.sort_order`, beatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]VideoCardDTO, 0, 6)
+	cardIDs := make([]int64, 0, 6)
+	for rows.Next() {
+		var v VideoCardDTO
+		if err := rows.Scan(&v.CardID, &v.CardUUID, &v.Title, &v.SortOrder, &v.DurationSec,
+			&v.ShotCount, &v.Status, &v.GeneratedVideoURL, &v.PromptText); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+		cardIDs = append(cardIDs, v.CardID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return out, nil
+	}
+	// 卡内镜头批量查询（含主体/台词一行摘要）
+	type cardShotRow struct {
+		cardID  int64
+		shot    ShotVideoDTO
+		subject string
+	}
+	shotRows := make(map[int64][]cardShotRow, len(out))
+	allShotIDs := make([]int64, 0, len(out)*4)
+	srows, err := r.pool.Query(ctx, `
+		SELECT sh.video_card_id, sh.id, sh.shot_uuid::text, sh.sort_order, sh.duration_sec,
+		       COALESCE(sh.video_generation_status::text,'PENDING'), COALESCE(sh.generated_video_url,''),
+		       COALESCE(sh.subject_description,''), COALESCE(sh.dialogue_text,'')
+		FROM shots sh WHERE sh.deleted_at IS NULL AND sh.video_card_id = ANY($1)
+		ORDER BY sh.sort_order, sh.id`, cardIDs)
+	if err == nil {
+		defer srows.Close()
+		for srows.Next() {
+			var r2 cardShotRow
+			r2.shot = ShotVideoDTO{}
+			if err := srows.Scan(&r2.cardID, &r2.shot.ShotID, &r2.shot.ShotUUID, &r2.shot.SortOrder,
+				&r2.shot.DurationSec, &r2.shot.VideoStatus, &r2.shot.GeneratedVideoURL,
+				&r2.subject, &r2.shot.DialogueText); err != nil {
+				continue
+			}
+			shotRows[r2.cardID] = append(shotRows[r2.cardID], r2)
+			allShotIDs = append(allShotIDs, r2.shot.ShotID)
+		}
+	}
+	refs, _ := r.ShotAssetRefsByIDs(ctx, allShotIDs)
+	subjects := map[int64]string{}
+	for _, csList := range shotRows {
+		for _, cs := range csList {
+			subjects[cs.shot.ShotID] = cs.subject
+		}
+	}
+	_ = subjects
+	for ci := range out {
+		rowsList := shotRows[out[ci].CardID]
+		out[ci].Shots = make([]ShotVideoDTO, 0, len(rowsList))
+		for _, cs := range rowsList {
+			cs.shot.LinkedAssets = refs[cs.shot.ShotID]
+			cs.shot.SubjectDescription = cs.subject
+			out[ci].Shots = append(out[ci].Shots, cs.shot)
+		}
+		if out[ci].ShotCount == 0 {
+			out[ci].ShotCount = len(rowsList)
+		}
+	}
+	return out, nil
+}
+
+// InsertVideoCards 规划视频任务入库（事务）：作废旧卡 → 按编组插入新卡 → 绑定镜头。
+// groups 为连续镜头编组（每个元素是 shots.ShotID 列表），标题按全局镜头号拼接。
+func (r *Repo) InsertVideoCards(ctx context.Context, beatID int64, globalOrder map[int64]int, groups [][]int64, shotsByID map[int64]ShotVideoDTO) (int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	// 作废旧卡并解绑（重新规划语义：旧卡及其视频一并废弃）
+	if _, err := tx.Exec(ctx, `UPDATE shots SET video_card_id=NULL WHERE narrative_unit_id=$1`, beatID); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE video_cards SET deleted_at=NOW(), updated_at=NOW()
+		WHERE narrative_unit_id=$1 AND deleted_at IS NULL`, beatID); err != nil {
+		return 0, err
+	}
+	n := 0
+	for gi, ids := range groups {
+		if len(ids) == 0 {
+			continue
+		}
+		firstNo, lastNo := globalOrder[ids[0]], globalOrder[ids[len(ids)-1]]
+		title := fmt.Sprintf("镜头%d~镜头%d", firstNo, lastNo)
+		if firstNo == lastNo {
+			title = fmt.Sprintf("镜头%d", firstNo)
+		}
+		totalDur := 0
+		for _, id := range ids {
+			totalDur += shotsByID[id].DurationSec
+		}
+		var cardID int64
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO video_cards (narrative_unit_id, project_id, sort_order, title, duration_sec, shot_count)
+			VALUES ($1, (SELECT project_id FROM narrative_units WHERE id=$1), $2, $3, $4, $5)
+			RETURNING id`,
+			beatID, gi+1, title, totalDur, len(ids)).Scan(&cardID); err != nil {
+			return 0, err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE shots SET video_card_id=$2 WHERE id = ANY($1)`, ids, cardID); err != nil {
+			return 0, err
+		}
+		n++
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// CreateCardVideoTasks 为非 SUCCESS 成片卡批量建 VIDEO_SEGMENT_GEN 任务（params.card_id，
+// Outbox 同事务同 CreateVideoTasks 模式）；队列 'video'，预置卡片 RUNNING。
+func (r *Repo) CreateCardVideoTasks(ctx context.Context, projectID, spaceID, userID, beatID int64, cards []VideoCardDTO, opts VideoGenOpts) ([]int64, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	taskIDs := make([]int64, 0, len(cards))
+	for _, cd := range cards {
+		p := map[string]any{"card_id": cd.CardID}
+		if opts.Resolution != "" {
+			p["resolution"] = opts.Resolution
+		}
+		if opts.ModelKey != "" {
+			p["model_key"] = opts.ModelKey
+		}
+		params, _ := json.Marshal(p)
+		var taskID int64
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO generation_tasks (request_id, idempotency_key, space_id, user_id, project_id, task_type, status, ai_model_requested, request_params_json)
+			VALUES ('video-'||gen_random_uuid(), 'video-'||gen_random_uuid(), $1, $2, $3, 'VIDEO_SEGMENT_GEN', 'QUEUED', NULLIF($4,''), $5::jsonb)
+			RETURNING id`,
+			spaceID, userID, projectID, opts.VideoModel, string(params)).Scan(&taskID); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO task_dispatch_outbox (event_type, task_id, dispatch_key, queue_name, payload_json)
+			VALUES ('TASK_DISPATCH', $1::bigint, 'task:'||$1::text||':dispatch:video', 'video',
+			        jsonb_build_object('task_id', $1::int, 'eligible_at_ms', extract(epoch from now())*1000, 'priority', 5, 'attempt_no', 1))`,
+			taskID); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE video_cards SET generation_status='RUNNING', generation_task_id=$2, updated_at=NOW()
+			WHERE id=$1`, cd.CardID, taskID); err != nil {
+			return nil, err
+		}
+		taskIDs = append(taskIDs, taskID)
+	}
+	if len(taskIDs) > 0 {
+		if _, err := tx.Exec(ctx, `
+			UPDATE projects SET status='VIDEO_GENERATING', current_step='VIDEO_PRODUCTION'
+			WHERE id=$1 AND status IN ('PARTIAL_ASSETS','ALL_ASSETS_READY')`, projectID); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return taskIDs, nil
+}
+
+// CreateShotRefImageTasks 为指定镜头批量创建镜头参考图任务（SHOT_REF_IMAGE_GEN，asset 队列）。
+// 规划视频任务后为各卡首镜自动补图：作为视频生成的「首帧画面基准」锚点，
+// 显著降低跨卡拼接的画面跳变。已有参考图的镜头自动跳过；单条失败不阻断批量。
+func (r *Repo) CreateShotRefImageTasks(ctx context.Context, projectID, spaceID, userID int64, shotIDs []int64) ([]int64, error) {
+	if len(shotIDs) == 0 {
+		return nil, nil
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	taskIDs := make([]int64, 0, len(shotIDs))
+	for _, sid := range shotIDs {
+		var hasRef bool
+		if err := tx.QueryRow(ctx,
+			`SELECT COALESCE(reference_image_url,'') <> '' FROM shots WHERE id=$1 AND deleted_at IS NULL`,
+			sid).Scan(&hasRef); err != nil {
+			continue // 镜头不存在/已删 → 跳过
+		}
+		if hasRef {
+			continue
+		}
+		params, _ := json.Marshal(map[string]any{"shot_id": sid})
+		var taskID int64
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO generation_tasks (request_id, idempotency_key, space_id, user_id, project_id, task_type, status, request_params_json)
+			VALUES ('shotref-'||gen_random_uuid(), 'shotref-'||gen_random_uuid(), $1, $2, $3, 'SHOT_REF_IMAGE_GEN', 'QUEUED', $4::jsonb)
+			RETURNING id`,
+			spaceID, userID, projectID, string(params)).Scan(&taskID); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO task_dispatch_outbox (event_type, task_id, dispatch_key, queue_name, payload_json)
+			VALUES ('TASK_DISPATCH', $1::bigint, 'task:'||$1::text||':dispatch:asset', 'asset',
+			        jsonb_build_object('task_id', $1::int, 'eligible_at_ms', extract(epoch from now())*1000, 'priority', 5, 'attempt_no', 1))`,
+			taskID); err != nil {
+			return nil, err
+		}
+		taskIDs = append(taskIDs, taskID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return taskIDs, nil
+}
+
+// ResetBeatCardVideos 重做模式重置单元下全部成片卡与卡内镜头为 PENDING（清空旧视频 URL）。
+func (r *Repo) ResetBeatCardVideos(ctx context.Context, beatID int64) error {
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE video_cards SET generation_status='PENDING', generated_video_url=NULL, point_cost=0, updated_at=NOW()
+		WHERE narrative_unit_id=$1 AND deleted_at IS NULL`, beatID); err != nil {
+		return err
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE shots SET video_generation_status='PENDING', generated_video_url=NULL, updated_at=NOW()
+		WHERE narrative_unit_id=$1 AND deleted_at IS NULL`, beatID)
+	return err
+}
+
+// ResolveCard 解析 card_uuid → 基础信息（重生成/提示词编辑用）。
+type CardBasic struct {
+	ID              int64
+	ProjectID       int64
+	NarrativeUnitID int64
+	Title           string
+	DurationSec     int
+	Status          string
+	PromptText      string
+}
+
+func (r *Repo) ResolveCard(ctx context.Context, cardUUID string) (*CardBasic, error) {
+	var cb CardBasic
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, project_id, narrative_unit_id, COALESCE(title,''), duration_sec,
+		       generation_status::text, COALESCE(prompt_text,'')
+		FROM video_cards WHERE card_uuid=$1 AND deleted_at IS NULL`, cardUUID).
+		Scan(&cb.ID, &cb.ProjectID, &cb.NarrativeUnitID, &cb.Title, &cb.DurationSec, &cb.Status, &cb.PromptText)
+	if err != nil {
+		return nil, err
+	}
+	return &cb, nil
+}
+
+// SetCardPrompt 更新成片卡自定义提示词（空串恢复自动组装）。
+func (r *Repo) SetCardPrompt(ctx context.Context, cardID int64, promptText string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE video_cards SET prompt_text=NULLIF($2,''), updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL`,
+		cardID, promptText)
+	return err
+}
+
+// SetCardDuration 更新成片卡送模型时长（对齐 LuxReal 卡头时长下拉；4~15s 由服务层 clamp）。
+func (r *Repo) SetCardDuration(ctx context.Context, cardID int64, durationSec int) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE video_cards SET duration_sec=$2, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL`,
+		cardID, durationSec)
+	return err
+}
+
+// BindCardAsset 卡级绑定参考资产：对卡内全部存活镜头写 shot_asset_refs（去重）。
+// 对齐 LuxReal 拖资产 chip 进卡的精准绑定语义；返回实际新增行数。
+func (r *Repo) BindCardAsset(ctx context.Context, cardID int64, assetKind string, assetID int64) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `
+		WITH card_shots AS (
+			SELECT id FROM shots WHERE video_card_id=$1 AND deleted_at IS NULL
+		)
+		INSERT INTO shot_asset_refs (shot_id, asset_kind, asset_id)
+		SELECT cs.id, $2::asset_kind_enum, $3
+		FROM card_shots cs
+		WHERE NOT EXISTS (
+			SELECT 1 FROM shot_asset_refs sar
+			WHERE sar.shot_id = cs.id AND sar.asset_kind = $2::asset_kind_enum AND sar.asset_id = $3
+		)`, cardID, assetKind, assetID)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// UnbindCardAsset 卡级解绑参考资产：移除卡内全部镜头的该资产显式引用
+// （无镜头级覆盖后 LoadShotRefAssets 自动回落单元级链，不会断参考）。
+func (r *Repo) UnbindCardAsset(ctx context.Context, cardID int64, assetKind string, assetID int64) error {
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM shot_asset_refs sar
+		USING shots sh
+		WHERE sar.shot_id = sh.id AND sh.video_card_id=$1
+		  AND sar.asset_kind = $2::asset_kind_enum AND sar.asset_id = $3`,
+		cardID, assetKind, assetID)
+	return err
+}
+
+// BindShotAsset 镜头级绑定参考资产（精准到单个镜头，对齐 LuxReal @ 引用语义）：
+// 单镜头 upsert shot_asset_refs + 同步 linked_assets_json 快照。
+// 注意：镜头级一旦存在任一显式行，LoadShotRefAssets 即完全使用镜头级列表（不再混合单元级继承）。
+func (r *Repo) BindShotAsset(ctx context.Context, shotID int64, assetKind string, assetID int64) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
+		INSERT INTO shot_asset_refs (shot_id, asset_kind, asset_id)
+		VALUES ($1, $2::asset_kind_enum, $3)
+		ON CONFLICT (shot_id, asset_kind, asset_id) DO NOTHING`,
+		shotID, assetKind, assetID)
+	if err != nil {
+		return false, err
+	}
+	if err := r.SyncShotLinkedAssets(ctx, shotID); err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// UnbindShotAsset 镜头级解绑：仅删除该镜头的显式引用行。
+// 返回删除行数；0 行表示该引用来自叙事单元级继承（无法按镜头单独摘除），
+// 由上层决定提示文案。解绑后同步刷新快照（显式行清空则回落展示单元级继承项）。
+func (r *Repo) UnbindShotAsset(ctx context.Context, shotID int64, assetKind string, assetID int64) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM shot_asset_refs
+		WHERE shot_id=$1 AND asset_kind=$2::asset_kind_enum AND asset_id=$3`,
+		shotID, assetKind, assetID)
+	if err != nil {
+		return 0, err
+	}
+	n := tag.RowsAffected()
+	if n > 0 {
+		if uerr := r.SyncShotLinkedAssets(ctx, shotID); uerr != nil {
+			return n, uerr
+		}
+	}
+	return n, nil
+}
+
+// SyncShotLinkedAssets 重算单镜头的 linked_assets_json 快照：
+// 存在显式行 → 快照=显式引用集；否则快照=叙事单元级继承集（与生成侧 LoadShotRefAssets 口径一致）。
+func (r *Repo) SyncShotLinkedAssets(ctx context.Context, shotID int64) error {
+	var explicit int
+	if err := r.pool.QueryRow(ctx, `
+		SELECT count(*) FROM shot_asset_refs WHERE shot_id=$1`, shotID).Scan(&explicit); err != nil {
+		return err
+	}
+	// 统一列序：name / kind / id（pad 占位保证两分支结构一致）
+	sqlExplicit := `
+		SELECT COALESCE(c.name, sc.base_name, p.name, '') AS name,
+		       sar.asset_kind::text AS kind, sar.asset_id AS id
+		FROM shot_asset_refs sar
+		LEFT JOIN characters c ON sar.asset_kind='CHARACTER' AND c.id=sar.asset_id AND c.deleted_at IS NULL
+		LEFT JOIN scenes sc ON sar.asset_kind='SCENE' AND sc.id=sar.asset_id AND sc.deleted_at IS NULL
+		LEFT JOIN props p ON sar.asset_kind='PROP' AND p.id=sar.asset_id AND p.deleted_at IS NULL
+		WHERE sar.shot_id=$1`
+	sqlInherit := `
+		SELECT COALESCE(c.name, sc.base_name, p.name, '') AS name,
+		       nal.asset_kind::text AS kind, nal.asset_id AS id
+		FROM nu_asset_links nal
+		LEFT JOIN characters c ON nal.asset_kind='CHARACTER' AND c.id=nal.asset_id AND c.deleted_at IS NULL
+		LEFT JOIN scenes sc ON nal.asset_kind='SCENE' AND sc.id=nal.asset_id AND sc.deleted_at IS NULL
+		LEFT JOIN props p ON nal.asset_kind='PROP' AND p.id=nal.asset_id AND p.deleted_at IS NULL
+		WHERE nal.narrative_unit_id=(SELECT narrative_unit_id FROM shots WHERE id=$1)`
+	q := sqlExplicit
+	if explicit == 0 {
+		q = sqlInherit
+	}
+	rows, err := r.pool.Query(ctx, q, shotID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type snap struct {
+		id   int64
+		kind string
+		name string
+	}
+	items := make([]snap, 0, 8)
+	for rows.Next() {
+		var it snap
+		if err := rows.Scan(&it.name, &it.kind, &it.id); err != nil {
+			continue
+		}
+		items = append(items, it)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	out := make([]map[string]any, 0, len(items))
+	seen := make(map[string]bool, len(items))
+	for _, it := range items {
+		key := it.kind + ":" + strconv.FormatInt(it.id, 10)
+		if it.name == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, map[string]any{"asset_kind": it.kind, "asset_id": it.id, "name": it.name})
+	}
+	lj, _ := json.Marshal(out)
+	_, err = r.pool.Exec(ctx, `
+		UPDATE shots SET linked_assets_json=$2::jsonb, updated_at=NOW() WHERE id=$1`,
+		shotID, string(lj))
+	return err
+}
+
+// MarkVideoCardFailedByTask 任务死信归位：card_id 命中的卡置 FAILED_DEAD + 卡内镜头 FAILED；
+// legacy shot 模式（params.shot_id）同样把镜头置 FAILED。幂等，失败容错（只记日志由调用方打）。
+func (r *Repo) MarkVideoFailedByTask(ctx context.Context, paramsJSON []byte) {
+	var p struct {
+		CardID int64 `json:"card_id"`
+		ShotID int64 `json:"shot_id"`
+	}
+	if err := json.Unmarshal(paramsJSON, &p); err != nil {
+		return
+	}
+	if p.CardID != 0 {
+		if _, err := r.pool.Exec(ctx, `
+			UPDATE video_cards SET generation_status='FAILED_DEAD', updated_at=NOW()
+			WHERE id=$1 AND generation_status IN ('PENDING','QUEUED','RUNNING')`, p.CardID); err != nil {
+			return
+		}
+		_, _ = r.pool.Exec(ctx, `
+			UPDATE shots SET video_generation_status='FAILED_DEAD', updated_at=NOW()
+			WHERE video_card_id=$1 AND video_generation_status NOT IN ('SUCCESS','FAILED_DEAD')`, p.CardID)
+	}
+	if p.ShotID != 0 {
+		_, _ = r.pool.Exec(ctx, `
+			UPDATE shots SET video_generation_status='FAILED_DEAD', updated_at=NOW()
+			WHERE id=$1 AND video_generation_status NOT IN ('SUCCESS','FAILED_DEAD')`, p.ShotID)
+	}
+}
+
+// RepairStaleVideoCards 存量修复：RUNNING/QUEUED 卡且任务已终态（或无任务关联）→ FAILED_DEAD，
+// 卡内未成功镜头 → FAILED_DEAD；僵尸 RUNNING 镜头同理。返回修复的卡数与镜头数。
+func (r *Repo) RepairStaleVideoCards(ctx context.Context) (cards int64, shots int64, err error) {
+	tag, e := r.pool.Exec(ctx, `
+		UPDATE video_cards vc SET generation_status='FAILED_DEAD', updated_at=NOW()
+		WHERE vc.deleted_at IS NULL AND vc.generation_status IN ('QUEUED','RUNNING')
+		  AND (
+		    vc.generation_task_id IS NULL
+		    OR EXISTS (SELECT 1 FROM generation_tasks g WHERE g.id = vc.generation_task_id
+		               AND g.status IN ('FAILED_RETRYING','FAILED_DEAD'))
+		  )`)
+	cards = tag.RowsAffected()
+	if e != nil {
+		return cards, 0, e
+	}
+	tag2, e2 := r.pool.Exec(ctx, `
+		UPDATE shots sh SET video_generation_status='FAILED_DEAD', updated_at=NOW()
+		FROM video_cards vc
+		WHERE sh.video_card_id = vc.id AND vc.deleted_at IS NULL
+		  AND vc.generation_status = 'FAILED_DEAD'
+		  AND sh.video_generation_status NOT IN ('SUCCESS','FAILED_DEAD')`)
+	shots = tag2.RowsAffected()
+	return cards, shots, e2
 }
 
 // MarkTaskFailed 标记任务失败（计费冻结失败等场景回滚任务状态）。
@@ -676,6 +1188,71 @@ func (r *Repo) ResolveEpisode(ctx context.Context, episodeUUID string) (int64, i
 	return epID, projectID, err
 }
 
+// ExportPreflight 合成前预检结果：按 URL 去重后的片段统计。
+type ExportPreflight struct {
+	Total       int     `json:"total"` // 去重后可参与合成的片段数
+	UniqueShots int     `json:"unique_shots"`
+	TotalDur    float64 `json:"total_duration_sec"`
+	Duplicates  int     `json:"duplicates"` // 被去重掉的重复镜头数
+	Beats       int     `json:"beats"`      // 涉及的叙事单元数
+}
+
+// FirstEpisodeOf 项目首集（sort_order 最小；供导出缺省目标集使用）。
+func (r *Repo) FirstEpisodeOf(ctx context.Context, projectID int64) (int64, error) {
+	var id int64
+	err := r.pool.QueryRow(ctx, `
+		SELECT id FROM episodes WHERE project_id=$1 AND deleted_at IS NULL ORDER BY sort_order LIMIT 1`, projectID).Scan(&id)
+	return id, err
+}
+
+// PreflightExportCompose 合成前预检（3.4.1 前置）：指定集按序 SUCCESS 镜头去重统计。
+func (r *Repo) PreflightExportCompose(ctx context.Context, episodeID int64) (*ExportPreflight, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT ON (sh.generated_video_url)
+		       sh.generated_video_url, COALESCE(sh.duration_sec, 0)::float8,
+		       nu.sort_order
+		FROM narrative_units nu
+		JOIN shots sh ON sh.narrative_unit_id = nu.id AND sh.deleted_at IS NULL
+		WHERE nu.episode_id = $1
+		  AND nu.deleted_at IS NULL
+		  AND sh.video_generation_status = 'SUCCESS' AND COALESCE(sh.generated_video_url, '') <> ''
+		ORDER BY sh.generated_video_url`, episodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	pf := &ExportPreflight{}
+	seenNU := map[int]bool{}
+	for rows.Next() {
+		var url string
+		var dur float64
+		var nuSort int
+		if err := rows.Scan(&url, &dur, &nuSort); err != nil {
+			return nil, err
+		}
+		pf.Total++
+		pf.UniqueShots++
+		pf.TotalDur += dur
+		seenNU[nuSort] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	pf.Beats = len(seenNU)
+	// 重复数：该集全部 SUCCESS 镜头数 − 去重后
+	var allN int
+	if err := r.pool.QueryRow(ctx, `
+		SELECT count(*) FROM narrative_units nu
+		JOIN shots sh ON sh.narrative_unit_id = nu.id AND sh.deleted_at IS NULL
+		WHERE nu.episode_id = $1
+		  AND nu.deleted_at IS NULL
+		  AND sh.video_generation_status = 'SUCCESS' AND COALESCE(sh.generated_video_url, '') <> ''`, episodeID).Scan(&allN); err != nil {
+		return nil, err
+	}
+	pf.Duplicates = allN - pf.Total
+	return pf, nil
+}
+
 // CheckProjectAccess 校验用户是项目所属空间的成员（跨空间隔离铁律 D2）。
 func (r *Repo) CheckProjectAccess(ctx context.Context, projectID, userID int64) error {
 	var one int
@@ -712,6 +1289,7 @@ func (r *Repo) ResolveBeatID(ctx context.Context, beatUUID string) (int64, error
 }
 
 // ResolveNarrativeUnit nu_uuid → (id, project_id)。
+// ResolveNarrativeUnit 叙事单元 uuid → (id, project_id)。
 func (r *Repo) ResolveNarrativeUnit(ctx context.Context, nuUUID string) (int64, int64, error) {
 	var id, projectID int64
 	err := r.pool.QueryRow(ctx, `SELECT id, project_id FROM narrative_units WHERE nu_uuid = $1 AND deleted_at IS NULL`, nuUUID).Scan(&id, &projectID)
@@ -719,6 +1297,94 @@ func (r *Repo) ResolveNarrativeUnit(ctx context.Context, nuUUID string) (int64, 
 		return 0, 0, fmt.Errorf("%w: nu", ErrNotFound)
 	}
 	return id, projectID, err
+}
+
+// CreateLinkedAsset 视频制作页补充缺失资产（Step3「增加关联资产」）：
+// 事务内创建 characters/scenes/props 记录 + 写 nu_asset_links 挂到指定叙事单元；
+// origin_episode_id 取该单元所在剧集序号（资产归属集，与拆分抽取口径一致）。
+// 幂等：项目内同名同类型资产已存在时不重建、直接复用并补建关联。
+// 返回 asset_id 与剧集 sort_order（前端据此调 batch-generate 触发参考图生成）。
+func (r *Repo) CreateLinkedAsset(ctx context.Context, nuUUID string, assetKind string, name string, description string) (int64, int64, error) {
+	nuID, projectID, err := r.ResolveNarrativeUnit(ctx, nuUUID)
+	if err != nil {
+		return 0, 0, err
+	}
+	var epID, epSort int64
+	if err := r.pool.QueryRow(ctx, `
+		SELECT e.id, e.sort_order FROM episodes e
+		JOIN narrative_units nu ON nu.episode_id=e.id WHERE nu.id=$1`, nuID).
+		Scan(&epID, &epSort); err != nil {
+		return 0, 0, err
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	tableByKind := map[string]string{"CHARACTER": "characters", "SCENE": "scenes", "PROP": "props"}
+	nameColByKind := map[string]string{"CHARACTER": "name", "SCENE": "base_name", "PROP": "name"}
+	prefixByKind := map[string]string{"CHARACTER": "CHAR", "SCENE": "SCENE", "PROP": "PROP"}
+	tbl, okTbl := tableByKind[assetKind]
+	nameCol, okCol := nameColByKind[assetKind]
+	if !okTbl || !okCol {
+		return 0, 0, fmt.Errorf("asset_kind 非法: %s", assetKind)
+	}
+
+	// 同名同类型资产复用（幂等：重复提交或资产已在其他集/单元存在时只补关联）
+	var assetID int64
+	reused := false
+	if err := tx.QueryRow(ctx, fmt.Sprintf(
+		`SELECT id FROM %s WHERE project_id=$1 AND %s=$2 AND deleted_at IS NULL ORDER BY id LIMIT 1`, tbl, nameCol),
+		projectID, name).Scan(&assetID); err == nil {
+		reused = true
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, 0, err
+	}
+
+	if !reused {
+		var cnt int
+		if err := tx.QueryRow(ctx, fmt.Sprintf(
+			`SELECT count(*) FROM %s WHERE project_id=$1 AND deleted_at IS NULL`, tbl), projectID).Scan(&cnt); err != nil {
+			return 0, 0, err
+		}
+		code := fmt.Sprintf("%s_%03d", prefixByKind[assetKind], cnt+1)
+		for attempt := 0; attempt < 5; attempt++ {
+			var codeTaken bool
+			if err := tx.QueryRow(ctx, fmt.Sprintf(
+				`SELECT EXISTS(SELECT 1 FROM %s WHERE project_id=$1 AND code=$2 AND deleted_at IS NULL)`, tbl),
+				projectID, code).Scan(&codeTaken); err != nil {
+				return 0, 0, err
+			}
+			if !codeTaken {
+				break
+			}
+			code = fmt.Sprintf("%s_%03d_%d", prefixByKind[assetKind], cnt+1, time.Now().UnixMilli()%100000)
+		}
+		descCol := map[string]string{"CHARACTER": "description_notes", "SCENE": "base_prompt", "PROP": "description_prompt"}[assetKind]
+		insertSQL := fmt.Sprintf(
+			`INSERT INTO %s (project_id, code, %s, %s, origin_episode_id)
+			VALUES ($1,$2,$3,$4,NULLIF($5,0))
+			RETURNING id`, tbl, nameCol, descCol)
+		if err := tx.QueryRow(ctx, insertSQL, projectID, code, name, description, epSort).Scan(&assetID); err != nil {
+			return 0, 0, err
+		}
+	}
+	upsertLink := func() error {
+		_, lerr := tx.Exec(ctx, `
+			INSERT INTO nu_asset_links (narrative_unit_id, asset_kind, asset_id)
+			VALUES ($1, $2::asset_kind_enum, $3) ON CONFLICT DO NOTHING`,
+			nuID, assetKind, assetID)
+		return lerr
+	}
+	if err := upsertLink(); err != nil {
+		return 0, 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, err
+	}
+	return assetID, epSort, nil
 }
 
 // SaveVersionSnapshot 保存叙事单元版本快照（F4：编辑前自动快照，用于回滚）。

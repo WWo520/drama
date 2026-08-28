@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -70,10 +71,12 @@ func (p *AutodlComfyProvider) GenerateVideo(ctx context.Context, k *KeyCredentia
 		prompt = prompt[:maxH3PromptChars]
 	}
 
-	// 参考图清洗 + 截断（v5 工作流最多 9 张；Handler 侧已按角色→场景→道具序去重）
+	// 参考图清洗 + 截断（v5 工作流最多 9 张；Handler 侧已按角色→场景→道具序去重）。
+	// 私网地址（127.0.0.1/localhost/192.168.x 等）云端 GPU 拉不到 → 转纯文生，
+	// 避免整卡失败（ref_image_0 必填的工作流收到不可达 URL 直接拒单）。
 	refs := make([]string, 0, len(req.RefImageURLs))
 	for _, u := range req.RefImageURLs {
-		if u = strings.TrimSpace(u); u != "" {
+		if u = strings.TrimSpace(u); u != "" && !isPrivateURL(u) {
 			refs = append(refs, u)
 		}
 	}
@@ -183,6 +186,25 @@ func autodlR2VVariant(endpoint string) string {
 		}
 	}
 	return ""
+}
+
+// isPrivateURL 判定云 GPU 不可达的私网地址（127.0.0.1/localhost/192.168/10./172.16-31）。
+// AutoDL 等公网实例拉不到此类 URL，提交前过滤转纯文生。
+func isPrivateURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	switch host {
+	case "127.0.0.1", "localhost", "0.0.0.0", "::1":
+		return true
+	}
+	return strings.HasPrefix(host, "192.168.") || strings.HasPrefix(host, "10.") ||
+		strings.HasPrefix(host, "172.16.") || strings.HasPrefix(host, "172.17.") ||
+		strings.HasPrefix(host, "172.18.") || strings.HasPrefix(host, "172.19.") ||
+		strings.HasPrefix(host, "172.2") || strings.HasPrefix(host, "172.30.") ||
+		strings.HasPrefix(host, "172.31.")
 }
 
 // GenerateImage 本 Provider 仅接入视频工作流（图像工作流后续按需扩展）。

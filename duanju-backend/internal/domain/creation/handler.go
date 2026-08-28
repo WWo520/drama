@@ -101,15 +101,19 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, adminMW, auditMW gin.Handl
 		nus.POST("/:nu_id/rollback/:version_id", h.rollbackVersion)
 		nus.PATCH("/:nu_id", h.updateNarrativeUnit)  // F4: 叙事单元编辑（title/content/script_original_text/preset_duration_sec）
 		nus.DELETE("/:nu_id", h.deleteNarrativeUnit) // F4: 叙事单元删除（软删除级联）
+		// Step3 补充缺失资产：创建角色/场景/道具 + 挂 nu_asset_links 到该单元（origin 归属所在剧集）
+		nus.POST("/:nu_id/assets/create", func(c *gin.Context) { extra.Storyboard.CreateUnitAsset(c, c.Param("nu_id")) })
 	}
 	exportGroup := rg.Group("/projects")
 	{
 		exportGroup.POST("/:project_id/export", h.triggerExport)
+		exportGroup.GET("/:project_id/export/preflight", h.exportPreflight)
 	}
 	exportList := rg.Group("/exports")
 	{
 		exportList.GET("", h.listExports)
 		exportList.GET("/:export_id", h.exportDetail)
+		exportList.POST("/:export_id/retry", h.exportRetry)
 	}
 	// Step3 视频（S1-F05）：3.3.7a 批量生成镜头块视频
 	beats := rg.Group("/beats")
@@ -242,6 +246,8 @@ func (h *Handler) registerExtraRoutes(rg *gin.RouterGroup, extra *ExtraServices,
 		beats.GET("/:beat_id", func(c *gin.Context) { extra.Storyboard.BeatDetail(c, c.Param("beat_id")) })
 		beats.POST("/:beat_id/compose-video", func(c *gin.Context) { extra.Storyboard.ComposeBeatVideo(c, c.Param("beat_id")) })
 		beats.POST("/:beat_id/replan", func(c *gin.Context) { extra.Storyboard.ReplanBeat(c, c.Param("beat_id")) })
+		beats.POST("/:beat_id/plan-video-tasks", h.planVideoTasks) // 规划视频任务（成片卡编组）
+		beats.GET("/:beat_id/cards", h.listBeatCards)              // 成片卡列表（Step3 网格轮询）
 		beats.GET("/:beat_id/shot-groups", func(c *gin.Context) { extra.Storyboard.BeatShotGroups(c, c.Param("beat_id")) })
 		beats.GET("/:beat_id/storyboards", func(c *gin.Context) { extra.Storyboard.BeatStoryboards(c, c.Param("beat_id")) })
 		beats.POST("/:beat_id/storyboards/generate", func(c *gin.Context) { extra.Storyboard.GenerateStoryboards(c, c.Param("beat_id")) })
@@ -254,12 +260,27 @@ func (h *Handler) registerExtraRoutes(rg *gin.RouterGroup, extra *ExtraServices,
 	shots := rg.Group("/shots")
 	{
 		shots.GET("/:shot_id", func(c *gin.Context) { extra.Storyboard.ShotDetail(c, c.Param("shot_id")) })
+		// Step3 高价值快批量：镜头编辑（提示词 / 时长 / 分镜字段微调）
+		shots.PATCH("/:shot_id", func(c *gin.Context) { extra.Storyboard.UpdateShot(c, c.Param("shot_id")) })
 		shots.POST("/batch", extra.Storyboard.ShotsBatch)
-		shots.POST("/:shot_id/regenerate", h.regenerateShot) // F11: 单镜头重生成
+		shots.POST("/:shot_id/regenerate", h.regenerateShot) // F11: 单镜头重生成（旧链路兼容）
+		// 成片卡（规划视频任务产物；主线生成链路）
+		cards := rg.Group("/video-cards")
+		{
+			cards.POST("/:card_id/regenerate", h.regenerateCard)
+			cards.PATCH("/:card_id/prompt", h.updateCardPrompt)
+			cards.PATCH("/:card_id/duration", h.updateCardDuration)
+			// 参考图拖拽绑定（对齐 LuxReal 拖资产 chip 进卡）：绑定作用于卡内全部镜头
+			cards.POST("/:card_id/assets/bind", h.bindCardAsset)
+			cards.DELETE("/:card_id/assets/bind", h.unbindCardAsset)
+		}
 		// 18 - 视频制作：生成镜头级参考图（对齐 LuxReal「镜头N的参考图」，SHOT_REF_IMAGE_GEN）
 		shots.POST("/:shot_id/generate-reference-image", func(c *gin.Context) {
 			extra.Storyboard.GenerateShotRefImage(c, c.Param("shot_id"))
 		})
+		// 镜头级参考资产绑定（对齐 LuxReal 拖资产 chip 到单镜头）：精准到单个镜头的 shot_asset_refs
+		shots.POST("/:shot_id/assets/bind", h.bindShotAsset)
+		shots.DELETE("/:shot_id/assets/bind", h.unbindShotAsset)
 	}
 	storyboards := rg.Group("/storyboards")
 	{
@@ -521,6 +542,14 @@ func (h *Handler) exportDetail(c *gin.Context) {
 	h.exportSvc.Detail(c, c.Param("export_id"))
 }
 
+func (h *Handler) exportPreflight(c *gin.Context) {
+	h.exportSvc.Preflight(c, c.Param("project_id"))
+}
+
+func (h *Handler) exportRetry(c *gin.Context) {
+	h.exportSvc.Retry(c, c.Param("export_id"))
+}
+
 func (h *Handler) generateVideos(c *gin.Context) {
 	h.svc.GenerateVideos(c, c.Param("beat_id"))
 }
@@ -536,6 +565,51 @@ func (h *Handler) listVariants(c *gin.Context) {
 
 func (h *Handler) listBeatShots(c *gin.Context) {
 	h.svc.ListBeatShots(c, c.Param("beat_id"))
+}
+
+// planVideoTasks 规划视频任务（成片卡编组；POST /beats/:beat_id/plan-video-tasks）。
+func (h *Handler) planVideoTasks(c *gin.Context) {
+	h.svc.PlanVideoTasks(c, c.Param("beat_id"))
+}
+
+// listBeatCards 成片卡列表（GET /beats/:beat_id/cards）。
+func (h *Handler) listBeatCards(c *gin.Context) {
+	h.svc.ListBeatCards(c, c.Param("beat_id"))
+}
+
+// regenerateCard 单成片卡重新生成（POST /video-cards/:card_id/regenerate）。
+func (h *Handler) regenerateCard(c *gin.Context) {
+	h.svc.RegenerateCard(c, c.Param("card_id"))
+}
+
+// updateCardPrompt 编辑成片卡提示词（PATCH /video-cards/:card_id/prompt）。
+func (h *Handler) updateCardPrompt(c *gin.Context) {
+	h.svc.UpdateCardPrompt(c, c.Param("card_id"))
+}
+
+// updateCardDuration 调整成片卡时长（PATCH /video-cards/:card_id/duration）。
+func (h *Handler) updateCardDuration(c *gin.Context) {
+	h.svc.UpdateCardDuration(c, c.Param("card_id"))
+}
+
+// bindCardAsset 成片卡绑定参考资产（POST /video-cards/:card_id/assets/bind）。
+func (h *Handler) bindCardAsset(c *gin.Context) {
+	h.svc.BindCardAsset(c, c.Param("card_id"))
+}
+
+// unbindCardAsset 解绑成片卡参考资产（DELETE /video-cards/:card_id/assets/bind）。
+func (h *Handler) unbindCardAsset(c *gin.Context) {
+	h.svc.UnbindCardAsset(c, c.Param("card_id"))
+}
+
+// bindShotAsset 镜头级绑定参考资产（POST /shots/:shot_id/assets/bind）。
+func (h *Handler) bindShotAsset(c *gin.Context) {
+	h.svc.BindShotAsset(c, c.Param("shot_id"))
+}
+
+// unbindShotAsset 镜头级解绑参考资产（DELETE /shots/:shot_id/assets/bind）。
+func (h *Handler) unbindShotAsset(c *gin.Context) {
+	h.svc.UnbindShotAsset(c, c.Param("shot_id"))
 }
 
 func (h *Handler) createVariant(c *gin.Context) {

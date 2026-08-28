@@ -26,7 +26,7 @@ export interface ProjectSummary {
   current_step: string;
   total_episode_count: number;
   total_duration_sec: number;
-  cover_url: string | null;
+  cover_image_url: string | null;
   updated_at: string;
 }
 

@@ -1,13 +1,15 @@
 // genstylethumbs 风格库预览图生成工具（一次性/可重跑）：
 // 读取 style_library 27 项风格 → 用统一人像模板 + 风格后缀（prompt_suffix_static）
-// 调火山 Seedream 生成预览图 → 回填 style_library.thumbnail_url。
+// 调火山 Seedream 生成预览图 → 转存自有 MinIO（TOS 签名 24h 过期根治）→ 回填固定 URL。
 //
 // 用法（仓库根目录）：
 //
 //	go run ./cmd/genstylethumbs            # 仅生成 thumbnail_url 为空的风格
 //	go run ./cmd/genstylethumbs -force     # 全部重新生成
 //
-// 依赖环境变量：DATABASE_URL、MODEL_KEY_ENC_SECRET（从仓库根 .env 读取，也可直接注入）。
+// 依赖环境变量：DATABASE_URL、MODEL_KEY_ENC_SECRET（从仓库根 .env 读取，也可直接注入）、
+// S3_ENDPOINT/S3_ACCESS_KEY/S3_SECRET_KEY/S3_BUCKET/S3_PUBLIC_BASE（配置后走 MinIO 转存，
+// 未配置则保持旧行为直写厂商临时 URL）。
 package main
 
 import (
@@ -21,7 +23,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 
+	"github.com/duanju/backend/internal/engine/agent"
 	"github.com/duanju/backend/internal/engine/model"
 	"github.com/duanju/backend/internal/pkg/cryptox"
 	"github.com/duanju/backend/internal/repository"
@@ -130,6 +135,29 @@ func main() {
 
 	provider := model.NewVolcImageProvider("genstylethumbs", []model.Capability{model.CapT2I}, "")
 
+	// 可选 MinIO 转存：S3_* 配置齐全时启用（厂商 TOS 签名 URL 24h 过期 → 主页图裂的根治）
+	var persist agent.ImagePersister
+	if ep := os.Getenv("S3_ENDPOINT"); ep != "" && os.Getenv("S3_BUCKET") != "" {
+		mc, merr := minio.New(ep, &minio.Options{
+			Creds:  credentials.NewStaticV4(os.Getenv("S3_ACCESS_KEY"), os.Getenv("S3_SECRET_KEY"), ""),
+			Secure: strings.EqualFold(os.Getenv("S3_USE_SSL"), "true"),
+		})
+		if merr == nil {
+			publicBase := os.Getenv("S3_PUBLIC_BASE")
+			if publicBase == "" {
+				publicBase = "http://" + ep
+			}
+			mp := agent.NewMinIOImagePersist(mc, os.Getenv("S3_BUCKET"), publicBase)
+			if perr := mp.EnsurePublicRead(ctx); perr != nil {
+				log.Printf("警告：桶匿名读策略设置失败: %v", perr)
+			}
+			persist = mp
+			log.Printf("MinIO 转存已启用: %s/%s", publicBase, os.Getenv("S3_BUCKET"))
+		} else {
+			log.Printf("警告：MinIO 初始化失败，保持直写厂商临时 URL: %v", merr)
+		}
+	}
+
 	okCount, failCount := 0, 0
 	for _, it := range items {
 		suffix := it.suffix
@@ -156,6 +184,10 @@ func main() {
 			failCount++
 			log.Printf("  [失败] %s（%s）: %v", it.name, it.code, lastErr)
 			continue
+		}
+		// 转存自有 MinIO：固定 URL 永不过期；失败保留厂商 URL 并告警
+		if persist != nil {
+			url = agent.PersistImagePublic(ctx, persist, "styles/"+it.code, url)
 		}
 		if _, uerr := conn.Exec(ctx, `
 			UPDATE style_library SET thumbnail_url=$2, updated_at=NOW()

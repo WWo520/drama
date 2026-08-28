@@ -345,6 +345,13 @@ func (s *AssetStore) RollbackVersion(ctx context.Context, narrativeUnitID, versi
 		WHERE id=$1 AND narrative_unit_id=$2`, versionID, narrativeUnitID).Scan(&sbJSON); err == nil && sbJSON != "" && sbJSON != "null" {
 		var groups []agent.ShotGroup
 		if jerr := json.Unmarshal([]byte(sbJSON), &groups); jerr == nil && len(groups) > 0 {
+			// 解绑并作废旧成片卡（回滚后 shots 全新，旧卡镜头归属失效）
+			if _, derr := tx.Exec(ctx, `UPDATE shots SET video_card_id=NULL WHERE narrative_unit_id=$1`, narrativeUnitID); derr != nil {
+				return derr
+			}
+			if _, derr := tx.Exec(ctx, `UPDATE video_cards SET deleted_at=NOW() WHERE narrative_unit_id=$1 AND deleted_at IS NULL`, narrativeUnitID); derr != nil {
+				return derr
+			}
 			if _, derr := tx.Exec(ctx, `UPDATE shots SET deleted_at=NOW() WHERE narrative_unit_id=$1 AND deleted_at IS NULL`, narrativeUnitID); derr != nil {
 				return derr
 			}

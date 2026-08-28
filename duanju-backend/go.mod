@@ -13,6 +13,7 @@ require (
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
+	github.com/volcengine/ve-tos-golang-sdk/v2 v2.9.9
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.51.0
 )

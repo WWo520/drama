@@ -6,7 +6,7 @@ import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ChevronDown, Clock, Download, FileText, Film, Loader2, Maximize, Pause, PictureInPicture2, Play,
-  RotateCcw, RotateCw, Volume2, Wand2, X,
+  RefreshCw, RotateCcw, RotateCw, Volume2, Wand2, X,
 } from "lucide-react";
 
 import {
@@ -19,6 +19,7 @@ import {
   type BeatSummary,
   type EpisodeLite,
   type ExportItem,
+  type ExportPreflight,
   type ProjectDetail,
   type ShotVideo,
 } from "@duanju/api-client";
@@ -70,11 +71,15 @@ interface PlayItem {
 function ComposeModal({
   totalSec,
   submitting,
+  preflight,
+  preflightLoading,
   onClose,
   onSubmit,
 }: {
   totalSec: number;
   submitting: boolean;
+  preflight: ExportPreflight | null;
+  preflightLoading: boolean;
   onClose: () => void;
   onSubmit: (resolution: string) => void;
 }) {
@@ -170,6 +175,30 @@ function ComposeModal({
           </div>
         </div>
 
+        {/* 合成前预检：片段统计（跳过的重复片段透明化） */}
+        <div className="rounded-xl p-3 mb-5" style={{ background: "#1A1A2E", border: "1px solid #2A2A3E" }}>
+          {preflightLoading ? (
+            <div className="flex items-center gap-2 text-xs text-[#6B7088]">
+              <Loader2 size={12} className="animate-spin" />
+              正在检查可合成片段…
+            </div>
+          ) : preflight && preflight.total > 0 ? (
+            <div className="text-xs leading-relaxed">
+              <span className="text-white/85 font-medium">
+                将合成 {preflight.total} 个片段 · 约 {fmtTime(preflight.total_duration_sec)}
+              </span>
+              <span className="text-[#6B7088]">（{preflight.beats} 个叙事单元）</span>
+              {preflight.duplicates > 0 && (
+                <div className="text-[#F5B23C] mt-1">
+                  {preflight.duplicates} 个重复片段将被自动跳过
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-xs text-[#EF4444]">未找到可合成的视频片段，请先完成 Step3 视频生成</div>
+          )}
+        </div>
+
         {/* 费用预估（仅展示，实际计费以后端为准） */}
         <div className="flex items-center justify-center mb-5">
           <span className="text-sm text-[#4C7FF8]">预计消耗 {Math.max(1, Math.ceil(totalSec))} 积分</span>
@@ -254,6 +283,9 @@ export default function Step4Page() {
   const [composeOpen, setComposeOpen] = useState(false);
   const [exportFileOpen, setExportFileOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // 合成前预检（弹窗打开时拉取片段统计）
+  const [preflight, setPreflight] = useState<ExportPreflight | null>(null);
+  const [preflightLoading, setPreflightLoading] = useState(false);
 
   // 播放器状态
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -262,39 +294,70 @@ export default function Step4Page() {
   const [curIdx, setCurIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [curTime, setCurTime] = useState(0);
+  // 各片段真实时长（key=playlist 索引；元数据加载后校正 DB duration_sec 的漂移）
+  const [realDurs, setRealDurs] = useState<Record<number, number>>({});
   const [volume, setVolume] = useState(0.8);
   const [speed, setSpeed] = useState("1");
   const [speedOpen, setSpeedOpen] = useState(false);
-  const [qualityOpen, setQualityOpen] = useState(false);
+  const [qualityOpen, setQualityOpen] = useState(false); // 清晰度菜单（预览档位切换）
+  const [controlsVisible, setControlsVisible] = useState(true);
 
   const stepState = useStepState(projectId, proj?.status ?? null);
 
   const activeEp = episodes.find((e) => e.episode_id === activeEpisode) ?? null;
 
-  // 连播列表：跨 beat 展平已完成镜头（按 beat / 镜头顺序）
+  // 连播列表：跨 beat 展平已完成镜头；同 URL 去重（重复镜头块/重规划旧批并存时避免同画面播两次）
   const playlist = useMemo<PlayItem[]>(() => {
     const list: PlayItem[] = [];
+    const seenUrls = new Set<string>();
     beats.forEach((b, beatIdx) => {
       (shotsMap[b.beat_id] ?? [])
         .filter((s) => s.video_generation_status === "SUCCESS" && s.generated_video_url)
-        .forEach((s) => list.push({ beatId: b.beat_id, beatIdx, sortOrder: s.sort_order, url: s.generated_video_url, durationSec: s.duration_sec }));
+        .forEach((s) => {
+          if (seenUrls.has(s.generated_video_url)) return;
+          seenUrls.add(s.generated_video_url);
+          list.push({ beatId: b.beat_id, beatIdx, sortOrder: s.sort_order, url: s.generated_video_url, durationSec: s.duration_sec });
+        });
     });
     return list;
   }, [beats, shotsMap]);
 
-  const totalDur = useMemo(() => playlist.reduce((acc, p) => acc + (p.durationSec || 0), 0), [playlist]);
-  // 各片段在全局时间轴上的起点
+  const totalDur = useMemo(
+    () => playlist.reduce((acc, p, i) => acc + (realDurs[i] || p.durationSec || 0), 0),
+    [playlist, realDurs],
+  );
+  // 各片段在全局时间轴上的起点（优先真实时长）
   const prefix = useMemo(() => {
     const arr: number[] = [];
     let acc = 0;
-    playlist.forEach((p) => {
+    playlist.forEach((p, i) => {
       arr.push(acc);
-      acc += p.durationSec || 0;
+      acc += realDurs[i] || p.durationSec || 0;
     });
     return arr;
-  }, [playlist]);
+  }, [playlist, realDurs]);
   const globalTime = (prefix[curIdx] ?? 0) + curTime;
   const curItem = playlist[curIdx] ?? null;
+
+  // 进度条分段节点：叙事单元边界（亮）+ 单元内镜头块边界（暗），位置=累计秒/总秒（对齐 LuxReal Timeline-section）
+  const segTicks = useMemo(() => {
+    const ticks: { pct: number; unitBoundary: boolean; label: string }[] = [];
+    let lastBeatIdx = -1;
+    playlist.forEach((p, i) => {
+      if (i === 0) {
+        lastBeatIdx = p.beatIdx;
+        return;
+      }
+      const isUnitBoundary = p.beatIdx !== lastBeatIdx;
+      lastBeatIdx = p.beatIdx;
+      ticks.push({
+        pct: totalDur > 0 ? (prefix[i] / totalDur) * 100 : 0,
+        unitBoundary: isUnitBoundary,
+        label: `${isUnitBoundary ? "【叙事单元】" : ""}${beats[p.beatIdx]?.title ?? ""} · 第${i + 1}段 · ${fmtTime(realDurs[i] || p.durationSec)}`,
+      });
+    });
+    return ticks;
+  }, [playlist, prefix, totalDur, beats, realDurs]);
 
   // 加载项目 + 剧集 + beats
   const loadStructure = useCallback(async () => {
@@ -331,6 +394,16 @@ export default function Step4Page() {
     );
     setShotsMap(sMap);
   }, []);
+
+  // 切集：重置播放器与数据态，避免旧集镜头残留到新集播放列表
+  useEffect(() => {
+    setShotsMap({});
+    setRealDurs({});
+    setCurIdx(0);
+    setCurTime(0);
+    setPlaying(false);
+    videoRef.current?.pause();
+  }, [activeEpisode]);
 
   useEffect(() => {
     void loadStructure();
@@ -384,7 +457,7 @@ export default function Step4Page() {
     void loadExports();
   }, [loadExports]);
 
-  // ESC 关闭弹窗与下拉
+  // 键盘控制：ESC 关闭弹窗；空格播放/暂停、←→ 快退/快进（输入框聚焦时不拦截）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -392,11 +465,26 @@ export default function Step4Page() {
         setExportFileOpen(false);
         setSpeedOpen(false);
         setQualityOpen(false);
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      if (!videoRef.current) return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        skip(-5);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        skip(5);
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalDur, curIdx, playing, globalTime]);
 
   // 点击空白关闭下拉
   useEffect(() => {
@@ -428,8 +516,26 @@ export default function Step4Page() {
         }
         return;
       }
-      void v.play().catch(() => toast.error("视频播放失败，请检查视频资源"));
+      void v.play().catch(() => {
+        // 播放失败（素材 URL 失效/非视频内容）：自动尝试下一段，末段则停止
+        if (curIdx < playlist.length - 1) {
+          jumpTo(curIdx + 1, 0);
+        } else {
+          setPlaying(false);
+          toast.error("视频无法播放，素材可能已失效");
+        }
+      });
       setPlaying(true);
+    }
+  };
+
+  // 播放中途出错（error 事件）：同样跳下一段，避免卡死在坏段
+  const onVideoError = () => {
+    if (curIdx < playlist.length - 1) {
+      jumpTo(curIdx + 1, 0);
+    } else {
+      setPlaying(false);
+      toast.error("当前片段无法播放");
     }
   };
 
@@ -450,17 +556,17 @@ export default function Step4Page() {
     if (curIdx < playlist.length - 1) {
       jumpTo(curIdx + 1, 0);
     } else {
-      // 末段截断：mock 素材实际时长可能长于 duration_sec，强制暂停避免时间溢出
       videoRef.current?.pause();
       setPlaying(false);
     }
   };
 
-  // 段内到达片段时长即切段（mock 素材实际时长与 duration_sec 不一致时兼作切段兼容）
+  // 段内时间更新：元数据已校正真实时长后按真实时长切段
   const onTimeUpdate = (t: number) => {
     setCurTime(t);
     const seg = playlist[curIdx];
-    if (seg && seg.durationSec > 0 && t >= seg.durationSec) {
+    const segDur = (seg && realDurs[curIdx]) || seg?.durationSec || 0;
+    if (seg && segDur > 0 && t >= segDur - 0.03) {
       onEnded();
     }
   };
@@ -504,6 +610,10 @@ export default function Step4Page() {
     if (!v) return;
     v.volume = volume;
     v.playbackRate = Number(speed);
+    // 校正真实时长：素材实际时长与 DB duration_sec 漂移时以视频元数据为准
+    if (v.duration > 0 && Number.isFinite(v.duration)) {
+      setRealDurs((prev) => (Math.abs((prev[curIdx] ?? 0) - v.duration) > 0.05 ? { ...prev, [curIdx]: v.duration } : prev));
+    }
     if (pendingSeekRef.current !== null) {
       v.currentTime = pendingSeekRef.current;
       pendingSeekRef.current = null;
@@ -524,12 +634,50 @@ export default function Step4Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [curIdx]);
 
+  // 合成前预检：弹窗打开时拉取片段统计（按当前激活集）
+  useEffect(() => {
+    if (!composeOpen || !projectId) return;
+    setPreflightLoading(true);
+    setPreflight(null);
+    exportApi.preflight(projectId, activeEpisode ?? undefined)
+      .then(setPreflight)
+      .catch(() => setPreflight(null))
+      .finally(() => setPreflightLoading(false));
+  }, [composeOpen, projectId, activeEpisode]);
+
+  // 下载 403（签名 URL 过期）→ 引导一键重新合成
+  const handleDownloadError = (e: ExportItem) => {
+    toast.error("下载链接已过期，正在为您重新合成", {
+      id: `retry-${e.export_id}`,
+    });
+    exportApi.retry(e.export_id)
+      .then(() => {
+        toast.success("已重新发起合成，完成后可下载");
+        void loadExports();
+      })
+      .catch((err) => toast.error(errMsg(err, "重新合成失败")));
+  };
+
+  // 校验下载链接（fetch 探测；403/404 视为过期走重试）
+  const handleDownload = (e: ExportItem) => {
+    if (!e.output_url) return;
+    fetch(e.output_url, { method: "HEAD" })
+      .then((resp) => {
+        if (resp.status === 403 || resp.status === 404) {
+          handleDownloadError(e);
+        } else {
+          window.open(e.output_url, "_blank", "noopener");
+        }
+      })
+      .catch(() => window.open(e.output_url, "_blank", "noopener"));
+  };
+
   // 合成导出（3.4.1：MP4_H264 + 清晰度 + 合规水印）
   const canExport = proj != null && EXPORTABLE.includes(proj.status);
   const handleCompose = async (resolution: string) => {
     try {
       setSubmitting(true);
-      await exportApi.trigger(projectId, resolution, true);
+      await exportApi.trigger(projectId, resolution, true, activeEpisode ?? undefined);
       toast.success(`合成任务已提交（${RESOLUTIONS.find((r) => r.key === resolution)?.label ?? resolution}）`);
       setComposeOpen(false);
       void loadExports();
@@ -552,6 +700,19 @@ export default function Step4Page() {
 
   const progressPct = totalDur > 0 ? Math.min(100, (globalTime / totalDur) * 100) : 0;
 
+  // 部分完成统计：已就绪单元数 / 整集预估时长（未完成单元按预设时长计入）
+  const episodeStats = useMemo(() => {
+    const doneBeats = beats.filter((b) => (shotsMap[b.beat_id] ?? []).some((s) => s.video_generation_status === "SUCCESS")).length;
+    const fullDur = beats.reduce((acc, b) => {
+      const bs = shotsMap[b.beat_id] ?? [];
+      const done = bs.filter((s) => s.video_generation_status === "SUCCESS").reduce((a, s) => a + (s.duration_sec || 0), 0);
+      const fallback = b.actual_duration_sec > 0 ? b.actual_duration_sec : b.preset_duration_sec;
+      return acc + (done > 0 ? done : fallback);
+    }, 0);
+    return { doneBeats, totalBeats: beats.length, fullDur };
+  }, [beats, shotsMap]);
+  const partialReady = episodeStats.doneBeats < episodeStats.totalBeats && episodeStats.doneBeats > 0;
+
   // 项目加载失败（404/无权限/后端异常）整页降级，避免无限“加载中…”
   if (loadError) return <ProjectLoadError />;
 
@@ -570,11 +731,13 @@ export default function Step4Page() {
       {/* Content Scroll Area */}
       <div className="flex-1 overflow-y-auto flex flex-col px-6 pt-10 pb-6 scrollbar-thin" style={{ justifyContent: "flex-start" }}>
         {/* ===== VIDEO PLAYER ===== */}
-        <div className="flex-shrink-0 relative w-full flex justify-center mb-8" style={{ height: "68vh" }}>
+        <div className="flex-shrink-0 relative w-full flex justify-center mb-8" style={{ height: "76vh" }}>
           <div
             ref={playerBoxRef}
-            className="relative h-full rounded-2xl overflow-hidden bg-black shadow-2xl shadow-black/60"
-            style={{ width: "calc(68vh * 9 / 16)", maxWidth: "400px" }}
+            className="relative h-full rounded-2xl overflow-hidden bg-black shadow-2xl shadow-black/60 group/pv"
+            style={{ width: "calc(76vh * 9 / 16)", maxWidth: "520px" }}
+            onMouseEnter={() => setControlsVisible(true)}
+            onMouseLeave={() => { if (playing) setControlsVisible(false); }}
           >
             {curItem ? (
               <>
@@ -586,9 +749,14 @@ export default function Step4Page() {
                   onTimeUpdate={(e) => onTimeUpdate(e.currentTarget.currentTime)}
                   onEnded={onEnded}
                   onLoadedMetadata={onLoadedMetadata}
+                  onError={onVideoError}
                   onClick={togglePlay}
                   preload="metadata"
                 />
+                {/* 下一段预加载：缓解连播切源黑屏 */}
+                {playlist[curIdx + 1] && (
+                  <video src={playlist[curIdx + 1].url} className="hidden" preload="auto" aria-hidden />
+                )}
                 {/* 中央大播放按钮（暂停态） */}
                 {!playing && (
                   <button
@@ -616,73 +784,71 @@ export default function Step4Page() {
               </div>
             )}
 
-            {/* 左上角剧集徽章 */}
+            {/* 左上角剧集徽章 + 部分完成提示 */}
             {activeEp && (
-              <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5 z-10">
-                <Film size={13} />
-                第{activeEp.sort_order}集 {activeEp.title}
+              <div className="absolute top-4 left-4 flex flex-col gap-1.5 items-start z-10">
+                <div className="bg-black/60 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5">
+                  <Film size={13} />
+                  第{activeEp.sort_order}集 {activeEp.title}
+                </div>
+                {partialReady && (
+                  <div className="bg-[#F5B23C]/20 backdrop-blur-sm text-[#F5B23C] text-[11px] px-3 py-1 rounded-full">
+                    部分单元未生成，已跳过播放
+                  </div>
+                )}
               </div>
             )}
 
-            {/* 右上角清晰度下拉 */}
+            {/* 右上角清晰度（预览仅源清晰度，导出时可选其他） */}
             <div className="absolute top-4 right-4 z-10">
-              <button
-                className="bg-black/60 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1 font-medium hover:bg-black/70 transition-colors"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setQualityOpen(!qualityOpen);
-                  setSpeedOpen(false);
-                }}
+              <div
+                className="bg-black/60 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1 font-medium"
+                title="预览使用原始生成清晰度，导出合成时可选择 480P/720P/1080P"
               >
-                <span>1080P</span>
-                <ChevronDown size={12} />
-              </button>
-              {qualityOpen && (
-                <div className="absolute top-full right-0 mt-1.5 bg-[#1E1E24] border border-[#2A2A35] rounded-lg py-1 w-24 z-20 shadow-xl">
-                  {["480P", "720P", "1080P", "4K"].map((q) => (
-                    <button
-                      key={q}
-                      className={`w-full text-left text-sm py-2 px-3 transition-colors hover:bg-white/5 ${q === "1080P" ? "text-[#4C7FF8] font-medium" : "text-white/70"}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setQualityOpen(false);
-                        if (q !== "1080P") toast.info("预览暂仅提供 1080P 源，导出时可选择其他清晰度");
-                      }}
-                    >
-                      {q}
-                    </button>
-                  ))}
-                </div>
-              )}
+                <span>源 · 1080P</span>
+              </div>
             </div>
 
-            {/* 右下角 LuxReal 水印（对齐设计稿 workbench-preview.html） */}
-            <div className="absolute bottom-16 right-4 text-white/30 text-sm flex items-center gap-1 select-none pointer-events-none z-10">
-              <span className="font-semibold tracking-wide text-xs">LuxReal</span>
-            </div>
-
-            {/* 底部控制栏 */}
+            {/* 底部控制栏（hover 显隐，播放中自动淡出） */}
             {curItem && (
               <div
-                className="absolute bottom-0 left-0 right-0 px-4 pb-4 pt-10 z-10"
+                className={`absolute bottom-0 left-0 right-0 px-4 pb-4 pt-10 z-10 transition-opacity duration-200 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
                 style={{ background: "linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.5) 50%, transparent 100%)" }}
               >
-                {/* 进度条（全局） */}
-                <div
-                  className="relative h-1 bg-white/20 rounded-full mb-3 cursor-pointer group"
-                  onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    seekGlobal(((e.clientX - rect.left) / rect.width) * totalDur);
-                  }}
-                >
-                  <div className="h-full rounded-full bg-white relative" style={{ width: `${progressPct}%` }}>
-                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-md -mr-1.5" />
+                {/* 进度条 + 时间（时间置于进度条两端；分段节点对齐 LuxReal Timeline-section） */}
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-white/90 text-[11px] font-mono tabular-nums shrink-0">{fmtTime(globalTime)}</span>
+                  <div
+                    className="relative flex-1 h-1 bg-white/20 rounded-full cursor-pointer group"
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      seekGlobal(((e.clientX - rect.left) / rect.width) * totalDur);
+                    }}
+                  >
+                    <div className="h-full rounded-full bg-white relative" style={{ width: `${progressPct}%` }}>
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-md -mr-1.5" />
+                    </div>
+                    {/* 分段节点：亮=叙事单元边界，暗=单元内镜头块边界；悬停显示所属单元与时长 */}
+                    {segTicks.map((t, i) => (
+                      <div
+                        key={i}
+                        title={t.label}
+                        className={`absolute top-1/2 -translate-y-1/2 -ml-px pointer-events-auto ${t.unitBoundary ? "w-[2px]" : "w-px"}`}
+                        style={{
+                          left: `${t.pct}%`,
+                          height: t.unitBoundary ? "12px" : "7px",
+                          background: t.unitBoundary ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.45)",
+                          boxShadow: t.unitBoundary ? "0 0 3px rgba(0,0,0,0.6)" : "none",
+                        }}
+                      />
+                    ))}
                   </div>
+                  <span className="text-white/60 text-[11px] font-mono tabular-nums shrink-0">{fmtTime(totalDur)}</span>
                 </div>
 
                 <div className="flex items-center justify-between">
                   {/* 左：播放/回退/前进/音量 */}
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
                     <button className="text-white hover:text-white/80 transition flex items-center justify-center" onClick={togglePlay}>
                       {playing ? <Pause size={20} className="fill-white" /> : <Play size={20} className="fill-white" />}
                     </button>
@@ -705,25 +871,29 @@ export default function Step4Page() {
                       </button>
                       <div
                         className="w-16 h-1 bg-white/20 rounded-full cursor-pointer"
-                        onClick={(e) => {
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          const nv = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-                          setVolume(nv);
-                          if (videoRef.current) videoRef.current.volume = nv;
+                        onPointerDown={(e) => {
+                          const apply = (clientX: number) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const nv = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+                            setVolume(nv);
+                            if (videoRef.current) videoRef.current.volume = nv;
+                          };
+                          apply(e.clientX);
+                          const onMove = (ev: PointerEvent) => apply(ev.clientX);
+                          const onUp = () => {
+                            window.removeEventListener("pointermove", onMove);
+                            window.removeEventListener("pointerup", onUp);
+                          };
+                          window.addEventListener("pointermove", onMove);
+                          window.addEventListener("pointerup", onUp);
                         }}
                       >
                         <div className="h-full bg-white rounded-full" style={{ width: `${volume * 100}%` }} />
                       </div>
                     </div>
                   </div>
-                  {/* 中：时间 */}
-                  <div className="absolute left-1/2 -translate-x-1/2">
-                    <span className="text-white/90 text-xs font-mono">
-                      {fmtTime(globalTime)} / {fmtTime(totalDur)}
-                    </span>
-                  </div>
                   {/* 右：倍速/画中画/全屏 */}
-                  <div className="flex items-center gap-3 relative">
+                  <div className="flex items-center gap-2">
                     <div className="relative">
                       <button
                         className="text-white/80 text-xs hover:text-white transition flex items-center gap-0.5"
@@ -753,6 +923,36 @@ export default function Step4Page() {
                         </div>
                       )}
                     </div>
+                    {/* 清晰度（预览档位展示；成片以导出分辨率真源为准） */}
+                    <div className="relative">
+                      <button
+                        className="text-white/80 text-xs hover:text-white transition"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setQualityOpen(!qualityOpen);
+                          setSpeedOpen(false);
+                        }}
+                      >
+                        1080P
+                      </button>
+                      {qualityOpen && (
+                        <div className="absolute bottom-full right-0 mb-2 bg-[#1E1E24] border border-[#2A2A35] rounded-lg py-1 w-20 z-20 shadow-xl">
+                          {["480P", "720P", "1080P"].map((q) => (
+                            <button
+                              key={q}
+                              className={`w-full text-left text-sm py-2 px-3 transition-colors hover:bg-white/5 ${q === "1080P" ? "text-[#4C7FF8] font-medium" : "text-white/70"}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setQualityOpen(false);
+                                toast.info(`${q} 预览档位切换即将上线`);
+                              }}
+                            >
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     <button className="text-white/80 hover:text-white transition" onClick={enterPip}>
                       <PictureInPicture2 size={16} />
                     </button>
@@ -775,6 +975,11 @@ export default function Step4Page() {
                 const bs = shotsMap[b.beat_id] ?? [];
                 const doneN = bs.filter((s) => s.video_generation_status === "SUCCESS").length;
                 const runningN = bs.filter((s) => s.video_generation_status === "RUNNING").length;
+                // 单元时长对齐真实拼接结果：已完成片段实际时长之和；无完成片段时回退预设/解析时长
+                const doneDur = bs
+                  .filter((s) => s.video_generation_status === "SUCCESS")
+                  .reduce((acc, s) => acc + (s.duration_sec || 0), 0);
+                const shownDur = doneDur > 0 ? doneDur : b.actual_duration_sec > 0 ? b.actual_duration_sec : b.preset_duration_sec;
                 return (
                   <div key={b.beat_id} className="flex items-center">
                     {i > 0 && <div className="timeline-connector" />}
@@ -794,14 +999,14 @@ export default function Step4Page() {
                               }}
                             >
                               {runningN > 0 && <Loader2 size={9} className="animate-spin" />}
-                              {doneN === bs.length ? "已完成" : `${doneN}/${bs.length}`}
+                              {doneN === bs.length ? `${doneN}段已完成` : `${doneN}/${bs.length}段`}
                             </span>
                           )}
                         </div>
                         <div className="timeline-unit-title">{b.title}</div>
                         <div className="timeline-unit-duration">
                           <Clock size={12} />
-                          <span>{fmtTime(b.actual_duration_sec > 0 ? b.actual_duration_sec : b.preset_duration_sec)}</span>
+                          <span>{fmtTime(shownDur)}</span>
                         </div>
                       </div>
                     </div>
@@ -819,7 +1024,9 @@ export default function Step4Page() {
               {proj?.title ?? "加载中…"} · 第{activeEp?.sort_order ?? 1}集
             </h2>
             <p className="text-xs text-[#6B7088]">
-              总时长 {fmtTime(totalDur)} · 1080P · 9:16 竖屏
+              {partialReady
+                ? `已就绪 ${fmtTime(totalDur)} / 整集约 ${fmtTime(episodeStats.fullDur)} · ${episodeStats.doneBeats}/${episodeStats.totalBeats} 单元完成`
+                : `总时长 ${fmtTime(totalDur)} · 1080P · 9:16 竖屏`}
             </p>
           </div>
           <div className="flex gap-3">
@@ -865,29 +1072,97 @@ export default function Step4Page() {
               暂无导出记录，点击「合成视频」生成成片
             </div>
           ) : (
-            exports.map((e) => (
-              <div key={e.export_id} className="export-history-row">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className={`export-badge ${e.status === "SUCCESS" ? "success" : e.status === "FAILED" ? "failed" : "pending"}`}>
-                    {e.status === "SUCCESS" ? "已完成" : e.status === "FAILED" ? "失败" : "导出中"}
-                  </span>
-                  <span className="text-xs text-[#8B8B9A]">{RESOLUTIONS.find((r) => r.key === e.resolution)?.label ?? e.resolution}</span>
-                  <span className="text-xs text-[#4A4A5A]">{fmtSize(e.file_size)}</span>
-                  <span className="text-xs text-[#4A4A5A] truncate">{new Date(e.created_at).toLocaleString()}</span>
+            exports.map((e) => {
+              const isComposing = e.status === "PENDING";
+              const stage = e.progress_stage ?? "";
+              const pd = e.progress_detail ?? {};
+              // 阶段进度条：下载 0-60%，合成 60-85%，上传 85-99%，DONE 100%
+              let pct = 0;
+              let stageLabel = "";
+              if (stage === "DOWNLOADING") {
+                pct = 5 + Math.min(55, (pd.done ?? 0) / Math.max(1, pd.total ?? 1) * 55);
+                stageLabel = `下载片段 ${pd.done ?? 0}/${pd.total ?? 0}`;
+              } else if (stage === "COMPOSING") {
+                pct = 62;
+                stageLabel = "FFmpeg 合成中";
+              } else if (stage === "UPLOADING") {
+                pct = 88;
+                stageLabel = "上传成片";
+              } else if (stage === "DONE" || e.status === "SUCCESS") {
+                pct = 100;
+              }
+              return (
+                <div key={e.export_id} className="export-history-row !items-start">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className={`export-badge ${e.status === "SUCCESS" ? "success" : e.status === "FAILED" ? "failed" : "pending"}`}>
+                        {e.status === "SUCCESS" ? "已完成" : e.status === "FAILED" ? "失败" : "导出中"}
+                      </span>
+                      <span className="text-xs text-[#8B8B9A]">{RESOLUTIONS.find((r) => r.key === e.resolution)?.label ?? e.resolution}</span>
+                      {e.status === "SUCCESS" && e.file_size > 0 && (
+                        <span className="text-xs text-[#4A4A5A]">{fmtSize(e.file_size)}</span>
+                      )}
+                      {(e.segments_total ?? 0) > 0 && (
+                        <span className="text-xs text-[#4A4A5A]">{e.segments_total} 段{((e.segments_failed ?? 0) > 0) ? `（跳过 ${e.segments_failed}）` : ""}</span>
+                      )}
+                      <span className="text-xs text-[#4A4A5A] truncate">{new Date(e.created_at).toLocaleString()}</span>
+                    </div>
+                    {/* 合成进度条（PENDING 阶段展示阶段+百分比） */}
+                    {isComposing && (
+                      <div className="mt-2">
+                        <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-500"
+                            style={{ width: `${pct}%`, background: "linear-gradient(90deg, #4C7FF8, #8B5CF6)" }}
+                          />
+                        </div>
+                        <div className="text-[10px] text-[#6B7088] mt-1">
+                          {stageLabel || "排队中…"}
+                          {(pd.failed ?? 0) > 0 && <span className="text-[#F5B23C]"> · {pd.failed} 个失效片段已跳过</span>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {e.status === "SUCCESS" && e.output_url && (
+                    <a
+                      className="btn-export-download"
+                      href={e.output_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(ev) => {
+                        // 异步校验签名 URL；过期则拦截默认行为走重试
+                        fetch(e.output_url, { method: "HEAD" }).then((resp) => {
+                          if (resp.status === 403 || resp.status === 404) {
+                            ev.preventDefault();
+                            handleDownloadError(e);
+                          }
+                        }).catch(() => undefined);
+                      }}
+                    >
+                      <Download size={12} />
+                      下载
+                    </a>
+                  )}
+                  {e.status === "FAILED" && (
+                    <button
+                      className="text-[11px] px-2.5 py-1.5 rounded-lg font-medium text-white flex items-center gap-1 hover:opacity-90"
+                      style={{ background: "linear-gradient(135deg, #4C7FF8, #8B5CF6)" }}
+                      onClick={() => {
+                        exportApi.retry(e.export_id)
+                          .then(() => {
+                            toast.success("已重新发起合成");
+                            void loadExports();
+                          })
+                          .catch((err) => toast.error(errMsg(err, "重新合成失败")));
+                      }}
+                    >
+                      <RefreshCw size={11} />
+                      重新合成
+                    </button>
+                  )}
                 </div>
-                {e.status === "SUCCESS" && e.output_url && (
-                  <a className="btn-export-download" href={e.output_url} target="_blank" rel="noreferrer">
-                    <Download size={12} />
-                    下载
-                  </a>
-                )}
-                {e.status === "FAILED" && (
-                  <button className="text-[11px] text-[#EF4444] hover:underline" onClick={() => toast.error("导出失败，请重新发起合成")}>
-                    <X size={12} />
-                  </button>
-                )}
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
@@ -898,6 +1173,8 @@ export default function Step4Page() {
         <ComposeModal
           totalSec={totalDur}
           submitting={submitting}
+          preflight={preflight}
+          preflightLoading={preflightLoading}
           onClose={() => setComposeOpen(false)}
           onSubmit={(r) => void handleCompose(r)}
         />

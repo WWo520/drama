@@ -5,6 +5,7 @@ package creation
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -358,6 +359,79 @@ func (s *StoryboardService) ShotsBatch(c *gin.Context) {
 	httpx.OK(c, gin.H{"items": items})
 }
 
+// UpdateShot 镜头编辑（Step3 高价值快批量：编辑提示词 / 调整时长 / 分镜字段微调）。
+// 仅更新传入的非空字段；不动 video_generation_status（已生成视频不重置，
+// 用户改完提示词后自行点「重新生成」应用新值——避免编辑即清视频造成误删）。
+func (s *StoryboardService) UpdateShot(c *gin.Context, shotUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	var req struct {
+		PromptRefined         *string `json:"prompt_refined"`
+		DurationSec           *int    `json:"duration_sec"`
+		SubjectDescription    *string `json:"subject_description"`
+		BackgroundDescription *string `json:"background_description"`
+		DialogueText          *string `json:"dialogue_text"`
+		AmbientSound          *string `json:"ambient_sound"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	if req.PromptRefined == nil && req.DurationSec == nil && req.SubjectDescription == nil &&
+		req.BackgroundDescription == nil && req.DialogueText == nil && req.AmbientSound == nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "无可更新字段")
+		return
+	}
+	if req.DurationSec != nil && (*req.DurationSec < 1 || *req.DurationSec > 30) {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "时长须在 1~30 秒之间")
+		return
+	}
+	if req.PromptRefined != nil && len([]rune(*req.PromptRefined)) > 8000 {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "提示词过长（≤8000 字）")
+		return
+	}
+	shotID, err := s.repo.ResolveShotID(c.Request.Context(), shotUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "镜头不存在")
+		return
+	}
+	var projectID int64
+	if err := s.repo.pool.QueryRow(c.Request.Context(),
+		`SELECT project_id FROM shots WHERE id=$1 AND deleted_at IS NULL`, shotID).Scan(&projectID); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "镜头不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	// 逐字段 COALESCE 合并（nil 字段保留原值）
+	if _, err := s.repo.pool.Exec(c.Request.Context(), `
+		UPDATE shots SET
+			prompt_refined         = COALESCE($2, prompt_refined),
+			duration_sec           = COALESCE($3, duration_sec),
+			subject_description    = COALESCE($4, subject_description),
+			background_description = COALESCE($5, background_description),
+			dialogue_text          = COALESCE($6, dialogue_text),
+			ambient_sound          = COALESCE($7, ambient_sound),
+			updated_at             = NOW()
+		WHERE id=$1 AND deleted_at IS NULL`,
+		shotID, req.PromptRefined, req.DurationSec, req.SubjectDescription,
+		req.BackgroundDescription, req.DialogueText, req.AmbientSound); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "更新镜头失败")
+		return
+	}
+	// 回读最新值（前端就地刷新）
+	var dur int
+	var prompt string
+	_ = s.repo.pool.QueryRow(c.Request.Context(),
+		`SELECT duration_sec, COALESCE(prompt_refined,'') FROM shots WHERE id=$1`, shotID).Scan(&dur, &prompt)
+	httpx.OK(c, gin.H{"shot_id": shotUUID, "duration_sec": dur, "prompt_refined": prompt})
+}
+
 // ---- 3.3.7b/3.3.8 镜头块视频 ----
 
 // GenerateShotGroupVideo 3.3.7b 单个镜头块视频生成（18 - 视频制作 阶段三：补 Outbox 真实派发）。
@@ -687,6 +761,51 @@ func (s *StoryboardService) VideoTTS(c *gin.Context, videoUUID string) {
 		return
 	}
 	httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "AI 配音功能暂未开放，敬请期待")
+}
+
+// CreateUnitAsset POST /narrative-units/:nu_id/assets/create（Step3 补充缺失资产）：
+// 视频制作时发现分镜引用的资产在 Step2 未被抽取到（LLM 抽取有遗漏），在此补建：
+// 事务内创建 characters/scenes/props 记录并挂 nu_asset_links 到当前叙事单元，
+// origin_episode_id 归属其所在剧集；同名资产幂等复用。生成参考图由前端复用 batch-generate。
+func (s *StoryboardService) CreateUnitAsset(c *gin.Context, nuUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	var req struct {
+		AssetKind   string `json:"asset_kind" binding:"required"` // CHARACTER/SCENE/PROP
+		Name        string `json:"name" binding:"required,min=1,max=64"`
+		Description string `json:"description" binding:"omitempty,max=2000"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误：asset_kind/name 必填")
+		return
+	}
+	switch req.AssetKind {
+	case "CHARACTER", "SCENE", "PROP":
+	default:
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "asset_kind 非法")
+		return
+	}
+	_, projectID, err := s.repo.ResolveNarrativeUnit(c.Request.Context(), nuUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "叙事单元不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	assetID, epSort, err := s.repo.CreateLinkedAsset(c.Request.Context(), nuUUID, req.AssetKind, req.Name, req.Description)
+	if err != nil {
+		log.Printf("补充关联资产失败: %v (nu=%s kind=%s)", err, nuUUID, req.AssetKind)
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建资产失败")
+		return
+	}
+	kind := req.AssetKind
+	genKind := kind // 前端 batch-generate 的 target kind：CHARACTER→CHARACTER_VARIANT 由前端映射
+	httpx.OK(c, gin.H{"asset_id": assetID, "asset_kind": kind, "episode_sort_order": epSort, "gen_kind": genKind})
 }
 
 // EpisodeAssetLinks GET /episodes/:episode_id/asset-links（17 - 工作台对齐）。

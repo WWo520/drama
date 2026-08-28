@@ -621,3 +621,182 @@ func extractJSON(raw string) string {
 	}
 	return raw[start : end+1]
 }
+
+// ---- 两段式拆分（结构段 + 镜头设计段）----
+// 背景：单次输出全片分镜 JSON 在长剧本下必然超出 max_tokens 截断（6445 字剧本 4 连败实测），
+// 故拆成「段A 结构拆分（恒定体量）+ 段B 按集镜头设计（每次请求体量不随总剧本增长）」。
+
+// parseAndValidateOutline 段A 解析与校验：只要求 集/单元(标题+逐字摘录)/资产清单 合法，
+// shot_groups 由段B 补齐，此处不强校验（模型输出的零星镜头块保留也可作为参考但会被覆盖）。
+func parseAndValidateOutline(raw string) (*SplitResult, error) {
+	clean := extractJSON(raw)
+	var result SplitResult
+	if err := json.Unmarshal([]byte(clean), &result); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+	}
+	repairAssets(&result)
+	if err := validateOutline(&result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// validateOutline 段A 结构校验（不含镜头维度）。
+func validateOutline(r *SplitResult) error {
+	if len(r.Episodes) == 0 {
+		return fmt.Errorf("%w: 缺少 episodes", ErrInvalidStructure)
+	}
+	for ei, ep := range r.Episodes {
+		if len(ep.NarrativeUnits) == 0 {
+			return fmt.Errorf("%w: 第%d集缺少 narrative_units", ErrInvalidStructure, ei+1)
+		}
+		for bi, beat := range ep.NarrativeUnits {
+			if strings.TrimSpace(beat.Title) == "" {
+				return fmt.Errorf("%w: 第%d集第%d个叙事单元缺标题", ErrInvalidStructure, ei+1, bi+1)
+			}
+			if strings.TrimSpace(beat.ScriptOriginalText) == "" {
+				return fmt.Errorf("%w: 叙事单元 %q 缺少原文摘录", ErrInvalidStructure, beat.Title)
+			}
+		}
+	}
+	// 集级资产轻量校验：code/name 非空（缺省字段容忍，落库时兜底）
+	for i, sc := range r.Scenes {
+		if strings.TrimSpace(sc.Code) == "" || strings.TrimSpace(sc.BaseName) == "" {
+			return fmt.Errorf("%w: 第%d个场景缺少 code/base_name", ErrInvalidStructure, i+1)
+		}
+	}
+	for i, p := range r.Props {
+		if strings.TrimSpace(p.Code) == "" || strings.TrimSpace(p.Name) == "" {
+			return fmt.Errorf("%w: 第%d个道具缺少 code/name", ErrInvalidStructure, i+1)
+		}
+	}
+	return nil
+}
+
+// normalizeUnitDurations 单元时长确定性归一：摘录字数÷4 字/秒向上取整，夹在 [3,30]。
+// 模型估时常失真（漏计或超 30s），段B 前统一以此为准（块时长加总向它对齐）。
+func normalizeUnitDurations(r *SplitResult) {
+	runeLen := func(s string) int {
+		return len([]rune(strings.Map(func(rt rune) rune {
+			if unicode.IsSpace(rt) {
+				return -1
+			}
+			return rt
+		}, s)))
+	}
+	for ei := range r.Episodes {
+		for bi := range r.Episodes[ei].NarrativeUnits {
+			u := &r.Episodes[ei].NarrativeUnits[bi]
+			d := (runeLen(u.ScriptOriginalText) + 3) / 4
+			if d < 3 {
+				d = 3
+			}
+			if d > 30 {
+				d = 30
+			}
+			u.DurationSec = FlexInt(d)
+		}
+	}
+}
+
+// shotDesignOut 段B LLM 输出结构（单集全部单元的镜头块）。
+type shotDesignOut struct {
+	Units []struct {
+		Index      int         `json:"index"`
+		ShotGroups []ShotGroup `json:"shot_groups"`
+	} `json:"units"`
+}
+
+// parseShotDesign 解析段B输出（坏 JSON 返回可重试错误）。
+func parseShotDesign(raw string) (*shotDesignOut, error) {
+	var out shotDesignOut
+	if err := json.Unmarshal([]byte(extractJSON(raw)), &out); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+	}
+	if len(out.Units) == 0 {
+		return nil, fmt.Errorf("%w: 缺少 units", ErrInvalidStructure)
+	}
+	return &out, nil
+}
+
+// applyShotDesign 把段B输出的镜头块挂到对应单元：
+// index 对位、枚举校验、空块剔除，最后把块时长总和确定性均衡到单元时长。
+// 有缺失单元/非法条目返回错误（触发整集重试）。
+func applyShotDesign(ep *EpisodeSplit, out *shotDesignOut) error {
+	groupsByUnit := make(map[int][]ShotGroup, len(out.Units))
+	for _, u := range out.Units {
+		if u.Index < 1 || u.Index > len(ep.NarrativeUnits) {
+			continue // 越界条目忽略（模型偶发幻觉序号）
+		}
+		valid := make([]ShotGroup, 0, len(u.ShotGroups))
+		for _, g := range u.ShotGroups {
+			if len(g.Shots) == 0 {
+				continue
+			}
+			ok := true
+			for si, s := range g.Shots {
+				if s.DurationSec <= 0 || s.DurationSec > 30 ||
+					!validShotSizes[s.ShotSize] || !validCameraMoves[s.CameraMovement] || !validCameraAngles[s.CameraAngle] {
+					ok = false
+					break
+				}
+				_ = si
+			}
+			if ok {
+				valid = append(valid, g)
+			}
+		}
+		if len(valid) > 0 {
+			groupsByUnit[u.Index] = valid
+		}
+	}
+	for ui := range ep.NarrativeUnits {
+		gs, ok := groupsByUnit[ui+1]
+		if !ok {
+			return fmt.Errorf("%w: 叙事单元 %q 缺少镜头块设计（或整组被枚举校验剔除）", ErrInvalidStructure, ep.NarrativeUnits[ui].Title)
+		}
+		want := int(ep.NarrativeUnits[ui].DurationSec)
+		ep.NarrativeUnits[ui].ShotGroups = balanceGroupDurations(gs, want)
+	}
+	return nil
+}
+
+// balanceGroupDurations 确定性把各块时长缩放到总和恰为 want（正整数，块间≥1 秒）。
+// LLM 对「加总相等」约束经常差 1~3 秒，重试纠偏低效且振荡，直接数值修复。
+func balanceGroupDurations(groups []ShotGroup, want int) []ShotGroup {
+	n := len(groups)
+	if n == 0 || want <= 0 {
+		return groups
+	}
+	total := 0
+	for i := range groups {
+		if groups[i].DurationSec <= 0 {
+			groups[i].DurationSec = FlexInt(want / n)
+		}
+		total += int(groups[i].DurationSec)
+	}
+	if total <= 0 {
+		total = 1
+	}
+	sum := 0
+	for i := range groups {
+		d := want * int(groups[i].DurationSec) / total
+		if d < 1 {
+			d = 1
+		}
+		groups[i].DurationSec = FlexInt(d)
+		sum += d
+	}
+	// 差额 ±N 逐块吸收（保持 ≥1）
+	for i := 0; sum != want && i < n*4; i++ {
+		idx := i % n
+		if sum < want {
+			groups[idx].DurationSec++
+			sum++
+		} else if groups[idx].DurationSec > 1 {
+			groups[idx].DurationSec--
+			sum--
+		}
+	}
+	return groups
+}

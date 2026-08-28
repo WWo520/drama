@@ -24,7 +24,8 @@ const storyboardPlanSystemPrompt = `你是短剧分镜编剧。根据叙事单�
 
 【规则】
 1. 全部镜头 duration_sec 加总须接近单元时长预设 %d 秒（误差 ±20%% 以内）；
-2. 每单元 1~3 个镜头块，每块 2~4 个镜头，单镜头 2~9 秒；
+2. 镜头粒度铁律：单镜头以 2~3 秒为主、不得超过 4 秒（对齐短剧成片节奏，如 26 秒单元约拆 10~13 个镜头）；镜头是连续小步进的单个画面动作，禁止把多个动作/多句台词塞进同一镜头；
+3. 按情节节奏切分为 2~4 个镜头块（块仅作展示分组），每块包含的镜头数量随时间自然累积；
 3. shot_size 仅限 ECU/CU/MCU/MS/FS/LS/ELS/TWO_SHOT/OTS；
 4. camera_movement 仅限 STATIC/SLOW_PUSH_IN/SLOW_PULL_OUT/FAST_PUSH_IN/DOLLY_IN/DOLLY_OUT/PAN_LEFT/PAN_RIGHT/TRACK_LEFT/TRACK_RIGHT/TILT_UP/TILT_DOWN/CRANE_UP/CRANE_DOWN/HANDHELD_SHAKY/WIPE_CLIP/ZOOM_IN_OPTICAL/SLOW_360_ORBIT；
 5. camera_angle 仅限 EYE_LEVEL_FRONT/SIDE/BACK/SLIGHT_LOW_ANGLE/LOW_ANGLE/SLIGHT_HIGH/HIGH_BIRDVIEW/OTS_LEFT/OTS_RIGHT/DUTCH_ANGLE；
@@ -217,27 +218,23 @@ func sanitizeRefAssets(groups []ShotGroup) {
 	}
 }
 
-// polishGroups 逐镜头润色（与拆分 polishAll 同款技能，单镜头失败不中断）。
+// polishGroups 按卡聚合润色（与拆分 polishAll 同款卡级方案A：整组一次调用 + 组间上下文；
+// 失败整组回退 luxShotPrompt，不中断）。
 func (h *StoryboardPlanHandler) polishGroups(ctx context.Context, groups []ShotGroup) {
 	for gi := range groups {
 		sg := &groups[gi]
+		var prevBrief, nextBrief string
+		if gi > 0 && len(groups[gi-1].Shots) > 0 {
+			prevBrief = neighborBrief(&groups[gi-1].Shots[len(groups[gi-1].Shots)-1])
+		}
+		if gi+1 < len(groups) && len(groups[gi+1].Shots) > 0 {
+			nextBrief = neighborBrief(&groups[gi+1].Shots[0])
+		}
+		if PolishShotGroupAsCard(ctx, h.llm, sg, prevBrief, nextBrief) {
+			continue
+		}
 		for si := range sg.Shots {
-			s := &sg.Shots[si]
-			prompt := fmt.Sprintf("镜头时长%d秒。景别:%s。运镜:%s。视角:%s。主体:%s。背景:%s。光影:%s。台词:%s。环境音:%s。",
-				int(s.DurationSec), shotSizeCn(s.ShotSize), cameraMoveCn(s.CameraMovement), cameraAngleCn(s.CameraAngle),
-				s.SubjectDescription, s.BackgroundDescription, s.LocalLightDescription, s.DialogueText, s.AmbientSound)
-			resp, err := h.llm.Chat(ctx, model.CapLLM, &model.ChatRequest{
-				Prompt:      prompt,
-				System:      fmt.Sprintf(polishSystemPrompt, int(s.DurationSec)),
-				MaxTokens:   512,
-				Temperature: 0.5,
-				NoThinking:  true,
-			})
-			if err != nil || resp.Content == "" {
-				s.PromptRefined = luxShotPrompt(s)
-				continue
-			}
-			s.PromptRefined = resp.Content
+			sg.Shots[si].PromptRefined = luxShotPrompt(&sg.Shots[si])
 		}
 	}
 }

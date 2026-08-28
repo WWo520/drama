@@ -207,7 +207,17 @@ export default function ProjectListPage() {
       <div key={p.project_id} className="project-card" onClick={() => openProject(p)}>
         <div className="project-thumb">
           <div className={`project-thumb-gradient thumb-${(idx % 16) + 1}`} />
+          {p.cover_image_url && (
+            <img
+              src={p.cover_image_url}
+              alt={p.title}
+              className="project-thumb-img"
+              onError={(e) => { e.currentTarget.style.display = "none"; }}
+            />
+          )}
           <div className="card-highlight" />
+          {/* 项目名称：左上角（对齐需求：每张卡片左上角展示项目名） */}
+          <span className="project-name-badge" title={p.title}>{p.title || "未命名项目"}</span>
           <span className={`status-badge status-${badge.kind}`}>{badge.label}</span>
           {badge.kind === "completed" && p.total_duration_sec > 0 && (
             <span className="duration-badge">{fmtDuration(p.total_duration_sec)}</span>

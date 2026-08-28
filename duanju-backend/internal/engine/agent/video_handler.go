@@ -1,6 +1,8 @@
 // VideoHandler：Worker-Video（VIDEO_SEGMENT_GEN / VIDEO_GROUP_CONCAT / FINAL_VIDEO_COMPOSE）。
 // 真实/降级视频生成 + 进度回写 + shots 状态 CAS 更新（回调幂等：RUNNING→SUCCESS 仅一次）。
 // 18 - 视频制作 阶段一：参考图注入（去重 + 上限 + 尾部全局约束指令）与生成参数透传。
+// 成片卡模式（对齐 LuxReal「规划视频任务」）：params.card_id 非空时按卡生成——
+// prompt = <Picture N> 声明块 + 资产绑定语句 + 卡内全部镜头的分镜脚本文本 + 完整约束尾缀。
 package agent
 
 import (
@@ -34,6 +36,13 @@ type VideoStore interface {
 	// SaveShotVideo 记录视频生成结果：shots.generated_video_url + video_generation_status=SUCCESS + 回写进度。
 	// 幂等：status='PENDING' 或已失败才写入，已 SUCCESS 的直接返回（回调幂等）。
 	SaveShotVideo(ctx context.Context, shotID int64, videoURL string, progressPct int, taskID int64) error
+	// LoadCard 加载成片卡信息（规划视频任务产物；card 模式生成入口）。
+	LoadCard(ctx context.Context, cardID int64) (*CardInfo, error)
+	// LoadCardShots 按顺序加载卡内镜头（含 8 字段分镜结构；deleted_at 过滤）。
+	LoadCardShots(ctx context.Context, cardID int64) ([]*ShotInfo, error)
+	// SaveCardVideo 记录成片卡生成结果：video_cards SUCCESS + 卡内 shots 同步置 SUCCESS
+	// （保持 CompleteVideoIfAllDone / Step4 展平逻辑兼容）；CAS 幂等同 SaveShotVideo。
+	SaveCardVideo(ctx context.Context, cardID int64, videoURL string, progressPct int, taskID int64) error
 	// UpdateProgress 更新任务进度（独立调用，不阻塞主流程）。
 	UpdateProgress(ctx context.Context, taskID int64, pct int, msg string) error
 	// UpdateShotGroupStatus 更新镜头块状态（所有子镜头完成后）。
@@ -62,15 +71,25 @@ type ShotInfo struct {
 	AmbientSound   string
 }
 
+// CardInfo 成片卡信息（规划视频任务产物：一次视频生成任务 = 一张卡 = 2~4 个连续分镜镜头）。
+type CardInfo struct {
+	CardID          int64
+	ProjectID       int64
+	NarrativeUnitID int64
+	DurationSec     int    // 卡内镜头时长加总（生成时按模型上下限截断）
+	Title           string // 形如「镜头2~镜头5」
+	PromptText      string // 用户自定义提示词；空 = 按分镜脚本三段式自动组装
+}
+
 // videoTaskTypes VIDEO_SEGMENT_GEN 等任务类型。
 var videoTaskTypes = map[string]bool{
 	"VIDEO_SEGMENT_GEN":  true,
 	"VIDEO_GROUP_CONCAT": true,
 }
 
-// videoTailConstraint 尾部全局约束指令（对齐 LuxReal：Agent 自动追加、不可删改的硬约束，
-// 钉住三件事——忠于脚本、忠于参考图、禁字幕）。
-const videoTailConstraint = "\n严格按照分镜脚本进行生成，参考上传图的人物形象、场景和道具。不要生成字幕。"
+// videoTailConstraint 尾部全局约束指令（对齐 LuxReal 成片卡 prompt 实测尾缀：
+// 忠于脚本、忠于参考图、禁字幕、音效规则——Agent 自动追加、不可删改的硬约束）。
+const videoTailConstraint = "\n严格按照分镜脚本进行生成，参考上传图的人物形象、场景和道具。不要生成字幕。生成关键音效，不要生成背景音乐和BGM。"
 
 // maxShotRefImages 单镜头参考图上限分档：火山 Seedance 多图参考上限 4 张；
 // maxH3RefImages 为 MiniMax H3（AutoDL v5 多图参考工作流 ref_image_0~8）上限 9 张。
@@ -78,6 +97,12 @@ const videoTailConstraint = "\n严格按照分镜脚本进行生成，参考上�
 const (
 	maxShotRefImages = 4
 	maxH3RefImages   = 9
+)
+
+// 成片卡时长送模型上下限（MiniMax H3 支持 4~15 秒；Seedance 系模型内部自行截断）。
+const (
+	cardMinDurationSec = 4
+	cardMaxDurationSec = 15
 )
 
 // VideoHandler 视频生成 Worker。
@@ -100,11 +125,19 @@ func (h *VideoHandler) Name() string { return "VIDEO_SEGMENT_GEN" }
 
 func (h *VideoHandler) Handles(taskType string) bool { return videoTaskTypes[taskType] }
 
-// Execute 执行视频生成：解析目标 → 加载参考图 → 真实/降级生成 → shots 状态 CAS（回调幂等）。
+// cardShot 卡内镜头 + 其参考资产配对（绑定语句需要知道"哪个资产出现在哪个镜头"）。
+type cardShot struct {
+	info *ShotInfo
+	refs []RefAsset
+}
+
+// Execute 执行视频生成：解析目标 → 加载参考图 → 真实/降级生成 → 状态 CAS（回调幂等）。
+// 目标二选一：card_id（成片卡模式，主线）/ shot_id（旧单镜头兼容路径）。
 func (h *VideoHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error) {
 	var params struct {
 		ShotID      int64  `json:"shot_id"`
 		ShotGroupID int64  `json:"shot_group_id"`
+		CardID      int64  `json:"card_id"`    // 成片卡模式（规划视频任务后的主线链路）
 		Resolution  string `json:"resolution"` // 弹窗提交（P480/P720/P1080）；空=默认 P720
 		ModelKey    string `json:"model_key"`  // 弹窗提交；空=keystore 默认路由
 	}
@@ -115,139 +148,173 @@ func (h *VideoHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 	if t.TaskType == "VIDEO_GROUP_CONCAT" {
 		return h.executeGroupConcat(ctx, params.ShotGroupID)
 	}
+	if params.CardID != 0 {
+		return h.executeCard(ctx, t, params.CardID, params.Resolution, params.ModelKey)
+	}
 	if params.ShotID == 0 {
-		return nil, fmt.Errorf("缺少 shot_id")
+		return nil, fmt.Errorf("缺少 card_id 或 shot_id")
 	}
 
-	// 加载镜头信息
+	// ===== 旧单镜头路径（兼容历史任务；新任务一律走成片卡）=====
 	shot, err := h.store.LoadShot(ctx, params.ShotID)
 	if err != nil {
 		return nil, err
 	}
-
-	// F10: 加载镜头参考资产配对（kind/name/url 同源同序；shot_asset_refs 优先，否则继承 nu_asset_links）。
-	// 配对而非两条独立查询：旧链路 URL 列表过滤无图资产、名称列表不过滤 → 索引错位，
-	// 且 <Picture N> 绑定需要知道"第 i 张图是哪个资产"。
-	refAssets := h.store.LoadShotRefAssets(ctx, params.ShotID, shot.NarrativeUnitID)
-	// 镜头级专属参考图（对齐 LuxReal「镜头N的参考图」）：作为最高优先级（Picture 1）注入。
-	if strings.TrimSpace(shot.ReferenceImageURL) != "" {
+	refAssets := h.store.LoadShotRefAssets(ctx, shot.ShotID, shot.NarrativeUnitID)
+	if strings.TrimSpace(shot.ReferenceImageURL) != "" && !refHasURL(refAssets, shot.ReferenceImageURL) {
 		refAssets = append([]RefAsset{{Kind: "SHOT", Name: "本镜头画面参考", URL: shot.ReferenceImageURL}}, refAssets...)
 	}
-	refAssets = dedupeRefAssets(refAssets)
-	// 上限按模型分档：MiniMax H3（AutoDL v5 多图参考）支持 9 张；火山 Seedance 上限 4 张。
-	refCap := maxShotRefImages
-	if params.ModelKey == "MiniMax-H3" {
-		refCap = maxH3RefImages
+	refAssets, expired := filterExpiredRefs(dedupeRefAssets(refAssets))
+	if len(expired) > 0 {
+		log.Printf("video: shot %d 剔除 %d 张已过期 TOS 签名参考图（请对该镜头重生成参考图）: %s",
+			shot.ShotID, len(expired), strings.Join(expired, "、"))
 	}
-	if len(refAssets) > refCap {
-		refAssets = refAssets[:refCap]
-	}
-	refURLs := make([]string, 0, len(refAssets))
-	for _, ra := range refAssets {
-		refURLs = append(refURLs, ra.URL)
-	}
+	refAssets, refURLs := capRefAssets(refAssets, params.ModelKey)
 	if len(refAssets) > 0 {
-		log.Printf("video: shot %d 参考图 %d 张 target=%s", shot.ShotID, len(refAssets), refAssets[0].URL)
+		log.Printf("video: shot %d 参考资产 %d 个 target=%s", shot.ShotID, len(refAssets), refAssets[0].Name)
+	}
+	return h.generateAndSave(ctx, t, genTarget{
+		Kind: "shot", ID: shot.ShotID, GroupID: shot.ShotGroupID,
+		DurationSec: shot.DurationSec,
+		Prompt:      buildLegacyPrompt(shot, refAssets), RefURLs: refURLs,
+	}, params.Resolution, params.ModelKey)
+}
+
+// executeCard 成片卡模式：加载卡 + 全部镜头 → 聚合参考图 → LuxReal 三段式 prompt → 生成 → 回写卡片与镜头。
+func (h *VideoHandler) executeCard(ctx context.Context, t *task.Task, cardID int64, resolution, modelKey string) ([]byte, error) {
+	card, err := h.store.LoadCard(ctx, cardID)
+	if err != nil {
+		return nil, fmt.Errorf("加载成片卡失败: %w", err)
+	}
+	shots, err := h.store.LoadCardShots(ctx, cardID)
+	if err != nil {
+		return nil, fmt.Errorf("加载卡内镜头失败: %w", err)
+	}
+	if len(shots) == 0 {
+		return nil, fmt.Errorf("成片卡 %d 内无有效镜头（分镜脚本可能已重排，请重新规划视频任务）", cardID)
 	}
 
+	// 每镜头参考资产配对（镜头级专属参考图前置为 Picture 最高优先级；同 URL 去重留首次出现位置）
+	cards := make([]cardShot, 0, len(shots))
+	for _, s := range shots {
+		ra := h.store.LoadShotRefAssets(ctx, s.ShotID, card.NarrativeUnitID)
+		if strings.TrimSpace(s.ReferenceImageURL) != "" && !refHasURL(ra, s.ReferenceImageURL) {
+			ra = append([]RefAsset{{Kind: "SHOT", Name: "本镜头画面参考", URL: s.ReferenceImageURL}}, ra...)
+		}
+		cards = append(cards, cardShot{info: s, refs: ra})
+	}
+	flatRefs, expired := filterExpiredRefs(dedupeRefAssets(flattenCardRefs(cards)))
+	if len(expired) > 0 {
+		log.Printf("video: card %d 剔除 %d 张已过期 TOS 签名参考图（请对相关镜头重生成参考图）: %s",
+			card.CardID, len(expired), strings.Join(expired, "、"))
+	}
+	flatRefs, refURLs := capRefAssets(flatRefs, modelKey)
+	log.Printf("video: card %d (%s) shots=%d 参考图 %d 张 dur=%ds",
+		card.CardID, card.Title, len(cards), len(refURLs), card.DurationSec)
+
+	duration := clampCardDuration(card.DurationSec)
+
+	// 提示词三段式（对齐 LuxReal 成片卡 prompt 实测结构）：
+	//   [1] <Picture N> 声明块（H3 Ref2VA 按图序编号逐张声明职责）
+	//   [2] 资产绑定语句：「X」是镜头N的参考图 / 多镜头资产列全部镜头号（LuxReal 绑定语法）
+	//   [3] 分镜脚本文本：以下内容是具体的分镜脚本：镜头1，【时长】2s…（卡内全镜头逐个拼入）
+	// 用户自定义 prompt_text 替换 [2][3]；尾缀恒定追加（幂等防重复）。
+	basePrompt := strings.TrimSpace(card.PromptText)
+	if basePrompt == "" {
+		basePrompt = buildLuxRealCardPrompt(cards, flatRefs)
+	}
+	prompt := basePrompt
+	if len(flatRefs) > 0 {
+		prompt = buildPictureDeclarations(flatRefs) + prompt
+	}
+	if !strings.Contains(prompt, "严格按照分镜脚本进行生成") {
+		prompt += videoTailConstraint
+	}
+
+	return h.generateAndSave(ctx, t, genTarget{
+		Kind: "card", ID: card.CardID,
+		DurationSec: duration, Prompt: prompt, RefURLs: refURLs,
+	}, resolution, modelKey)
+}
+
+// genTarget 生成目标归一（card 主线 / shot 兼容）。
+type genTarget struct {
+	Kind        string // "card" / "shot"
+	ID          int64  // card_id / shot_id
+	GroupID     int64  // shot 模式的镜头块 id
+	DurationSec int
+	Prompt      string
+	RefURLs     []string
+}
+
+// generateAndSave 共用执行段：mock 进度推进 → 引擎生成（生产禁降级）→ CAS 回写 → 输出摘要。
+func (h *VideoHandler) generateAndSave(ctx context.Context, t *task.Task, g genTarget, resolution, modelKey string) ([]byte, error) {
 	// 阶段性进度更新（模拟分步处理：提交→排队→渲染→完成）
 	h.store.UpdateProgress(ctx, t.ID, 10, "模型排队中…")
-	time.Sleep(50 * time.Millisecond) // mock 处理延迟
-
+	time.Sleep(50 * time.Millisecond)
 	h.store.UpdateProgress(ctx, t.ID, 40, "场景渲染中…")
 	time.Sleep(100 * time.Millisecond)
-
 	h.store.UpdateProgress(ctx, t.ID, 70, "镜头合成中…")
 	time.Sleep(100 * time.Millisecond)
 
-	// 提示词组装（对齐 LuxReal + MiniMax H3 官方规范）：
-	// 优先润色提示词（Lux Gem 润色后自然语言，含全部镜头信息）；
-	// 为空时按 8 字段结构化拼接（镜头参数头 + 主体/背景/光影/台词/环境音）兜底。
-	// 参考绑定双保险：
-	//   1) <Picture N> 声明块（H3 Ref2VA 官方机制——按参考图传入顺序编号，逐张声明
-	//      控制对象；官方指南 "Assign each reference a job"，人物/场景/道具各锁其维度）
-	//   2) @资产名标记（LuxReal 约定保留）+ 「资产名→Picture N」正文映射行
-	assetNames := make([]string, 0, len(refAssets))
-	for _, ra := range refAssets {
-		if ra.Kind != "SHOT" {
-			assetNames = append(assetNames, ra.Name)
-		}
+	res := resolution
+	if res == "" {
+		res = "P720"
 	}
-	basePrompt := shot.PromptRefined
-	if strings.TrimSpace(basePrompt) == "" {
-		basePrompt = buildStructuredShotPrompt(shot)
-	}
-	basePrompt = TagAssetsInPrompt(basePrompt, assetNames)
-	var promptB strings.Builder
-	if len(refAssets) > 0 {
-		promptB.WriteString(buildPictureDeclarations(refAssets))
-		bindings := make([]string, 0, len(assetNames))
-		for i, ra := range refAssets {
-			if ra.Kind != "SHOT" {
-				bindings = append(bindings, fmt.Sprintf("%s→<Picture %d>", ra.Name, i+1))
-			}
-		}
-		if len(bindings) > 0 {
-			promptB.WriteString("资产参考绑定：" + strings.Join(bindings, "、") +
-				"（画面须与对应参考图保持一致）\n\n")
-		}
-	}
-	promptB.WriteString(basePrompt)
-	promptB.WriteString(videoTailConstraint)
-	prompt := promptB.String()
-	resolution := params.Resolution
-	if resolution == "" {
-		resolution = "P720"
-	}
-
-	// 真实视频生成（B06 ModelEngine.GenerateVideo）：配置了 T2V 厂商/Key 后走真实调用；
-	// 无配置或调用失败降级 mock 样例视频（开发期链路保持可用）。
-	videoURL := ""
-	isMock := true
-	if h.engine != nil && strings.TrimSpace(prompt) != "" {
+	var videoURL string
+	isMock := false
+	switch {
+	case h.engine != nil && strings.TrimSpace(g.Prompt) != "":
 		resp, gerr := h.engine.GenerateVideo(ctx, model.CapT2V, &model.VideoRequest{
-			Prompt:       prompt,
-			RefImageURLs: refURLs, // F10: 多参考图注入
-			DurationSec:  shot.DurationSec,
-			Resolution:   resolution,
-			ModelKey:     params.ModelKey,
+			Prompt:       g.Prompt,
+			RefImageURLs: g.RefURLs,
+			DurationSec:  g.DurationSec,
+			Resolution:   res,
+			ModelKey:     modelKey,
 		})
-		if gerr == nil && resp.VideoURL != "" {
-			videoURL = resp.VideoURL
-			isMock = false
-		} else {
-			// 08 审查 Major#16：生产环境禁止降级 mock（避免按成功扣费给用户样例视频）
-			if h.env == "production" {
-				return nil, fmt.Errorf("真实视频生成失败（生产禁用 mock 降级）: %w", gerr)
-			}
-			log.Printf("video: 真实视频生成失败(%v)，降级 mock shot=%d", gerr, shot.ShotID)
+		if gerr != nil || resp.VideoURL == "" {
+			// 真实调用失败一律返回错误交由任务层重试（reaper 到上限后任务 FAILED 可见）；
+			// 不再降级 mock——伪造"已生成"的占位视频会误导用户（生产禁用逻辑合并于此）。
+			return nil, fmt.Errorf("真实视频生成失败: %w", gerr)
 		}
-	} else if h.env == "production" && (h.engine == nil || strings.TrimSpace(prompt) == "") {
-		return nil, fmt.Errorf("生产环境未配置 T2V 模型或镜头提示词为空")
+		videoURL = resp.VideoURL
+	case h.engine == nil && h.env != "production":
+		// 未配置任何厂商的开发环境才允许链路自测 mock
+		isMock = true
+	case h.env == "production":
+		return nil, fmt.Errorf("生产环境未配置 T2V 模型或提示词为空")
+	default:
+		return nil, fmt.Errorf("提示词为空，无法生成视频")
 	}
 	if videoURL == "" {
-		videoURL = fmt.Sprintf("%s/sample.mp4?shot=%d&t=%d",
-			mockCDNBase(), shot.ShotID, time.Now().UnixMilli())
+		videoURL = fmt.Sprintf("%s/sample.mp4?%s=%d&t=%d", mockCDNBase(), g.Kind, g.ID, time.Now().UnixMilli())
 	}
-	log.Printf("video: shot %d 视频 url=%s is_mock=%v refs=%d", shot.ShotID, videoURL, isMock, len(refURLs))
+	log.Printf("video: %s %d 视频 url=%s is_mock=%v refs=%d dur=%ds",
+		g.Kind, g.ID, videoURL, isMock, len(g.RefURLs), g.DurationSec)
 
-	// 回调幂等：SaveShotVideo 内 CAS（仅 PENDING/FAILED 状态写入，已 SUCCESS 跳过）
-	if err := h.store.SaveShotVideo(ctx, shot.ShotID, videoURL, 100, t.ID); err != nil {
-		return nil, err
-	}
-
-	// 更新镜头块状态（检查同块内所有镜头是否全部完成）
-	if err := h.store.UpdateShotGroupStatus(ctx, shot.ShotGroupID); err != nil {
-		log.Printf("video: 更新镜头块状态 shot_group=%d: %v", shot.ShotGroupID, err)
+	switch g.Kind {
+	case "card":
+		if err := h.store.SaveCardVideo(ctx, g.ID, videoURL, 100, t.ID); err != nil {
+			return nil, err
+		}
+	default:
+		if err := h.store.SaveShotVideo(ctx, g.ID, videoURL, 100, t.ID); err != nil {
+			return nil, err
+		}
+		if g.GroupID > 0 {
+			if err := h.store.UpdateShotGroupStatus(ctx, g.GroupID); err != nil {
+				log.Printf("video: 更新镜头块状态 shot_group=%d: %v", g.GroupID, err)
+			}
+		}
 	}
 
 	out, _ := json.Marshal(map[string]any{
-		"video_url":     videoURL,
-		"shot_id":       shot.ShotID,
-		"shot_group_id": shot.ShotGroupID,
-		"progress_pct":  100,
-		"is_mock":       isMock,
-		"ref_images":    len(refURLs),
+		"video_url":    videoURL,
+		"target_kind":  g.Kind,
+		"target_id":    g.ID,
+		"progress_pct": 100,
+		"is_mock":      isMock,
+		"ref_images":   len(g.RefURLs),
 	})
 	return out, nil
 }
@@ -268,6 +335,8 @@ func (h *VideoHandler) executeGroupConcat(ctx context.Context, shotGroupID int64
 	return out, nil
 }
 
+// ---- 纯函数辅助（可单测）----
+
 // dedupeRefAssets 参考资产按 URL 去重（角色→场景→道具序保持）。
 func dedupeRefAssets(refs []RefAsset) []RefAsset {
 	seen := make(map[string]bool, len(refs))
@@ -280,6 +349,84 @@ func dedupeRefAssets(refs []RefAsset) []RefAsset {
 		out = append(out, ra)
 	}
 	return out
+}
+
+// flattenCardRefs 展平卡内各镜头参考资产（保镜头顺序）。
+func flattenCardRefs(cards []cardShot) []RefAsset {
+	all := make([]RefAsset, 0, len(cards)*3)
+	for _, cs := range cards {
+		all = append(all, cs.refs...)
+	}
+	return all
+}
+
+// refHasURL 判断参考列表中是否已含指定 URL。
+func refHasURL(refs []RefAsset, url string) bool {
+	for _, ra := range refs {
+		if ra.URL == url {
+			return true
+		}
+	}
+	return false
+}
+
+// capRefAssets 按模型分档截断参考列表（声明块与 URL 列表索引保持对齐）并返回两者。
+func capRefAssets(refs []RefAsset, modelKey string) ([]RefAsset, []string) {
+	limit := maxShotRefImages
+	if modelKey == "MiniMax-H3" {
+		limit = maxH3RefImages
+	}
+	if len(refs) > limit {
+		refs = refs[:limit]
+	}
+	urls := make([]string, 0, len(refs))
+	for _, ra := range refs {
+		urls = append(urls, ra.URL)
+	}
+	return refs, urls
+}
+
+// clampCardDuration 成片卡送模型时长上下限（MiniMax H3 支持 4~15 秒）。
+func clampCardDuration(sec int) int {
+	if sec < cardMinDurationSec {
+		return cardMinDurationSec
+	}
+	if sec > cardMaxDurationSec {
+		return cardMaxDurationSec
+	}
+	return sec
+}
+
+// legacyPrompt 构建旧单镜头提示词：Picture 声明 + @ 资产标记润色稿/结构化兜底 + 尾缀。
+func buildLegacyPrompt(s *ShotInfo, refs []RefAsset) string {
+	names := make([]string, 0, len(refs))
+	for _, ra := range refs {
+		if ra.Kind != "SHOT" {
+			names = append(names, ra.Name)
+		}
+	}
+	base := s.PromptRefined
+	if strings.TrimSpace(base) == "" {
+		base = buildStructuredShotPrompt(s)
+	}
+	base = TagAssetsInPrompt(base, names)
+	var b strings.Builder
+	if len(refs) > 0 {
+		b.WriteString(buildPictureDeclarations(refs))
+		bindings := make([]string, 0, len(names))
+		for i, ra := range refs {
+			if ra.Kind != "SHOT" {
+				bindings = append(bindings, fmt.Sprintf("%s→<Picture %d>", ra.Name, i+1))
+			}
+		}
+		if len(bindings) > 0 {
+			b.WriteString("资产参考绑定：" + strings.Join(bindings, "、") +
+				"（画面须与对应参考图保持一致）\n\n")
+		}
+	}
+	b.WriteString(base)
+	b.WriteString(videoTailConstraint)
+	return b.String()
 }
 
 // buildPictureDeclarations 生成 <Picture N> 声明块（H3 Ref2VA 官方参考绑定机制：
@@ -295,11 +442,131 @@ func buildPictureDeclarations(refs []RefAsset) string {
 			b.WriteString(fmt.Sprintf("<Picture %d> 是场景「%s」的参考：画面中的环境布局、色调与氛围须与该参考图保持一致。\n", i+1, ra.Name))
 		case "PROP":
 			b.WriteString(fmt.Sprintf("<Picture %d> 是道具「%s」的参考：其外观细节须与该参考图保持一致。\n", i+1, ra.Name))
-		default: // SHOT：镜头级专属参考（构图示意，不强制逐帧一致）
-			b.WriteString(fmt.Sprintf("<Picture %d> 是本镜头的画面参考（构图与内容示意）。\n", i+1))
+		default: // SHOT：镜头级专属参考（本卡首帧画面基准——LuxReal 智能镜头的降级替代）
+			b.WriteString(fmt.Sprintf("<Picture %d> 是本段视频开场第一镜的画面基准（人物站位、环境布局、光线氛围必须从该画面自然延续展开，不得凭空另起构图）。\n", i+1))
 		}
 	}
 	b.WriteString("\n")
+	return b.String()
+}
+
+// buildAssetBindingLine LuxReal 成片卡实测的资产绑定语句段：
+// 「香槟塔金色酒液流动」是镜头1的参考图，「豪华宴会厅」是镜头2、镜头3的参考图。
+// 对每个聚合参考资产拼装其出现的卡内镜头号（refs 序即 Picture 序，双保险互证）。
+func buildAssetBindingLine(cards []cardShot, refs []RefAsset) string {
+	hitShots := make(map[string][]int, len(refs)) // url → 出现的镜头号（1-based 卡内序号）
+	for no, cs := range cards {
+		for _, ra := range cs.refs {
+			hitShots[ra.URL] = append(hitShots[ra.URL], no+1)
+		}
+	}
+	parts := make([]string, 0, len(refs))
+	seen := map[string]bool{}
+	for _, ra := range refs {
+		nums := hitShots[ra.URL]
+		if len(nums) == 0 || seen[ra.Name] {
+			continue
+		}
+		seen[ra.Name] = true
+		numStr := make([]string, 0, len(nums))
+		for _, n := range nums {
+			numStr = append(numStr, fmt.Sprintf("镜头%d", n))
+		}
+		parts = append(parts, fmt.Sprintf("「%s」是%s的参考图", ra.Name, strings.Join(numStr, "、")))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "，") + "。"
+}
+
+// buildShotScriptLine 单镜头 → LuxReal 分镜脚本文本块。
+// 精度优先级（对齐 LuxReal「润色后的镜头描述直接作为视频 prompt 主体」）：
+// 有润色稿（prompt_refined，含景别/运镜/动作/表情/承接/转场等融合细化语言）整段作为画面主体；
+// 无润色稿回退 8 字段结构化拼接。头行恒带 镜号+时长+时间戳（对齐 LuxReal 实测规范：
+// 镜号必须写清楚、时间戳明确逐镜节奏），供模型对齐分镜时序。
+func buildShotScriptLine(no int, s *ShotInfo, startSec int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "镜头%02d【时间戳 %d-%ds】【时长】%ds", no, startSec, startSec+s.DurationSec, s.DurationSec)
+	if refined := strings.TrimSpace(s.PromptRefined); refined != "" {
+		// 润色稿自带「镜头 | N秒」头行，与外层编号/时长重复，剥掉首行再嵌入
+		if i := strings.IndexByte(refined, '\n'); i > 0 && strings.Contains(refined[:i], "秒") {
+			refined = strings.TrimSpace(refined[i+1:])
+		}
+		b.WriteString("\n" + refined)
+		return b.String()
+	}
+	if v, ok := shotSizeCN[s.ShotSize]; ok && v != "" {
+		b.WriteString("\n【景别】" + v)
+	}
+	if v, ok := cameraMoveCN[s.CameraMovement]; ok && v != "" {
+		b.WriteString("【运镜】" + v)
+	}
+	if v, ok := cameraAngleCN[s.CameraAngle]; ok && v != "" {
+		b.WriteString("【视角】" + v)
+	}
+	if s.Subject != "" {
+		b.WriteString("\n【主体】" + s.Subject)
+	}
+	if s.Background != "" {
+		b.WriteString("\n【背景】" + s.Background)
+	}
+	if s.Light != "" {
+		b.WriteString("\n【光影】" + s.Light)
+	}
+	if s.Dialogue != "" {
+		b.WriteString("\n【台词】" + s.Dialogue)
+	}
+	if s.AmbientSound != "" {
+		b.WriteString("\n【音效】" + s.AmbientSound)
+	}
+	return b.String()
+}
+
+// buildLuxRealCardPrompt 三段式主体（对齐 LuxReal 单视频提示词润色规范——
+// 开头先锁「主体人物+场景+音效要求」，中段多镜号分镜脚本带时间戳，末段一致性铁律）：
+//
+//	[锚定段] 主体人物 / 场景 清单 + 「不要生成任何BGM」声明
+//	[脚本段] 资产绑定语句 + 卡内全镜头逐块文本（镜头01【时间戳 0-3s】…）
+//	[铁律段] 逐镜衔接与参考图一致性约束
+//
+// 不含 <Picture> 声明头与尾部全局硬约束（调用方拼接）。
+func buildLuxRealCardPrompt(cards []cardShot, refs []RefAsset) string {
+	var b strings.Builder
+	// [锚定段] 从聚合参考资产抽取角色/场景名锁定主语（名字贯穿全片提示词）
+	var chars, scenes []string
+	for _, ra := range refs {
+		switch ra.Kind {
+		case "CHARACTER":
+			chars = append(chars, ra.Name)
+		case "SCENE":
+			scenes = append(scenes, ra.Name)
+		}
+	}
+	b.WriteString("【画面主体】")
+	if len(chars) > 0 {
+		b.WriteString("角色：" + strings.Join(chars, "、") + "。")
+	} else {
+		b.WriteString("以分镜脚本描述的主体为准。")
+	}
+	if len(scenes) > 0 {
+		b.WriteString("场景：" + strings.Join(scenes, "、") + "。")
+	}
+	b.WriteString("\n【音效要求】只生成画面与环境音效，不要生成任何 BGM 或背景音乐。\n\n")
+	// [脚本段] 资产绑定语句（LuxReal 绑定语法：「X」是镜头1、镜头2的参考图）+ 逐镜号块
+	if line := buildAssetBindingLine(cards, refs); line != "" {
+		b.WriteString(line + "\n\n")
+	}
+	b.WriteString("以下内容是具体的分镜脚本：\n")
+	offset := 0
+	for no, cs := range cards {
+		b.WriteString(buildShotScriptLine(no+1, cs.info, offset) + "\n")
+		offset += cs.info.DurationSec
+	}
+	// [铁律段] 连贯性与一致性硬约束
+	b.WriteString("\n各镜头为同一时空连续叙事：人物的位置、朝向、动作状态必须逐镜衔接，" +
+		"前后镜头的起止画面不能跳变；人物形象、服饰与场景布局严格与对应参考图保持一致。" +
+		"严格按照每个镜头的时间戳顺序推进画面。")
 	return b.String()
 }
 

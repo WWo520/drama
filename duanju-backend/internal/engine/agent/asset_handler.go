@@ -54,10 +54,14 @@ type AssetTarget struct {
 
 // AssetHandler 实现 task.Handler（三种资产生成任务）。
 type AssetHandler struct {
-	store  AssetStore
-	engine ImageGenClient // 可为 nil：未注入时降级 mock（开发期）
-	env    string         // 08 审查 Major#16：生产环境禁止 mock 降级
+	store   AssetStore
+	engine  ImageGenClient // 可为 nil：未注入时降级 mock（开发期）
+	env     string         // 08 审查 Major#16：生产环境禁止 mock 降级
+	persist ImagePersister // 可选：生成图转存自有 MinIO（TOS 签名 24h 过期根因）
 }
+
+// SetPersister 注入图片持久化（nil 不转存）。
+func (h *AssetHandler) SetPersister(p ImagePersister) { h.persist = p }
 
 // ImageGenClient 图生模型能力（由 ModelEngine 实现注入）。
 type ImageGenClient interface {
@@ -92,7 +96,24 @@ func stripBodyMetrics(s string) string {
 }
 
 // noTextSuffix 全局无文字约束（画面防文字兜底；提示词已含同类约束时跳过）。
-const noTextSuffix = "。画面中不能出现任何文字、字母、数字和水印"
+const noTextSuffix = "。纯摄影画面，画面中禁止出现任何文字、字母、数字、水印、商标、标签、贴纸、字幕和图形标注"
+
+// bracketLabelRe 资产描述中的「【字段名】」结构化标签（拆分阶段 LLM 输出的模板格式）。
+var bracketLabelRe = regexp.MustCompile(`【[^】]*】`)
+
+// flattenBracketLabels 剥离资产描述里的【字段名】标签并把内容压成自然语言短句。
+// 根因：「【物品名称】咖啡【尺寸】约200ml」这类带方括号字段的模板文本是文生图模型
+// 公认的"画面内标注文字"强诱导源（Seedream 会把字段名/数值直接画成杯身印刷、包装
+// 标签等），结尾一句无文字软约束对抗不了该硬诱导（用户实测图内出现整段中文标签）。
+func flattenBracketLabels(s string) string {
+	if s == "" {
+		return s
+	}
+	out := bracketLabelRe.ReplaceAllString(s, "，")
+	out = punctSquashRe.ReplaceAllString(out, "，")
+	out = strings.TrimLeft(out, "，。；、 ")
+	return out
+}
 
 // timeOfDayCNDesc 时段枚举 → 画面描述（场景日夜变体，对齐 LuxReal）。
 var timeOfDayCNDesc = map[string]string{
@@ -212,8 +233,9 @@ func (h *AssetHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 	}
 	// 弹窗参数透传：临时提示词（图改图）优先于资产默认提示词
 	target.Gen = params.Gen
-	// 基线提示词剥离身体数据（身高/体重/年龄）：纯数字度量无视觉价值且诱导模型画进画面
-	prompt := stripBodyMetrics(target.Prompt)
+	// 基线提示词清洗：剥离身体数据（身高/体重/年龄）+ 剥离【字段名】结构化标签
+	// （标签模板是"画面内文字"的最强诱导源，必须转自然语言短句）
+	prompt := flattenBracketLabels(stripBodyMetrics(target.Prompt))
 	aspect, resolution := "R9_16", "1K"
 	if params.Gen != nil {
 		if params.Gen.Prompt != "" {
@@ -327,6 +349,11 @@ func (h *AssetHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 	if imageURL == "" {
 		imageURL = fmt.Sprintf("%s/asset-placeholder.png?kind=%s&id=%d&t=%d",
 			mockCDNBase(), params.TargetKind, params.TargetID, time.Now().UnixMilli())
+	}
+	// 真实生成图转存自有 MinIO（TOS 私有签名 24h 过期 → 图裂/视频拉不到参考图的根因）；
+	// 转存失败保留原 URL 不阻断。mock 占位图不转存。
+	if !isMock {
+		imageURL = persistGeneratedImage(ctx, h.persist, target.ProjectID, params.TargetKind, params.TargetID, imageURL)
 	}
 	// 最终提示词摘要入日志（prompt 组装链路可观测：基线+变体描述+时段/天气+风格后缀+构图模板）
 	log.Printf("asset: %s 生成图片 target=%d url=%s is_mock=%v prompt=<%s>", params.TargetKind, params.TargetID, imageURL, isMock, truncateStr(prompt, 160))

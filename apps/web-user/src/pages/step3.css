@@ -346,6 +346,47 @@
     overflow: hidden;
     text-overflow: ellipsis;
 }
+/* 镜头级资产绑定：逐行小图 + × 解绑（对齐 LuxReal 精准 @ 引用） */
+.sb-asset-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin: 2px 4px 0 0;
+}
+.sb-asset-row .sb-asset { margin-top: 0; }
+.sb-asset-x {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.08);
+    color: #8B8B9A;
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.15s;
+}
+.sb-asset-x:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #EF4444;
+}
+/* 拖拽悬停高亮：目标镜头行 */
+.sb-shot.drop-hot {
+    outline: 1.5px solid #4C7FF8;
+    outline-offset: -1px;
+    background: rgba(76, 127, 248, 0.06);
+}
+/* 镜头行「可拖入关联资产」提示 */
+.sb-bind-hint {
+    margin-left: auto;
+    font-size: 9px;
+    color: #4A4F66;
+    white-space: nowrap;
+}
 /* 提示词文本中 @资产 引用高亮 */
 .asset-ref-tag {
     color: #4C7FF8;
@@ -493,6 +534,71 @@
     transition: background 0.15s;
 }
 .shot-duration:hover { background: rgba(255,255,255,0.05); }
+
+/* 时长快捷档下拉（PATCH /shots/:id）：wrapper 相对定位，menu 绝对定位悬浮 */
+.shot-duration-wrap { position: relative; }
+.shot-duration-mask {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+}
+.shot-duration-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 31;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    width: 168px;
+    padding: 8px;
+    border-radius: 10px;
+    background: #16161C;
+    border: 1px solid #2A2A35;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.shot-duration-opt {
+    width: 44px;
+    padding: 4px 0;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: rgba(255,255,255,0.04);
+    color: #B8B8C4;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.shot-duration-opt:hover { background: rgba(76,127,248,0.15); color: #fff; }
+.shot-duration-opt.active {
+    background: rgba(76,127,248,0.2);
+    border-color: rgba(76,127,248,0.5);
+    color: #4C7FF8;
+    font-weight: 600;
+}
+
+/* 提示词编辑弹窗（PATCH /shots/:id · prompt_refined） */
+.prompt-edit-textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 200px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: #101016;
+    border: 1px solid #2A2A35;
+    color: #E6E6F0;
+    font-size: 12px;
+    line-height: 1.7;
+    outline: none;
+    transition: border-color 0.15s;
+}
+.prompt-edit-textarea:focus { border-color: rgba(76,127,248,0.6); }
+.prompt-edit-textarea::placeholder { color: #5A5A6E; }
+.prompt-edit-count {
+    margin-top: 6px;
+    text-align: right;
+    font-size: 10px;
+    color: #5A5A6E;
+}
 .shot-content {
     display: flex;
     padding: 0 12px 12px;

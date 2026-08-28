@@ -89,12 +89,16 @@ func (s *StoryboardStore) SaveStoryboardPlan(ctx context.Context, narrativeUnitI
 	}
 	defer tx.Rollback(ctx)
 
-	// RUNNING 门控（对齐 18 方案风险项）：存在生成中视频任务的单元拒绝重规划（防外键/状态残留）
+	// RUNNING 门控（对齐 18 方案风险项）：存在生成中视频任务（镜头级旧链路 / 成片卡）的单元拒绝重规划
 	var running int
 	if err := tx.QueryRow(ctx, `
-		SELECT count(*) FROM shots
-		WHERE narrative_unit_id=$1 AND deleted_at IS NULL AND video_generation_status='RUNNING'`,
-		narrativeUnitID).Scan(&running); err != nil {
+		SELECT (
+			SELECT count(*) FROM shots
+			WHERE narrative_unit_id=$1 AND deleted_at IS NULL AND video_generation_status='RUNNING'
+		) + (
+			SELECT count(*) FROM video_cards
+			WHERE narrative_unit_id=$1 AND deleted_at IS NULL AND generation_status IN ('QUEUED','RUNNING')
+		)`, narrativeUnitID).Scan(&running); err != nil {
 		return nil, err
 	}
 	if running > 0 {
@@ -103,6 +107,13 @@ func (s *StoryboardStore) SaveStoryboardPlan(ctx context.Context, narrativeUnitI
 
 	stats := &agent.SplitStats{}
 	totalDuration := 0
+	// 解绑成片卡并作废旧卡（分镜重排后旧卡的镜头归属失效；卡片生成的视频一并废弃）
+	if _, err := tx.Exec(ctx, `UPDATE shots SET video_card_id=NULL WHERE narrative_unit_id=$1`, narrativeUnitID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE video_cards SET deleted_at=NOW() WHERE narrative_unit_id=$1 AND deleted_at IS NULL`, narrativeUnitID); err != nil {
+		return nil, err
+	}
 	// 软删旧分镜（保留数据可回滚）
 	if _, err := tx.Exec(ctx, `UPDATE shots SET deleted_at=NOW() WHERE narrative_unit_id=$1 AND deleted_at IS NULL`, narrativeUnitID); err != nil {
 		return nil, err

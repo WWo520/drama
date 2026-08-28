@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -15,14 +16,19 @@ import (
 
 // ExportTaskQueue 导出任务创建边界（由 repository.ExportStore 实现）。
 type ExportTaskQueue interface {
-	// CreateExportTask 创建导出任务（返回 exportID 与 taskID，计费冻结按 taskID 进行）。
-	CreateExportTask(ctx context.Context, userID, spaceID, projectID int64, exportID int64, resolution string, watermark bool) (int64, int64, error)
+	// CreateExportTask 创建导出任务（返回 exportID 与 taskID，计费冻结按 taskID 进行；
+	// episodeID>0 时把目标集写入任务参数与 export_range_json，供 Worker 按集合成）。
+	CreateExportTask(ctx context.Context, userID, spaceID, projectID int64, exportID int64, resolution string, watermark bool, episodeID int64) (int64, int64, error)
 	// ListExports 导出历史（3.4.3）。
 	ListExports(ctx context.Context, projectID int64, page, pageSize int) ([]map[string]any, int, error)
 	// ListExportsByUser 我的全部导出（作品列表「视频成片」Tab）。
 	ListExportsByUser(ctx context.Context, userID int64, page, pageSize int) ([]map[string]any, int, error)
 	// GetExportByUUID 导出详情（3.4.2；归属校验）。
 	GetExportByUUID(ctx context.Context, exportUUID string, userID int64) (map[string]any, error)
+	// ResetExportForRetryByUUID 重试重置：清空旧输出 + 状态回 PENDING，返回 (exportID, taskID)。
+	ResetExportForRetryByUUID(ctx context.Context, exportUUID string, userID int64) (int64, int64, error)
+	// ReenqueueComposeTask 重建合成任务 + Outbox。
+	ReenqueueComposeTask(ctx context.Context, exportID, origTaskID int64) error
 }
 
 // ExportService 导出相关服务。
@@ -55,11 +61,12 @@ func (s *ExportService) Trigger(c *gin.Context, projectUUID string) {
 		return
 	}
 
-	// 解析请求体（3.4.1：format/resolution/watermark；缺省 P720 + 合规水印）
+	// 解析请求体（3.4.1：format/resolution/watermark/episode_id；缺省 P720 + 合规水印）
 	var req struct {
-		Format     string `json:"format"`
-		Resolution string `json:"resolution"`
-		Watermark  *bool  `json:"watermark"`
+		Format      string `json:"format"`
+		Resolution  string `json:"resolution"`
+		Watermark   *bool  `json:"watermark"`
+		EpisodeUUID string `json:"episode_id"` // 当前集 UUID；空 = 兼容旧行为（首集）
 	}
 	_ = c.ShouldBindJSON(&req)
 	resolution := req.Resolution
@@ -71,9 +78,22 @@ func (s *ExportService) Trigger(c *gin.Context, projectUUID string) {
 		watermark = *req.Watermark
 	}
 
+	// 目标集解析：传了 episode_id → 校验归属本项目；未传 → 首集（历史兼容）
+	episodeID := int64(0)
+	if epUUID := strings.TrimSpace(req.EpisodeUUID); epUUID != "" {
+		epID, projID, rerr := s.repo.ResolveEpisode(c.Request.Context(), epUUID)
+		if rerr != nil || projID != proj.ID {
+			httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "剧集不存在或不属于当前项目")
+			return
+		}
+		episodeID = epID
+	} else if fid, ferr := s.repo.FirstEpisodeOf(c.Request.Context(), proj.ID); ferr == nil {
+		episodeID = fid
+	}
+
 	spaceID := proj.SpaceID
 	// 创建导出记录 + 任务（返回 taskID 用于计费冻结）
-	exportID, taskID, err := s.exportOps.CreateExportTask(c.Request.Context(), uid, spaceID, proj.ID, proj.ID, resolution, watermark)
+	exportID, taskID, err := s.exportOps.CreateExportTask(c.Request.Context(), uid, spaceID, proj.ID, proj.ID, resolution, watermark, episodeID)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建导出任务失败")
 		return
@@ -142,4 +162,61 @@ func (s *ExportService) Detail(c *gin.Context, exportUUID string) {
 		return
 	}
 	httpx.OK(c, item)
+}
+
+// Preflight 合成前预检：去重后片段统计（弹窗展示"将合成 N 个片段，M 个重复将被跳过"）。
+// 支持 ?episode_id=<uuid>：缺省 = 首集（历史兼容）。
+func (s *ExportService) Preflight(c *gin.Context, projectUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	proj, err := s.repo.GetProject(c.Request.Context(), projectUUID, uid)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	episodeID := int64(0)
+	if epUUID := strings.TrimSpace(c.Query("episode_id")); epUUID != "" {
+		epID, projID, rerr := s.repo.ResolveEpisode(c.Request.Context(), epUUID)
+		if rerr != nil || projID != proj.ID {
+			httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "剧集不存在或不属于当前项目")
+			return
+		}
+		episodeID = epID
+	} else if fid, ferr := s.repo.FirstEpisodeOf(c.Request.Context(), proj.ID); ferr == nil {
+		episodeID = fid
+	}
+	pf, err := s.repo.PreflightExportCompose(c.Request.Context(), episodeID)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "预检失败")
+		return
+	}
+	httpx.OK(c, pf)
+}
+
+// Retry 重新合成：签名 URL 过期（403）或 FAILED 记录一键重发起。
+// 清空旧输出 → 状态回 PENDING → 重建合成任务（不重复冻结积分：复用原 export 记录）。
+func (s *ExportService) Retry(c *gin.Context, exportUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	exportID, taskID, err := s.exportOps.ResetExportForRetryByUUID(c.Request.Context(), exportUUID, uid)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "重置导出失败")
+		return
+	}
+	if exportID == 0 {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "导出记录不存在或不可重试")
+		return
+	}
+	// 重建合成任务 + Outbox（复用原 export 记录的 resolution/watermark 由仓储端保留）
+	if terr := s.exportOps.ReenqueueComposeTask(c.Request.Context(), exportID, taskID); terr != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "重建合成任务失败")
+		return
+	}
+	httpx.OK(c, gin.H{"export_id": exportUUID, "status": "PENDING"})
 }

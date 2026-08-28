@@ -46,6 +46,12 @@ type Worker struct {
 	Settler func(ctx context.Context, taskID int64, deliverable bool) error
 	// Notifier 任务终态通知回调（可选；WS 推送 TASK_SUCCESS/TASK_FAILED，轮询对齐 LuxReal 的 WS 驱动基础）
 	Notifier func(ctx context.Context, t *Task, status string, reason string)
+	// OnDead 业务对象终败归位回调（可选）：任务进入 FAILED_DEAD 死信时，按任务类型
+	// 回写业务实体状态（如成片卡 RUNNING 僵尸 → FAILED_DEAD），否则前端永远显示"生成中"。
+	OnDead func(ctx context.Context, t *Task, reason string)
+	// OnTaskStart 任务开始执行回调（可选）：Handler 借此感知当前任务 ID 上报进度
+	// （handler 为长生命周期单例，进度闭包需从回调取 taskID 而非构造期绑定）。
+	OnTaskStart func(t *Task)
 }
 
 func NewWorker(store Store, queue *Queue, handlers []Handler) *Worker {
@@ -109,6 +115,11 @@ func (w *Worker) processOnce(ctx context.Context) bool {
 	defer cancel()
 	go w.heartbeat(heartbeatCtx, taskID)
 
+	// 进度上报基点（Handler 通过回调感知当前任务 ID）
+	if w.OnTaskStart != nil {
+		w.OnTaskStart(t)
+	}
+
 	// ④ 执行
 	h, ok := w.resolveHandler(t.TaskType)
 	if !ok {
@@ -145,6 +156,10 @@ func (w *Worker) processOnce(ctx context.Context) bool {
 				// 终态通知（WS 推送 TASK_FAILED，前端据此刷新并停止轮询）
 				if w.Notifier != nil {
 					w.Notifier(ctx, t, StatusFailedDead, execErr.Error())
+				}
+				// 业务对象终败归位（成片卡/镜头 RUNNING 僵尸 → FAILED 态）
+				if w.OnDead != nil {
+					w.OnDead(ctx, t, execErr.Error())
 				}
 			} else {
 				// 退避后重试：转 QUEUED + 新 Outbox（同一事务已由 FailTask 预留 next_retry_at；

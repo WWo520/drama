@@ -4,6 +4,7 @@ package creation
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -266,8 +267,8 @@ const (
 	ExportPointsPerSec = 1  // 导出合成：1 点/秒（FFmpeg 成本低）
 )
 
-// GenerateVideos 3.3.7a 批量生成 beat 下全部镜头视频（VIDEO_SEGMENT_GEN + Outbox + 按秒计费冻结）。
-// 18 - 视频制作：弹窗参数（分辨率/模型）落任务参数；关联资产未就绪门控（对齐 LuxReal code=6002）。
+// GenerateVideos 3.3.7a 批量生成单元下全部成片卡视频（VIDEO_SEGMENT_GEN + Outbox + 按秒计费冻结）。
+// 成片卡主线（对齐 LuxReal「规划视频任务」）：无卡片时拒绝（引导先规划）；redo 重置后全量重建。
 func (s *Service) GenerateVideos(c *gin.Context, beatUUID string) {
 	uid := userID(c)
 	if uid == 0 {
@@ -278,7 +279,7 @@ func (s *Service) GenerateVideos(c *gin.Context, beatUUID string) {
 		Resolution string `json:"resolution"`  // P480/P720/P1080；MiniMax H3 为 768P/2K
 		VideoModel string `json:"video_model"` // 模型展示名（Seedance 2.5/2.0/1.5、MiniMax H3）
 		ModelKey   string `json:"model_key"`   // 模型 key（命中 models.model_key 才参与路由）
-		Redo       bool   `json:"redo"`        // 重新生成：重置 SUCCESS 镜头后全量重建（默认 false 只补缺失）
+		Redo       bool   `json:"redo"`        // 重新生成：重置 SUCCESS 卡片后全量重建
 	}
 	_ = c.ShouldBindJSON(&req)
 	switch strings.TrimSpace(req.Resolution) {
@@ -305,67 +306,77 @@ func (s *Service) GenerateVideos(c *gin.Context, beatUUID string) {
 		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "叙事单元不存在")
 		return
 	}
-	// 资产未就绪门控（阶段一.3）：命中关联但参考图缺失 → 拒绝并引导回 Step2；
-	// 无关联资产（纯 T2V 单元）或全部就绪才放行。
+	cards, err := s.repo.ListCardsByBeat(c.Request.Context(), beatID)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取成片卡失败")
+		return
+	}
+	if len(cards) == 0 {
+		httpx.Fail(c, http.StatusBadRequest, 6004, "尚未规划视频任务，请先点击「规划视频任务」将分镜镜头编组成片卡")
+		return
+	}
+	// 资产未就绪门控（阶段一.3）：命中关联但参考图缺失 → 拒绝并引导回 Step2。
 	if linked, ready, gerr := s.repo.BeatAssetReadiness(c.Request.Context(), beatID); gerr == nil && linked > 0 && ready < linked {
 		httpx.Fail(c, http.StatusBadRequest, 6002,
 			fmt.Sprintf("本单元有 %d 个关联资产未生成参考图，请先回到资产阶段完成生成后再制作视频", linked-ready))
 		return
 	}
-	shots, err := s.repo.ListShotsByBeat(c.Request.Context(), beatID)
-	if err != nil {
-		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取镜头失败")
-		return
-	}
-	// 重新生成模式（redo=true）：重置已 SUCCESS 镜头/镜头块（清旧视频）后全量重建，
-	// 否则 CreateVideoTasks 跳过 SUCCESS 镜头会静默创建 0 个任务（"重新生成"按钮语义缺陷）。
+	// 重新生成模式：重置已 SUCCESS 卡片与卡内镜头（清旧视频）后全量重建；
+	// 非重做模式下存在执行中任务则拒绝重复提交。
 	if req.Redo {
-		if rerr := s.repo.ResetBeatShotVideos(c.Request.Context(), beatID); rerr != nil {
-			httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "重置镜头状态失败")
+		if rerr := s.repo.ResetBeatCardVideos(c.Request.Context(), beatID); rerr != nil {
+			httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "重置视频任务状态失败")
 			return
 		}
-		for i := range shots {
-			if shots[i].VideoStatus == "SUCCESS" {
-				shots[i].VideoStatus = "PENDING"
+		for i := range cards {
+			cards[i].Status = "PENDING"
+			if cards[i].GeneratedVideoURL != "" {
+				cards[i].GeneratedVideoURL = ""
 			}
 		}
+	} else {
+		for _, cd := range cards {
+			if cd.Status == "QUEUED" || cd.Status == "RUNNING" {
+				httpx.Fail(c, http.StatusConflict, 30003, "本单元已有视频任务在执行中，请稍候")
+				return
+			}
+		}
+	}
+	eligible := make([]VideoCardDTO, 0, len(cards))
+	for _, cd := range cards {
+		if cd.Status != "SUCCESS" {
+			eligible = append(eligible, cd)
+		}
+	}
+	if len(eligible) == 0 {
+		httpx.OK(c, gin.H{"created": 0, "total": len(cards), "frozen_count": 0, "total_cost": 0})
+		return
 	}
 	spaceID, err := s.repo.SpaceIDByProject(c.Request.Context(), projectID)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "查询空间失败")
 		return
 	}
-	taskIDs, err := s.repo.CreateVideoTasks(c.Request.Context(), projectID, spaceID, uid, beatID, shots, opts)
+	taskIDs, err := s.repo.CreateCardVideoTasks(c.Request.Context(), projectID, spaceID, uid, beatID, eligible, opts)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建视频任务失败")
 		return
 	}
-	// 计费冻结：按镜头时长 × 10 点/秒（未成功镜头；不足则任务标记失败并回退 shot 状态）
+	// 计费冻结：按卡片时长 × 10 点/秒（不足则任务标记失败并回退卡片状态）
 	totalCost, frozenCount := 0, 0
 	if s.billing != nil {
 		for i, tID := range taskIDs {
-			dur := 0
-			// 找到对应 shot 的时长（按顺序过滤 SUCCESS 后对齐）
-			idx := 0
-			for _, sh := range shots {
-				if sh.VideoStatus == "SUCCESS" {
-					continue
-				}
-				if idx == i {
-					dur = sh.DurationSec
-					break
-				}
-				idx++
-			}
-			cost := dur * VideoPointsPerSec
+			cost := eligible[i].DurationSec * VideoPointsPerSec
 			if cost <= 0 {
 				continue
 			}
 			if err := s.billing.Freeze(c.Request.Context(), "USER", uid, tID, cost, &billing.TxnMeta{
-				SpaceID: spaceID, OperatorUserID: uid, ProjectID: &projectID, Description: "视频生成",
+				SpaceID: spaceID, OperatorUserID: uid, ProjectID: &projectID,
+				Description: fmt.Sprintf("成片卡视频生成 %s", eligible[i].Title),
 			}); err != nil {
-				// 余额不足等：任务标记失败，shot 状态回退
 				_ = s.repo.MarkTaskFailed(c.Request.Context(), tID, "积分不足或冻结失败："+err.Error())
+				_, _ = s.repo.pool.Exec(c.Request.Context(),
+					`UPDATE video_cards SET generation_status='FAILED_DEAD' WHERE id=$1`, eligible[i].CardID)
 				continue
 			}
 			totalCost += cost
@@ -376,7 +387,167 @@ func (s *Service) GenerateVideos(c *gin.Context, beatUUID string) {
 			return
 		}
 	}
-	httpx.OK(c, gin.H{"created": len(taskIDs), "total": len(shots), "frozen_count": frozenCount, "total_cost": totalCost})
+	httpx.OK(c, gin.H{"created": len(taskIDs), "total": len(cards), "frozen_count": frozenCount, "total_cost": totalCost})
+}
+
+// PlanVideoTasks 规划视频任务（对齐 LuxReal Tab3「视频任务规划」）：把单元下连续分镜镜头
+// 确定性编组成成片卡（总时长 4~10 秒、2~4 镜头；尾卡不足 4s 并入前一卡）。
+// 已有卡片时需 force=true 显式确认（旧卡及其生成的视频一并废弃）。
+func (s *Service) PlanVideoTasks(c *gin.Context, beatUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	var req struct {
+		Force bool `json:"force"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	projectID, err := s.repo.ResolveProjectByBeat(c.Request.Context(), beatUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "叙事单元不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	beatID, err := s.repo.ResolveBeatID(c.Request.Context(), beatUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "叙事单元不存在")
+		return
+	}
+	existing, err := s.repo.ListCardsByBeat(c.Request.Context(), beatID)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "查询已有成片卡失败")
+		return
+	}
+	for _, cd := range existing {
+		if cd.Status == "QUEUED" || cd.Status == "RUNNING" {
+			httpx.Fail(c, http.StatusConflict, 30003, "本单元有视频任务正在执行，无法重新规划")
+			return
+		}
+	}
+	if len(existing) > 0 && !req.Force {
+		httpx.Fail(c, http.StatusConflict, 30002,
+			fmt.Sprintf("本单元已规划 %d 个视频任务卡，重新规划将清空其已生成的视频，请确认后重试", len(existing)))
+		return
+	}
+	shots, err := s.repo.ListShotsByBeat(c.Request.Context(), beatID)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取镜头失败")
+		return
+	}
+	if len(shots) == 0 {
+		httpx.Fail(c, http.StatusBadRequest, 6005, "尚未生成分镜脚本，请先生成分镜脚本再规划视频任务")
+		return
+	}
+	globalOrder, shotsByID, groups := packVideoCards(shots)
+	n, err := s.repo.InsertVideoCards(c.Request.Context(), beatID, globalOrder, groups, shotsByID)
+	if err != nil {
+		s.lg.Error("插入成片卡失败", zap.Error(err), zap.Int64("beat_id", beatID))
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "规划视频任务失败")
+		return
+	}
+	// 各卡首镜自动补镜头参考图（首帧锚定，对齐 LuxReal 智能镜头：先有画面基准再生成视频）。
+	// 失败仅记日志不阻断规划——锚图缺失只影响衔接质量，视频链路本身可正常降级运行。
+	firstShotIDs := make([]int64, 0, len(groups))
+	for _, g := range groups {
+		if len(g) > 0 {
+			firstShotIDs = append(firstShotIDs, g[0])
+		}
+	}
+	spaceID, serr := s.repo.SpaceIDByProject(c.Request.Context(), projectID)
+	if serr == nil {
+		if _, terr := s.repo.CreateShotRefImageTasks(c.Request.Context(), projectID, spaceID, uid, firstShotIDs); terr != nil {
+			s.lg.Warn("批量创建首镜参考图任务失败（不影响规划）", zap.Error(terr), zap.Int64("beat_id", beatID))
+		}
+	} else {
+		s.lg.Warn("查询空间失败，跳过首镜参考图补齐", zap.Error(serr), zap.Int64("beat_id", beatID))
+	}
+	httpx.OK(c, gin.H{"created": n, "total_cards": n, "total_shots": len(shots)})
+}
+
+// packVideoCards 语义化编组（对齐 LuxReal「视频任务规划技能」：哪些镜头保持连续由剧情决定）：
+// 优先沿 shot_group 边界切卡——组是拆分阶段 LLM 按剧情划定的连贯叙事动作块（同组镜头
+// 属同一时空/同一动作线），整组绑一卡不拆散，镜头数随剧情浮动（1~N 镜）；
+// 仅当单组总时长超单卡目标上限 10s 时才在组内按时长贪心二段切分。
+// 尾卡不足 4s 并入前一卡（MiniMax H3 最短 4s；合并后 ≤15s 由 clampCardDuration 收口）。
+// 返回全局镜头号映射 / 镜头索引映射 / 编组列表。
+func packVideoCards(shots []ShotVideoDTO) (map[int64]int, map[int64]ShotVideoDTO, [][]int64) {
+	globalOrder := make(map[int64]int, len(shots))
+	shotsByID := make(map[int64]ShotVideoDTO, len(shots))
+	for i, sh := range shots {
+		globalOrder[sh.ShotID] = i + 1
+		shotsByID[sh.ShotID] = sh
+	}
+	const (
+		targetSec = 10 // 单卡时长目标上限（LuxReal 实测卡片最长 10s）
+		minSec    = 4  // 模型最短时长（尾卡合并阈值）
+	)
+	durOf := func(id int64) int {
+		if d := shotsByID[id].DurationSec; d > 0 {
+			return d
+		}
+		return 2
+	}
+
+	// ① 沿 shot_group 边界聚合为候选叙事块（保序；shots 已按组排序）
+	type block struct {
+		ids []int64
+		sum int
+	}
+	blocks := make([]block, 0, 8)
+	for _, sh := range shots {
+		if n := len(blocks); n > 0 && sh.ShotGroupID != 0 && sh.ShotGroupID == shotsByID[blocks[n-1].ids[len(blocks[n-1].ids)-1]].ShotGroupID {
+			j := &blocks[n-1]
+			j.ids = append(j.ids, sh.ShotID)
+			j.sum += durOf(sh.ShotID)
+			continue
+		}
+		blocks = append(blocks, block{ids: []int64{sh.ShotID}, sum: durOf(sh.ShotID)})
+	}
+
+	// ② 组内二次切分（仅当组时长超过目标上限）：≤10s 贪心分段，
+	//    剩余段 <4s 且并入前段后 ≤15s 则回并，避免产出生成不了的碎卡
+	var out [][]int64
+	for _, bl := range blocks {
+		if bl.sum <= targetSec {
+			out = append(out, bl.ids)
+			continue
+		}
+		var seg []int64
+		sum := 0
+		for _, id := range bl.ids {
+			if len(seg) > 0 && sum+durOf(id) > targetSec {
+				out = append(out, seg)
+				seg, sum = nil, 0
+			}
+			seg = append(seg, id)
+			sum += durOf(id)
+		}
+		if len(seg) > 0 {
+			out = append(out, seg)
+		}
+	}
+
+	// ③ 尾卡不足模型最短时长 → 并入前一卡（H3 上限 15s 内才合并，否则保留由 clamp 收口）
+	if len(out) >= 2 {
+		last := out[len(out)-1]
+		lsum := 0
+		for _, id := range last {
+			lsum += durOf(id)
+		}
+		prevSum := 0
+		for _, id := range out[len(out)-2] {
+			prevSum += durOf(id)
+		}
+		if lsum < minSec && prevSum+lsum <= 15 {
+			out[len(out)-2] = append(out[len(out)-2], last...)
+			out = out[:len(out)-1]
+		}
+	}
+	return globalOrder, shotsByID, out
 }
 
 // RegenerateShot 单镜头重生成（F11：POST /shots/:shot_id/regenerate）。
@@ -444,6 +615,345 @@ func (s *Service) RegenerateShot(c *gin.Context, shotUUID string) {
 		frozenCount = 1
 	}
 	httpx.OK(c, gin.H{"task_id": taskIDs[0], "shot_id": shotID, "frozen_count": frozenCount, "total_cost": totalCost})
+}
+
+// ListBeatCards 成片卡列表（Step3 卡片网格轮询；GET /beats/:beat_id/cards）。
+func (s *Service) ListBeatCards(c *gin.Context, beatUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	projectID, err := s.repo.ResolveProjectByBeat(c.Request.Context(), beatUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "叙事单元不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	beatID, err := s.repo.ResolveBeatID(c.Request.Context(), beatUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "叙事单元不存在")
+		return
+	}
+	cards, err := s.repo.ListCardsByBeat(c.Request.Context(), beatID)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取成片卡失败")
+		return
+	}
+	httpx.OK(c, gin.H{"items": cards})
+}
+
+// RegenerateCard 单成片卡重新生成（POST /video-cards/:card_id/regenerate）：重置 → 建任务 → 计费冻结。
+func (s *Service) RegenerateCard(c *gin.Context, cardUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	cb, err := s.repo.ResolveCard(c.Request.Context(), cardUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "成片卡不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), cb.ProjectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	if cb.Status == "QUEUED" || cb.Status == "RUNNING" {
+		httpx.Fail(c, http.StatusConflict, 30003, "该视频任务正在执行中，请稍候")
+		return
+	}
+	// 重置卡片与卡内镜头状态（清旧视频）
+	tx, err := s.repo.pool.Begin(c.Request.Context())
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "重置状态失败")
+		return
+	}
+	defer tx.Rollback(c.Request.Context())
+	if _, err := tx.Exec(c.Request.Context(), `
+		UPDATE video_cards SET generation_status='PENDING', generated_video_url=NULL, updated_at=NOW()
+		WHERE id=$1`, cb.ID); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "重置状态失败")
+		return
+	}
+	if _, err := tx.Exec(c.Request.Context(), `
+		UPDATE shots SET video_generation_status='PENDING', generated_video_url=NULL, updated_at=NOW()
+		WHERE video_card_id=$1 AND deleted_at IS NULL`, cb.ID); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "重置状态失败")
+		return
+	}
+	if err := tx.Commit(c.Request.Context()); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "重置状态失败")
+		return
+	}
+	spaceID, err := s.repo.SpaceIDByProject(c.Request.Context(), cb.ProjectID)
+	if err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "查询空间失败")
+		return
+	}
+	taskIDs, err := s.repo.CreateCardVideoTasks(c.Request.Context(), cb.ProjectID, spaceID, uid, cb.NarrativeUnitID,
+		[]VideoCardDTO{{CardID: cb.ID, Title: cb.Title, DurationSec: cb.DurationSec}}, VideoGenOpts{})
+	if err != nil || len(taskIDs) == 0 {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建视频任务失败")
+		return
+	}
+	totalCost := cb.DurationSec * VideoPointsPerSec
+	frozenCount := 0
+	if s.billing != nil && totalCost > 0 {
+		if err := s.billing.Freeze(c.Request.Context(), "USER", uid, taskIDs[0], totalCost, &billing.TxnMeta{
+			SpaceID:        spaceID,
+			OperatorUserID: uid,
+			ProjectID:      &cb.ProjectID,
+			Description:    fmt.Sprintf("成片卡重生成 %s", cb.Title),
+		}); err != nil {
+			_ = s.repo.MarkTaskFailed(c.Request.Context(), taskIDs[0], "积分不足或冻结失败："+err.Error())
+			_, _ = s.repo.pool.Exec(c.Request.Context(),
+				`UPDATE video_cards SET generation_status='FAILED_DEAD' WHERE id=$1`, cb.ID)
+			httpx.Fail(c, http.StatusBadRequest, httpx.CodeInsufficientPoints, "积分不足，无法重新生成")
+			return
+		}
+		frozenCount = 1
+	}
+	httpx.OK(c, gin.H{"task_id": taskIDs[0], "card_id": cb.ID, "frozen_count": frozenCount, "total_cost": totalCost})
+}
+
+// UpdateCardPrompt 编辑成片卡提示词（PATCH /video-cards/:card_id/prompt；空串恢复自动组装）。
+func (s *Service) UpdateCardPrompt(c *gin.Context, cardUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	var req struct {
+		PromptText string `json:"prompt_text"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误："+err.Error())
+		return
+	}
+	cb, err := s.repo.ResolveCard(c.Request.Context(), cardUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "成片卡不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), cb.ProjectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	if err := s.repo.SetCardPrompt(c.Request.Context(), cb.ID, strings.TrimSpace(req.PromptText)); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "保存提示词失败")
+		return
+	}
+	httpx.OK(c, gin.H{"card_id": cb.ID})
+}
+
+// UpdateCardDuration 调整成片卡送模型时长（PATCH /video-cards/:card_id/duration；
+// 对齐 LuxReal 卡头时长下拉：4~15s 合法区间，越界 clamp，已 SUCCESS 的卡下次重新生成生效）。
+func (s *Service) UpdateCardDuration(c *gin.Context, cardUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	var req struct {
+		DurationSec int `json:"duration_sec"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.DurationSec <= 0 {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误：duration_sec 必须为正整数")
+		return
+	}
+	cb, err := s.repo.ResolveCard(c.Request.Context(), cardUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "成片卡不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), cb.ProjectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	if cb.Status == "QUEUED" || cb.Status == "RUNNING" {
+		httpx.Fail(c, http.StatusConflict, 30003, "该视频任务正在执行中，无法调整时长")
+		return
+	}
+	dur := req.DurationSec
+	if dur < 4 {
+		dur = 4
+	} else if dur > 15 {
+		dur = 15
+	}
+	if err := s.repo.SetCardDuration(c.Request.Context(), cb.ID, dur); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "保存时长失败")
+		return
+	}
+	httpx.OK(c, gin.H{"card_id": cb.ID, "duration_sec": dur})
+}
+
+// BindCardAsset 成片卡绑定参考资产（POST /video-cards/:card_id/assets/bind）：
+// 拖拽语义对齐 LuxReal——把资产 chip 绑进卡作为参考图；作用于卡内全部镜头。
+func (s *Service) BindCardAsset(c *gin.Context, cardUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	var req struct {
+		AssetKind string `json:"asset_kind"` // CHARACTER/SCENE/PROP
+		AssetID   int64  `json:"asset_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.AssetID == 0 {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误：asset_kind/asset_id 必填")
+		return
+	}
+	switch req.AssetKind {
+	case "CHARACTER", "SCENE", "PROP":
+	default:
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "asset_kind 非法")
+		return
+	}
+	cb, err := s.repo.ResolveCard(c.Request.Context(), cardUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "成片卡不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), cb.ProjectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	n, err := s.repo.BindCardAsset(c.Request.Context(), cb.ID, req.AssetKind, req.AssetID)
+	if err != nil {
+		s.lg.Warn("卡级资产绑定失败", zap.Error(err), zap.Int64("card_id", cb.ID))
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "绑定资产失败")
+		return
+	}
+	httpx.OK(c, gin.H{"card_id": cb.ID, "bound_shots": n})
+}
+
+// BindShotAsset 镜头级绑定参考资产（POST /shots/:shot_id/assets/bind）：
+// 精准到单个镜头；镜头级显式引用生效后不再回落单元级继承（LoadShotRefAssets 口径）。
+func (s *Service) BindShotAsset(c *gin.Context, shotUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	var req struct {
+		AssetKind string `json:"asset_kind"` // CHARACTER/SCENE/PROP
+		AssetID   int64  `json:"asset_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.AssetID == 0 {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误：asset_kind/asset_id 必填")
+		return
+	}
+	switch req.AssetKind {
+	case "CHARACTER", "SCENE", "PROP":
+	default:
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "asset_kind 非法")
+		return
+	}
+	shotID, err := s.repo.ResolveShotID(c.Request.Context(), shotUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "镜头不存在")
+		return
+	}
+	var projectID int64
+	if err := s.repo.pool.QueryRow(c.Request.Context(),
+		`SELECT project_id FROM shots WHERE id=$1 AND deleted_at IS NULL`, shotID).Scan(&projectID); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "镜头不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	inserted, err := s.repo.BindShotAsset(c.Request.Context(), shotID, req.AssetKind, req.AssetID)
+	if err != nil {
+		s.lg.Warn("镜头级资产绑定失败", zap.Error(err), zap.Int64("shot_id", shotID))
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "绑定资产失败")
+		return
+	}
+	httpx.OK(c, gin.H{"shot_id": shotUUID, "inserted": inserted})
+}
+
+// UnbindShotAsset 镜头级解绑参考资产（DELETE /shots/:shot_id/assets/bind）。
+// removed=false 表示该引用来自叙事单元级继承（无镜头级显式行可删），需前端提示。
+func (s *Service) UnbindShotAsset(c *gin.Context, shotUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	assetKind := c.Query("asset_kind")
+	assetID, _ := strconv.ParseInt(c.Query("asset_id"), 10, 64)
+	switch assetKind {
+	case "CHARACTER", "SCENE", "PROP":
+	default:
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "asset_kind 非法")
+		return
+	}
+	if assetID == 0 {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "缺少 asset_id")
+		return
+	}
+	shotID, err := s.repo.ResolveShotID(c.Request.Context(), shotUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "镜头不存在")
+		return
+	}
+	var projectID int64
+	if err := s.repo.pool.QueryRow(c.Request.Context(),
+		`SELECT project_id FROM shots WHERE id=$1 AND deleted_at IS NULL`, shotID).Scan(&projectID); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "镜头不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	n, err := s.repo.UnbindShotAsset(c.Request.Context(), shotID, assetKind, assetID)
+	if err != nil {
+		s.lg.Warn("镜头级资产解绑失败", zap.Error(err), zap.Int64("shot_id", shotID))
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "解绑资产失败")
+		return
+	}
+	httpx.OK(c, gin.H{"shot_id": shotUUID, "removed": n > 0})
+}
+
+// UnbindCardAsset 解绑成片卡参考资产（DELETE /video-cards/:card_id/assets/bind）。
+func (s *Service) UnbindCardAsset(c *gin.Context, cardUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	assetKind := c.Query("asset_kind")
+	assetID, _ := strconv.ParseInt(c.Query("asset_id"), 10, 64)
+	switch assetKind {
+	case "CHARACTER", "SCENE", "PROP":
+	default:
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "asset_kind 非法")
+		return
+	}
+	if assetID == 0 {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "缺少 asset_id")
+		return
+	}
+	cb, err := s.repo.ResolveCard(c.Request.Context(), cardUUID)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "成片卡不存在")
+		return
+	}
+	if err := s.repo.CheckProjectAccess(c.Request.Context(), cb.ProjectID, uid); err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	if err := s.repo.UnbindCardAsset(c.Request.Context(), cb.ID, assetKind, assetID); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "解绑失败")
+		return
+	}
+	httpx.OK(c, gin.H{"card_id": cb.ID})
 }
 
 // UpdateNarrativeUnit 编辑叙事单元（F4：PATCH /narrative-units/:nu_id）。

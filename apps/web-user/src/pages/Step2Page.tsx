@@ -2,7 +2,7 @@
 // 布局：WorkbenchShell（AppShell + 剧集侧栏 + WorkflowPill 顶栏），内容区 6 Tab + 统计卡 + 三类资产卡
 // 接口：GET /episodes/:id/assets/overview|characters|scenes|props、POST /assets/batch-generate、POST /points/preview
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useSearchParams, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ArrowRight, Box, ChevronDown, Film, Gem, Image as ImageIcon, MapPin,
@@ -451,6 +451,9 @@ const RANGE_OPTIONS: { key: BatchRange; label: string }[] = [
 
 export default function Step2Page() {
   const { projectId = "" } = useParams();
+  // URL ?episode= 定位：Step3 未就绪资产跳转入口（跳到资产原属集）
+  const [searchParams] = useSearchParams();
+  const urlEpisode = searchParams.get("episode") ?? "";
   const [proj, setProj] = useState<ProjectDetail | null>(null);
   const [episodes, setEpisodes] = useState<EpisodeLite[]>([]);
   const [activeEpisode, setActiveEpisode] = useState<string | null>(null);
@@ -634,13 +637,15 @@ export default function Step2Page() {
         if (typeof cfg.style_name === "string" && cfg.style_name) setBatchStyle(cfg.style_name);
         const eps = await splitApi.episodes(projectId);
         setEpisodes(eps.items ?? []);
-        if (eps.items.length > 0) setActiveEpisode(eps.items[0].episode_id);
+        // URL ?episode= 优先（跳转定位），否则默认第一集
+        const want = urlEpisode && (eps.items ?? []).find((e) => e.episode_id === urlEpisode);
+        setActiveEpisode(want ? want.episode_id : (eps.items[0]?.episode_id ?? null));
       } catch (e) {
         setLoadError(true);
         toast.error(errMsg(e, "加载失败"));
       }
     })();
-  }, [projectId]);
+  }, [projectId, urlEpisode]);
 
   // 加载叙事单元（内容区统计卡与单元卡用；侧栏仅展示剧集，不展示单元）
   useEffect(() => {

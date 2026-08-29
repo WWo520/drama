@@ -3,7 +3,7 @@
 // 接口：GET /episodes/:id/beats、POST /beats/:id/plan-video-tasks、GET /beats/:id/cards、
 //       POST /beats/:id/generate-videos、POST /video-cards/:uuid/regenerate、PATCH /video-cards/:uuid/prompt
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   Box, CheckCircle2, ChevronDown, Clapperboard, Film, GripVertical, History,
@@ -547,6 +547,7 @@ function GenVideoModal({
   beat,
   cards,
   links,
+  projectId,
   submitting,
   onClose,
   onConfirm,
@@ -556,6 +557,8 @@ function GenVideoModal({
   beat: BeatSummary;
   cards: VideoCard[];
   links: NuAssetLinkItem[];
+  /** 项目 UUID：未就绪关联资产点击跳转 Step2 定位生成入口 */
+  projectId: string;
   submitting: boolean;
   onClose: () => void;
   onConfirm: (opts: { resolution?: string; video_model?: string; model_key?: string; redo?: boolean }) => void;
@@ -563,6 +566,7 @@ function GenVideoModal({
   defaultModel?: string;
   defaultResolution?: string;
 }) {
+  const navigate = useNavigate();
   // 初始值：项目配置快照 → 未配置/不合法时回退原默认（Seedance 2.5 / 1080P）
   const initModel =
     resolveModelKey(defaultModel) && MODEL_OPTIONS.some((m) => m.key === resolveModelKey(defaultModel))
@@ -604,8 +608,33 @@ function GenVideoModal({
               className="mt-2 rounded-lg px-3 py-2 text-xs leading-relaxed"
               style={{ background: "rgba(245,178,60,0.12)", color: "#F5B23C" }}
             >
-              本单元有 {links.length - readyCount} 个关联资产未生成参考图，相关成片卡将使用纯文生视频模式生成；可先返回 Step2
-              补齐资产以获得更好的一致性。
+              <div>
+                本单元有 {links.length - readyCount} 个关联资产未生成参考图，相关成片卡将使用纯文生视频模式生成；点击下方资产可
+                前往其所在集补齐，以获得更好的一致性。
+              </div>
+              {/* 未就绪资产列表：点击跳转资产原属集的 Step2（资产生成页） */}
+              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                {links
+                  .filter((l) => !l.main_image_url)
+                  .map((l) => (
+                    <button
+                      key={`${l.asset_kind}-${l.asset_id}`}
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-md transition-opacity hover:opacity-80"
+                      style={{ background: "rgba(245,178,60,0.18)", color: "#F5B23C", border: "1px solid rgba(245,178,60,0.4)" }}
+                      title="前往资产所在集生成"
+                      onClick={() => {
+                        if (!l.origin_episode_id) {
+                          toast.info(`资产「${l.name}」未关联到具体集，请在 Step2 查找`);
+                          return;
+                        }
+                        onClose();
+                        navigate(`/projects/${projectId}/step/2?episode=${l.origin_episode_id}`);
+                      }}
+                    >
+                      <span>{l.asset_kind === "CHARACTER" ? "角色" : l.asset_kind === "SCENE" ? "场景" : "道具"}·{l.name}</span>
+                    </button>
+                  ))}
+              </div>
             </div>
           )}
         </div>
@@ -1982,19 +2011,20 @@ export default function Step3Page() {
           <Settings2 size={16} />
           <span>Agent 技能配置</span>
         </button>
-        {/* 批量生成分镜脚本（生成视频前置步骤）：多选叙事单元 → 串行提交 STORYBOARD_PLAN */}
+        {/* 批量生成分镜脚本（生成视频前置步骤）：多选叙事单元 → 串行提交 STORYBOARD_PLAN。
+            禁用只看当前集：分镜任务单元级互不冲突，其他集生成中不影响本集提交（支持多集并行）。 */}
         <button
           className="btn-agent-config"
-          disabled={batchSubmitting || replanningIds.size > 0}
+          disabled={batchSubmitting || beats.some((b) => replanningIds.has(b.beat_id))}
           onClick={() => {
             const pending = beats.filter((b) => !storyboardReady(b.beat_id) && !replanningIds.has(b.beat_id));
             setBatchTarget(new Set(pending.map((b) => b.beat_id))); // 默认勾选缺失分镜的单元
           }}
         >
-          {replanningIds.size > 0 ? (
+          {beats.some((b) => replanningIds.has(b.beat_id)) ? (
             <>
               <Loader2 size={16} className="animate-spin" />
-              <span>分镜生成中({replanningIds.size})</span>
+              <span>分镜生成中({beats.filter((b) => replanningIds.has(b.beat_id)).length})</span>
             </>
           ) : (
             <>
@@ -2097,6 +2127,7 @@ export default function Step3Page() {
           beat={genTarget}
           cards={cardsMap[genTarget.beat_id] ?? []}
           links={linksMap[genTarget.beat_id] ?? []}
+          projectId={projectId}
           submitting={submitting}
           onClose={() => !submitting && setGenTarget(null)}
           onConfirm={(opts) => void handleGenerate(opts)}

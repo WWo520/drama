@@ -90,7 +90,7 @@ var punctSquashRe = regexp.MustCompile(`[，。；,;]\s*[，。；,;]+`)
 
 // loneWuRe 剥离标签后残留的孤立"无"项（拆分 LLM 对无实体/无配饰资产填"无"），
 // 仅匹配作为独立项的"无"（后跟分隔标点），不误伤"无人""无边"等正常词汇。
-var loneWuRe = regexp.MustCompile(`，无(?=[，。；,;]|$)`)
+var loneWuRe = regexp.MustCompile(`，无([，。；,;]|$)`)
 
 // stripBodyMetrics 剥离提示词中的身体数据描述并整理标点。
 func stripBodyMetrics(s string) string {
@@ -118,7 +118,7 @@ func flattenBracketLabels(s string) string {
 		return s
 	}
 	out := bracketLabelRe.ReplaceAllString(s, "，")
-	out = loneWuRe.ReplaceAllString(out, "")
+	out = loneWuRe.ReplaceAllString(out, "$1")
 	out = punctSquashRe.ReplaceAllString(out, "，")
 	out = strings.TrimLeft(out, "，。；、 ")
 	return out

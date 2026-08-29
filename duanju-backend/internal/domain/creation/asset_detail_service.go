@@ -422,22 +422,23 @@ func (s *AssetDetailService) EpisodeAssetsOverview(c *gin.Context, epUUID string
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
 		return
 	}
-	epID, projectID, err := s.repo.ResolveEpisode(c.Request.Context(), epUUID)
+	_, projectID, err := s.repo.ResolveEpisode(c.Request.Context(), epUUID)
 	if err != nil || s.repo.CheckProjectAccess(c.Request.Context(), projectID, uid) != nil {
 		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "剧集不存在")
 		return
 	}
 	type cnt struct{ total, done int }
 	var chars, scenes, props cnt
-	// characters 本身无 generation_status 列，生成状态在 character_variants（与 ListCharacters 口径一致）
+	// 口径说明：characters/scenes/props 按 (project_id, code) 全项目去重（ON CONFLICT），
+	// origin_episode_id 仅记录首次提取的集，跨集共享资产都堆在首集——按 origin 统计会导致
+	// 第 2~N 集概览显示 0~1 个，与角色列表（项目级）和真实提取数据矛盾。统一按项目级统计。
 	_ = s.repo.pool.QueryRow(c.Request.Context(), `
 		SELECT count(*), count(*) FILTER (WHERE EXISTS (
 			SELECT 1 FROM character_variants cv
 			WHERE cv.character_id=characters.id AND cv.deleted_at IS NULL AND cv.generation_status='SUCCESS'
-		)) FROM characters WHERE origin_episode_id=$1 AND deleted_at IS NULL`, epID).Scan(&chars.total, &chars.done)
-	_ = s.repo.pool.QueryRow(c.Request.Context(), `SELECT count(*), count(*) FILTER (WHERE generation_status='SUCCESS') FROM scenes WHERE origin_episode_id=$1 AND deleted_at IS NULL`, epID).Scan(&scenes.total, &scenes.done)
-	_ = s.repo.pool.QueryRow(c.Request.Context(), `SELECT count(*), count(*) FILTER (WHERE generation_status='SUCCESS') FROM props WHERE origin_episode_id=$1 AND deleted_at IS NULL`, epID).Scan(&props.total, &props.done)
-	_ = projectID
+		)) FROM characters WHERE project_id=$1 AND deleted_at IS NULL`, projectID).Scan(&chars.total, &chars.done)
+	_ = s.repo.pool.QueryRow(c.Request.Context(), `SELECT count(*), count(*) FILTER (WHERE generation_status='SUCCESS') FROM scenes WHERE project_id=$1 AND deleted_at IS NULL`, projectID).Scan(&scenes.total, &scenes.done)
+	_ = s.repo.pool.QueryRow(c.Request.Context(), `SELECT count(*), count(*) FILTER (WHERE generation_status='SUCCESS') FROM props WHERE project_id=$1 AND deleted_at IS NULL`, projectID).Scan(&props.total, &props.done)
 	httpx.OK(c, gin.H{
 		"characters": gin.H{"total": chars.total, "generated": chars.done},
 		"scenes":     gin.H{"total": scenes.total, "generated": scenes.done},
@@ -459,10 +460,11 @@ func (s *AssetDetailService) EpisodeScenes(c *gin.Context, epUUID string) {
 		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "剧集不存在")
 		return
 	}
+	_ = epID
 	rows, err := s.repo.pool.Query(c.Request.Context(), `
 		SELECT id, COALESCE(code,''), COALESCE(base_name,''), COALESCE(main_image_url,''),
 		       COALESCE(generation_status::text,''), COALESCE(point_cost,0)
-		FROM scenes WHERE origin_episode_id=$1 AND deleted_at IS NULL ORDER BY id ASC`, epID)
+		FROM scenes WHERE project_id=$1 AND deleted_at IS NULL ORDER BY id ASC`, projectID)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取场景失败")
 		return
@@ -524,10 +526,11 @@ func (s *AssetDetailService) EpisodeProps(c *gin.Context, epUUID string) {
 		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "剧集不存在")
 		return
 	}
+	_ = epID
 	rows, err := s.repo.pool.Query(c.Request.Context(), `
 		SELECT id, COALESCE(code,''), COALESCE(name,''), COALESCE(category::text,''),
 		       COALESCE(main_image_url,''), COALESCE(generation_status::text,''), COALESCE(point_cost,0), COALESCE(description_prompt,'')
-		FROM props WHERE origin_episode_id=$1 AND deleted_at IS NULL ORDER BY id ASC`, epID)
+		FROM props WHERE project_id=$1 AND deleted_at IS NULL ORDER BY id ASC`, projectID)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "获取道具失败")
 		return

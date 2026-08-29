@@ -825,14 +825,16 @@ func (s *StoryboardService) EpisodeAssetLinks(c *gin.Context, epUUID string) {
 		return
 	}
 	rows, err := s.repo.pool.Query(c.Request.Context(), `
-		SELECT nu.nu_uuid::text, t.kind, t.asset_id, t.name, t.main_image_url, t.generation_status
+		SELECT t.nu_uuid, t.kind, t.asset_id, t.name, t.main_image_url, t.generation_status, COALESCE(e.episode_uuid::text, '') AS origin_episode_uuid
 		FROM (
-			SELECT nal.narrative_unit_id, nal.asset_kind::text AS kind, nal.asset_id,
+			SELECT nal.narrative_unit_id, nu2.nu_uuid::text AS nu_uuid, nal.asset_kind::text AS kind, nal.asset_id,
 			       COALESCE(c.name, sc.base_name, p.name, '') AS name,
 			       COALESCE(cv.main_image_url, sc.main_image_url, p.main_image_url, '') AS main_image_url,
 			       COALESCE(cv.generation_status, sc.generation_status::text, p.generation_status::text, '') AS generation_status,
+			       COALESCE(c.origin_episode_id, sc.origin_episode_id, p.origin_episode_id) AS origin_episode_id,
 			       CASE nal.asset_kind WHEN 'CHARACTER' THEN 1 WHEN 'SCENE' THEN 2 ELSE 3 END AS ord, nal.id AS rid
 			FROM nu_asset_links nal
+			JOIN narrative_units nu2 ON nu2.id = nal.narrative_unit_id AND nu2.deleted_at IS NULL
 			LEFT JOIN characters c ON nal.asset_kind='CHARACTER' AND c.id=nal.asset_id AND c.deleted_at IS NULL
 			LEFT JOIN LATERAL (
 			    SELECT main_image_url, generation_status::text AS generation_status
@@ -842,6 +844,7 @@ func (s *StoryboardService) EpisodeAssetLinks(c *gin.Context, epUUID string) {
 			LEFT JOIN props p ON nal.asset_kind='PROP' AND p.id=nal.asset_id AND p.deleted_at IS NULL
 		) t
 		JOIN narrative_units nu ON nu.id = t.narrative_unit_id AND nu.deleted_at IS NULL
+		LEFT JOIN episodes e ON e.id = t.origin_episode_id AND e.deleted_at IS NULL
 		WHERE nu.episode_id = $1
 		ORDER BY nu.sort_order ASC, t.ord, t.rid`, epID)
 	if err != nil {
@@ -852,13 +855,14 @@ func (s *StoryboardService) EpisodeAssetLinks(c *gin.Context, epUUID string) {
 	items := make([]map[string]any, 0)
 	for rows.Next() {
 		var assetID int64
-		var beatUUID, kind, name, img, status string
-		if err := rows.Scan(&beatUUID, &kind, &assetID, &name, &img, &status); err != nil {
+		var beatUUID, kind, name, img, status, originEp string
+		if err := rows.Scan(&beatUUID, &kind, &assetID, &name, &img, &status, &originEp); err != nil {
 			continue
 		}
 		items = append(items, map[string]any{
 			"beat_id": beatUUID, "asset_kind": kind, "asset_id": assetID,
 			"name": name, "main_image_url": img, "generation_status": status,
+			"origin_episode_id": originEp, // 资产原属集（episode_uuid）：未生成时前端跳转生成入口用
 		})
 	}
 	httpx.OK(c, gin.H{"items": items})

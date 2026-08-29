@@ -57,6 +57,8 @@ export interface NuAssetLinkItem {
   name: string;
   main_image_url: string;
   generation_status: string; // PENDING / QUEUED / RUNNING / SUCCESS / FAILED
+  /** 资产原属集（episode_uuid）：未生成时跳转 Step2 定位生成入口 */
+  origin_episode_id?: string;
 }
 
 // 视频状态 → 徽章

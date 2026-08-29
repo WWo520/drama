@@ -99,6 +99,22 @@ const PACK_BADGE: Record<string, { cls: string; text: string } | null> = {
   POINTS_PKG_LARGE: { cls: "hot", text: "超值" },
 };
 
+// ===== 常见问题（订阅套餐 / 积分包 双套；点击展开折叠）=====
+const PLAN_FAQS = [
+  { q: "订阅如何扣费？", a: "按月订阅每月自动扣费，按年订阅一次性支付 12 个月费用（约省 17%）。扣费前会通过站内消息提醒，您可随时在个人中心管理订阅。" },
+  { q: "订阅包含的积分怎么使用？", a: "订阅积分按月发放，可用于角色/场景/道具参考图、分镜脚本、视频生成、成片合成等全部 AI 创作功能。当月未用完的积分次月重置。" },
+  { q: "可以随时取消订阅吗？", a: "可以。取消订阅后当前计费周期内仍可继续使用剩余权益，到期后不再自动续费，也不会额外扣费。" },
+  { q: "积分不够用了怎么办？", a: "您可以随时购买一次性积分包补充积分，积分包与订阅权益互不影响，积分永久有效。" },
+  { q: "支持发票吗？", a: "支持。订单支付成功后可在个人中心申请开具电子发票，一般 1-3 个工作日内发送至您的邮箱。" },
+];
+const PACK_FAQS = [
+  { q: "积分会过期吗？", a: "购买的一次性积分包积分永久有效，不会过期。订阅套餐的月度积分当月有效，次月重置。消耗时系统会优先使用即将过期的积分。" },
+  { q: "积分包可以与其他功能搭配使用吗？", a: "可以。积分可用于所有生成功能（角色、场景、道具、视频生成等），无限制地应用于任何需要积分的创作操作。" },
+  { q: "如何充值积分？", a: "您可以随时在个人中心或当前页面选择积分包进行购买。购买后积分将立即到账并可用于创作。" },
+  { q: "支持退款吗？", a: "未使用的积分包支持 7 天内无理由退款。如有退款需求，请联系客服处理。" },
+  { q: "企业用户有优惠吗？", a: "大批量采购可享受专属报价和服务方案。如有 20 人以上团队采购需求，请联系我们的商务团队获取定制化优惠方案。" },
+];
+
 // 积分包展示项（真源 GET /point-packages，失败回退常量）
 interface PackItem {
   code: string;
@@ -131,6 +147,9 @@ export default function PointsPage() {
   const [view, setView] = useState<"subscription" | "packs">("packs");
   const [profileOpen, setProfileOpen] = useState(false);
   const [points, setPoints] = useState<number | null>(null);
+  // 常见问题展开态（点击切换展开/折叠）
+  const [openFaq, setOpenFaq] = useState<string | null>(PLAN_FAQS[0]?.q ?? null);
+  const toggleFaq = (q: string) => setOpenFaq((v) => (v === q ? null : q));
 
   // 支付弹窗状态
   const [order, setOrder] = useState<PayOrder | null>(null);
@@ -443,9 +462,20 @@ export default function PointsPage() {
             </Link>
           </nav>
 
-          <div className="flex-1" style={{ minHeight: 20 }} />
+          <div className="flex-1" style={{ minHeight: 16 }} />
 
-          {/* 头像（点击展开面板，LuxReal 对齐版 ProfilePanel） */}
+          {/* Wallet：积分图案 + 积分数值 + 充值按钮（同一组件，充值按钮缩小版；位于头像上方） */}
+          <div className="sidebar-wallet">
+            <button className="sidebar-credits" style={{ cursor: "pointer" }} title="查看积分明细" onClick={() => void openTxns()}>
+              <span className="sidebar-credits-badge">
+                <Coins size={14} className="sidebar-credits-icon" />
+              </span>
+              <span className="sidebar-credits-value">{points === null ? "…" : points.toLocaleString()}</span>
+            </button>
+            <Link to="/points" className="sidebar-recharge" title="充值">充值</Link>
+          </div>
+
+          {/* 头像（点击展开面板，LuxReal 对齐版 ProfilePanel；置于侧边栏最底部） */}
           <div className="pp-anchor" style={{ marginBottom: 4 }}>
             <div
               className="sidebar-avatar"
@@ -466,18 +496,6 @@ export default function PointsPage() {
             </div>
             <ProfilePanel open={profileOpen} onClose={() => setProfileOpen(false)} />
           </div>
-
-          {/* 积分（真实余额，点击查看明细，金色徽章 Coins 图标 + 数字） */}
-          <button className="sidebar-credits" style={{ cursor: "pointer" }} title="查看积分明细" onClick={() => void openTxns()}>
-            <span className="sidebar-credits-badge">
-              <Coins size={16} className="sidebar-credits-icon" />
-            </span>
-            {points === null ? "…" : points.toLocaleString()}
-          </button>
-          {/* 充值（当前页） */}
-          <Link to="/points" className="sidebar-recharge" title="充值">
-            充值
-          </Link>
         </aside>
 
         {/* ===== 主内容区（自然滚动）===== */}
@@ -490,7 +508,7 @@ export default function PointsPage() {
             </div>
             <h1 className="hero-title">选择适合你的创作方案</h1>
             <p className="hero-subtitle">
-              从个人创作者到专业团队，LuxReal 提供多种订阅方案，
+              从个人创作者到专业团队，导演台提供多种订阅方案，
               让每一次创作都物超所值
             </p>
 
@@ -692,6 +710,25 @@ export default function PointsPage() {
                     </div>
                   </div>
                 </div>
+
+                {/* 订阅套餐 FAQ（点击展开/折叠） */}
+                <div className="faq-section">
+                  <div className="section-header">
+                    <h2 className="section-title">常见问题</h2>
+                    <p className="section-subtitle">关于订阅套餐的常见疑问</p>
+                  </div>
+                  <div className="faq-grid">
+                    {PLAN_FAQS.map((f) => (
+                      <div key={f.q} className={`faq-item ${openFaq === f.q ? "open" : ""}`} onClick={() => toggleFaq(f.q)}>
+                        <div className="faq-question">
+                          <span>{f.q}</span>
+                          <ChevronDown size={20} />
+                        </div>
+                        <div className="faq-answer">{f.a}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -731,14 +768,8 @@ export default function PointsPage() {
                     <p className="section-subtitle">关于积分包的常见疑问</p>
                   </div>
                   <div className="faq-grid">
-                    {[
-                      { q: "积分会过期吗？", a: "购买的一次性积分包积分永久有效，不会过期。订阅套餐的月度积分当月有效，次月重置。消耗时系统会优先使用即将过期的积分。" },
-                      { q: "积分包可以与其他功能搭配使用吗？", a: "可以。积分可用于所有生成功能（角色、场景、道具、视频生成等），无限制地应用于任何需要积分的创作操作。" },
-                      { q: "如何充值积分？", a: "您可以随时在个人中心或当前页面选择积分包进行购买。购买后积分将立即到账并可用于创作。" },
-                      { q: "支持退款吗？", a: "未使用的积分包支持 7 天内无理由退款。如有退款需求，请联系客服处理。" },
-                      { q: "企业用户有优惠吗？", a: "大批量采购可享受专属报价和服务方案。如有 20 人以上团队采购需求，请联系我们的商务团队获取定制化优惠方案。" },
-                    ].map((f) => (
-                      <div key={f.q} className="faq-item">
+                    {PACK_FAQS.map((f) => (
+                      <div key={f.q} className={`faq-item ${openFaq === f.q ? "open" : ""}`} onClick={() => toggleFaq(f.q)}>
                         <div className="faq-question">
                           <span>{f.q}</span>
                           <ChevronDown size={20} />
@@ -762,7 +793,7 @@ export default function PointsPage() {
               <a href="#" className="footer-link">帮助中心</a>
               <a href="#" className="footer-link">联系我们</a>
             </div>
-            <div className="footer-copy">© 2026 Empty Broken. All rights reserved.</div>
+            <div className="footer-copy">© 2026 导演台 保留所有权利</div>
           </footer>
         </div>
       </div>

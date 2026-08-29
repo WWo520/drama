@@ -328,9 +328,20 @@ export default function FeedPage() {
             </Link>
           </nav>
 
-          <div className="flex-1" style={{ minHeight: 20 }} />
+          <div className="flex-1" style={{ minHeight: 16 }} />
 
-          {/* 头像（点击开关头像资料面板，LuxReal 对齐版 pp-panel） */}
+          {/* Wallet：积分图案 + 积分数值 + 充值按钮（同一组件，充值按钮缩小版；位于头像上方） */}
+          <div className="sidebar-wallet">
+            <span className="sidebar-credits">
+              <span className="sidebar-credits-badge">
+                <Coins size={14} className="sidebar-credits-icon" />
+              </span>
+              <span className="sidebar-credits-value">{points === null ? "…" : points.toLocaleString()}</span>
+            </span>
+            <Link to="/points" className="sidebar-recharge" title="充值">充值</Link>
+          </div>
+
+          {/* 头像（点击开关头像资料面板，LuxReal 对齐版 pp-panel；置于侧边栏最底部） */}
           <div className="pp-anchor" style={{ marginBottom: 4 }}>
             <div
               className="sidebar-avatar"
@@ -351,18 +362,6 @@ export default function FeedPage() {
             </div>
             <ProfilePanel open={profileOpen} onClose={() => setProfileOpen(false)} />
           </div>
-
-          {/* 积分（真实余额，金色徽章 Coins 图标 + 数字） */}
-          <span className="sidebar-credits">
-            <span className="sidebar-credits-badge">
-              <Coins size={16} className="sidebar-credits-icon" />
-            </span>
-            {points === null ? "…" : points.toLocaleString()}
-          </span>
-          {/* 充值 */}
-          <Link to="/points" className="sidebar-recharge" title="充值">
-            充值
-          </Link>
 
           {/* 头像资料面板已内置于 ProfilePanel（上方 pp-anchor 内） */}
         </aside>

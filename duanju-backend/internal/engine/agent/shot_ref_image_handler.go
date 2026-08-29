@@ -20,8 +20,10 @@ import (
 type ShotRefImageStore interface {
 	// LoadShot 镜头信息（注：可复用 VideoStore.LoadShot 读 PromptRefined）。
 	LoadShot(ctx context.Context, shotID int64) (*ShotInfo, error)
-	// LoadShotRefs 加载镜头参考图 URL（shot_asset_refs 优先，否则继承 nu_asset_links）。
+	// LoadShotRefs 加载镜头参考图 URL（shot_asset_refs 优先；缺 SCENE 时继承 nu_asset_links 场景补齐）。
 	LoadShotRefs(ctx context.Context, shotID int64, narrativeUnitID int64) ([]string, error)
+	// LoadShotRefAssets 加载镜头参考资产配对（kind/name/url，供场景锚定文案构建）。
+	LoadShotRefAssets(ctx context.Context, shotID int64, narrativeUnitID int64) []RefAsset
 	// SaveShotRefImage 记录镜头参考图（shots.reference_image_url）。
 	SaveShotRefImage(ctx context.Context, shotID int64, imageURL string, taskID int64) error
 }
@@ -45,6 +47,27 @@ func NewShotRefImageHandler(store ShotRefImageStore, engine ImageGenClient, env 
 // Name 返回任务类型。
 func (h *ShotRefImageHandler) Name() string { return "SHOT_REF_IMAGE_GEN" }
 
+// sceneNamesOf 抽取参考资产中的场景名（供场景锚定文案）。
+func sceneNamesOf(refs []RefAsset) []string {
+	names := make([]string, 0, 2)
+	for _, ra := range refs {
+		if ra.Kind == "SCENE" && ra.Name != "" {
+			names = append(names, ra.Name)
+		}
+	}
+	return names
+}
+
+// firstNonEmpty 返回首个非空字符串（全空返回空串）。
+func firstNonEmpty(list []string) string {
+	for _, s := range list {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 // Handles 判定是否处理该任务类型。
 func (h *ShotRefImageHandler) Handles(taskType string) bool { return taskType == "SHOT_REF_IMAGE_GEN" }
 
@@ -64,19 +87,21 @@ func (h *ShotRefImageHandler) Execute(ctx context.Context, t *task.Task) ([]byte
 		return nil, err
 	}
 	prompt := strings.TrimSpace(shot.PromptRefined)
-	// 加载镜头已关联的资产参考图作为 I2I 输入（保持角色优先顺序）
+	// 加载镜头已关联的资产参考图（含场景补齐继承）作为多图参考输入
 	refURLs, _ := h.store.LoadShotRefs(ctx, params.ShotID, shot.NarrativeUnitID)
+	// 场景锚定（防场景漂移）：对话/特写镜头的润色稿常不点明地点，图生模型易把人物
+	// 画到别的场景（用户实测"餐厅对话答话人不在餐厅"根因之一）——显式声明本镜头所在场景。
+	if sceneAnchors := sceneNamesOf(h.store.LoadShotRefAssets(ctx, params.ShotID, shot.NarrativeUnitID)); len(sceneAnchors) > 0 {
+		prompt = strings.TrimSpace(prompt + "\n\n场景锚定：本镜头必须发生在「" + strings.Join(sceneAnchors, "」「") +
+			"」场景内，环境布局、陈设、色调与场景参考图一致，不得切换到其他地点或凭空虚构场景。")
+	}
 
 	imageURL := ""
 	isMock := true
 	if h.engine != nil && prompt != "" {
-		refImage := ""
-		if len(refURLs) > 0 {
-			refImage = refURLs[0]
-		}
 		resp, gerr := h.engine.GenerateImage(ctx, model.CapT2I, &model.ImageRequest{
 			Prompt:      prompt,
-			RefImageURL: refImage,
+			RefImageURL: firstNonEmpty(refURLs), // 兼容单图接口：首参考图（角色优先）作 I2I 输入
 			AspectRatio: "16:9",
 			Resolution:  "1K",
 		})

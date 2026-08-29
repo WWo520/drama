@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -191,6 +192,117 @@ func setOf(vals ...string) map[string]bool {
 	return m
 }
 
+// 枚举别名归一表：LLM 偶发输出同义写法（CLOSE_UP/MEDIUM_SHOT/中景/固定镜头等），
+// 归一修复而非剔除——此前任一字段非精确白名单值就整组剔除，单元缺镜头块导致整集
+// 反复重试直至 SCRIPT_SPLIT_FAILED（线上 task 1085 连续 4 次失败的根因）。
+// 规范值写法差异过大无法识别时，回退安全默认值（后续有确定性时长/构图均衡兜底）。
+var (
+	shotSizeAliases = map[string]string{
+		"ECU": "ECU", "EXTREME_CLOSEUP": "ECU", "EXTREME_CLOSE_UP": "ECU", "大特写": "ECU",
+		"CU": "CU", "CLOSEUP": "CU", "CLOSE_UP": "CU", "特写": "CU", "近景": "CU",
+		"MCU": "MCU", "MEDIUM_CLOSEUP": "MCU", "MEDIUM_CLOSE_UP": "MCU", "中近景": "MCU",
+		"MS": "MS", "MEDIUM_SHOT": "MS", "MID_SHOT": "MS", "WAIST_SHOT": "MS", "中景": "MS",
+		"FS": "FS", "FULL_SHOT": "FS", "全身": "FS", "全身景": "FS", "全景": "FS",
+		"LS": "LS", "LONG_SHOT": "LS", "WIDE_SHOT": "LS", "WS": "LS", "远景": "LS",
+		"ELS": "ELS", "EXTREME_LONG_SHOT": "ELS", "EXTREME_WIDE_SHOT": "ELS", "大远景": "ELS",
+		"TWO_SHOT": "TWO_SHOT", "双人": "TWO_SHOT", "双人镜头": "TWO_SHOT", "双人景": "TWO_SHOT",
+		"OTS": "OTS", "OVER_SHOULDER": "OTS", "过肩": "OTS", "过肩镜头": "OTS",
+	}
+	cameraMoveAliases = map[string]string{
+		"STATIC": "STATIC", "STATIC_SHOT": "STATIC", "FIXED": "STATIC", "LOCKED": "STATIC",
+		"固定": "STATIC", "固定镜头": "STATIC", "静止": "STATIC", "锁定": "STATIC",
+		"SLOW_PUSH_IN": "SLOW_PUSH_IN", "SLOW_PUSH": "SLOW_PUSH_IN", "PUSH_IN": "SLOW_PUSH_IN",
+		"缓推": "SLOW_PUSH_IN", "缓慢推近": "SLOW_PUSH_IN", "推近": "SLOW_PUSH_IN",
+		"SLOW_PULL_OUT": "SLOW_PULL_OUT", "SLOW_PULL": "SLOW_PULL_OUT", "PULL_OUT": "SLOW_PULL_OUT",
+		"缓拉": "SLOW_PULL_OUT", "缓慢拉远": "SLOW_PULL_OUT", "拉远": "SLOW_PULL_OUT",
+		"FAST_PUSH_IN": "FAST_PUSH_IN", "FAST_PUSH": "FAST_PUSH_IN", "快推": "FAST_PUSH_IN", "急推": "FAST_PUSH_IN",
+		"DOLLY_IN": "DOLLY_IN", "DOLLY": "DOLLY_IN", "推镜": "DOLLY_IN", "推镜头": "DOLLY_IN", "前推": "DOLLY_IN",
+		"DOLLY_OUT": "DOLLY_OUT", "DOLLY_BACK": "DOLLY_OUT", "后拉": "DOLLY_OUT",
+		"PAN_LEFT": "PAN_LEFT", "PAN": "PAN_LEFT", "左摇": "PAN_LEFT", "向左摇": "PAN_LEFT",
+		"PAN_RIGHT": "PAN_RIGHT", "右摇": "PAN_RIGHT", "向右摇": "PAN_RIGHT",
+		"TRACK_LEFT": "TRACK_LEFT", "TRACKING_LEFT": "TRACK_LEFT", "左移": "TRACK_LEFT", "横移左": "TRACK_LEFT",
+		"TRACK_RIGHT": "TRACK_RIGHT", "TRACKING_RIGHT": "TRACK_RIGHT", "TRACK": "TRACK_RIGHT", "TRACKING": "TRACK_RIGHT",
+		"右移": "TRACK_RIGHT", "横移": "TRACK_RIGHT", "横移右": "TRACK_RIGHT",
+		"TILT_UP": "TILT_UP", "上摇": "TILT_UP", "仰摇": "TILT_UP",
+		"TILT_DOWN": "TILT_DOWN", "下摇": "TILT_DOWN", "俯摇": "TILT_DOWN",
+		"CRANE_UP": "CRANE_UP", "摇臂上升": "CRANE_UP", "上升": "CRANE_UP", "升镜头": "CRANE_UP",
+		"CRANE_DOWN": "CRANE_DOWN", "摇臂下降": "CRANE_DOWN", "下降": "CRANE_DOWN", "降镜头": "CRANE_DOWN",
+		"HANDHELD_SHAKY": "HANDHELD_SHAKY", "HANDHELD": "HANDHELD_SHAKY", "SHAKY": "HANDHELD_SHAKY",
+		"手持": "HANDHELD_SHAKY", "手持跟拍": "HANDHELD_SHAKY", "晃动": "HANDHELD_SHAKY",
+		"WIPE_CLIP": "WIPE_CLIP", "WIPE": "WIPE_CLIP", "划像": "WIPE_CLIP", "划像转场": "WIPE_CLIP",
+		"ZOOM_IN_OPTICAL": "ZOOM_IN_OPTICAL", "ZOOM_IN": "ZOOM_IN_OPTICAL", "ZOOM": "ZOOM_IN_OPTICAL",
+		"变焦推": "ZOOM_IN_OPTICAL", "光学变焦": "ZOOM_IN_OPTICAL",
+		"SLOW_360_ORBIT": "SLOW_360_ORBIT", "ORBIT": "SLOW_360_ORBIT", "ARC": "SLOW_360_ORBIT",
+		"环绕": "SLOW_360_ORBIT", "旋转环绕": "SLOW_360_ORBIT", "360环绕": "SLOW_360_ORBIT",
+	}
+	cameraAngleAliases = map[string]string{
+		"EYE_LEVEL_FRONT": "EYE_LEVEL_FRONT", "EYE_LEVEL": "EYE_LEVEL_FRONT", "FRONT": "EYE_LEVEL_FRONT",
+		"平视": "EYE_LEVEL_FRONT", "平拍": "EYE_LEVEL_FRONT", "正面": "EYE_LEVEL_FRONT", "正面机位": "EYE_LEVEL_FRONT",
+		"SIDE": "SIDE", "SIDE_VIEW": "SIDE", "PROFILE": "SIDE", "侧面": "SIDE", "侧拍": "SIDE", "侧视角": "SIDE",
+		"BACK": "BACK", "BACK_VIEW": "BACK", "REAR": "BACK", "背面": "BACK", "背拍": "BACK", "背视角": "BACK",
+		"SLIGHT_LOW_ANGLE": "SLIGHT_LOW_ANGLE", "微仰": "SLIGHT_LOW_ANGLE", "轻微仰角": "SLIGHT_LOW_ANGLE", "略仰": "SLIGHT_LOW_ANGLE",
+		"LOW_ANGLE": "LOW_ANGLE", "LOW": "LOW_ANGLE", "仰拍": "LOW_ANGLE", "仰角": "LOW_ANGLE", "低角度": "LOW_ANGLE",
+		"SLIGHT_HIGH": "SLIGHT_HIGH", "微俯": "SLIGHT_HIGH", "轻微俯角": "SLIGHT_HIGH", "略俯": "SLIGHT_HIGH",
+		"HIGH_BIRDVIEW": "HIGH_BIRDVIEW", "HIGH_ANGLE": "HIGH_BIRDVIEW", "HIGH": "HIGH_BIRDVIEW", "BIRD": "HIGH_BIRDVIEW",
+		"俯拍": "HIGH_BIRDVIEW", "俯角": "HIGH_BIRDVIEW", "高角度": "HIGH_BIRDVIEW", "鸟瞰": "HIGH_BIRDVIEW", "顶视": "HIGH_BIRDVIEW",
+		"OTS_LEFT": "OTS_LEFT", "过肩左": "OTS_LEFT", "过肩机位左": "OTS_LEFT",
+		"OTS_RIGHT": "OTS_RIGHT", "过肩右": "OTS_RIGHT", "过肩机位右": "OTS_RIGHT",
+		"DUTCH_ANGLE": "DUTCH_ANGLE", "DUTCH": "DUTCH_ANGLE", "CANTED": "DUTCH_ANGLE",
+		"荷兰角": "DUTCH_ANGLE", "斜角": "DUTCH_ANGLE", "倾斜": "DUTCH_ANGLE",
+	}
+)
+
+// normalizeEnumKey 归一枚举写法：去首尾空白、空白/连字符转下划线、转大写。
+func normalizeEnumKey(s string) string {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	return strings.NewReplacer(" ", "_", "-", "_", "　", "_", "－", "_").Replace(s)
+}
+
+// repairEnum 归一+别名精确匹配；未命中再做包含匹配（别名键有序，保证确定性）。
+// 仍无法识别返回空串，由调用方回退默认值。
+func repairEnum(v string, aliases map[string]string) string {
+	key := normalizeEnumKey(v)
+	if key == "" {
+		return ""
+	}
+	if c, ok := aliases[key]; ok {
+		return c
+	}
+	keys := make([]string, 0, len(aliases))
+	for k := range aliases {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if strings.Contains(key, k) || strings.Contains(k, key) {
+			return aliases[k]
+		}
+	}
+	return ""
+}
+
+// normalizeShotEnums 原地修复单个镜头的枚举与时长（保证落库值恒在白名单内）。
+func normalizeShotEnums(s *Shot) {
+	if v := repairEnum(s.ShotSize, shotSizeAliases); v != "" {
+		s.ShotSize = v
+	} else if !validShotSizes[s.ShotSize] {
+		s.ShotSize = "MS"
+	}
+	if v := repairEnum(s.CameraMovement, cameraMoveAliases); v != "" {
+		s.CameraMovement = v
+	} else if !validCameraMoves[s.CameraMovement] {
+		s.CameraMovement = "STATIC"
+	}
+	if v := repairEnum(s.CameraAngle, cameraAngleAliases); v != "" {
+		s.CameraAngle = v
+	} else if !validCameraAngles[s.CameraAngle] {
+		s.CameraAngle = "EYE_LEVEL_FRONT"
+	}
+	if s.DurationSec <= 0 || s.DurationSec > 30 {
+		s.DurationSec = FlexInt(3) // 时长后续按单元时长确定性均衡，非法值给安全占位
+	}
+}
+
 // ErrInvalidJSON 坏 JSON（LLM 输出无法解析）→ 触发重试（S1-B05 验收：坏 JSON 自动重试）。
 var ErrInvalidJSON = errors.New("split: llm 输出非合法 JSON")
 
@@ -276,23 +388,13 @@ func validateStructure(r *SplitResult) error {
 			if len(beat.ShotGroups) == 0 {
 				return fmt.Errorf("%w: 叙事单元 %q 缺少 shot_groups", ErrInvalidStructure, beat.Title)
 			}
-			for gi, sg := range beat.ShotGroups {
+			for gi := range beat.ShotGroups {
+				sg := &beat.ShotGroups[gi]
 				if len(sg.Shots) == 0 {
 					return fmt.Errorf("%w: 镜头块 %q 缺少 shots", ErrInvalidStructure, sg.Title)
 				}
-				for si, s := range sg.Shots {
-					if s.DurationSec <= 0 || s.DurationSec > 30 {
-						return fmt.Errorf("%w: 镜头时长非法 %d", ErrInvalidStructure, s.DurationSec)
-					}
-					if !validShotSizes[s.ShotSize] {
-						return fmt.Errorf("%w: 景别 %q 非法（第%d集/单元%d/块%d/镜头%d）", ErrInvalidStructure, s.ShotSize, ei+1, bi+1, gi+1, si+1)
-					}
-					if !validCameraMoves[s.CameraMovement] {
-						return fmt.Errorf("%w: 运镜 %q 非法", ErrInvalidStructure, s.CameraMovement)
-					}
-					if !validCameraAngles[s.CameraAngle] {
-						return fmt.Errorf("%w: 视角 %q 非法", ErrInvalidStructure, s.CameraAngle)
-					}
+				for si := range sg.Shots {
+					normalizeShotEnums(&sg.Shots[si]) // 枚举/时长容错修复（写法归一+安全默认），避免因拼写差异触发整次拆分重试
 				}
 			}
 		}
@@ -733,18 +835,10 @@ func applyShotDesign(ep *EpisodeSplit, out *shotDesignOut) error {
 			if len(g.Shots) == 0 {
 				continue
 			}
-			ok := true
-			for si, s := range g.Shots {
-				if s.DurationSec <= 0 || s.DurationSec > 30 ||
-					!validShotSizes[s.ShotSize] || !validCameraMoves[s.CameraMovement] || !validCameraAngles[s.CameraAngle] {
-					ok = false
-					break
-				}
-				_ = si
+			for si := range g.Shots {
+				normalizeShotEnums(&g.Shots[si]) // 先归一修复再收录：同义枚举写法不再导致整组被剔除
 			}
-			if ok {
-				valid = append(valid, g)
-			}
+			valid = append(valid, g)
 		}
 		if len(valid) > 0 {
 			groupsByUnit[u.Index] = valid

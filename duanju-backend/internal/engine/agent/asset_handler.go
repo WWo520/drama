@@ -74,6 +74,10 @@ type ImageGenClient interface {
 // 身高/体重数字渲染成画面上的标注线与文字（用户实测图内出现"身高175"）。
 const charThreeViewSuffix = "生成该主体的全身三视图：正面视图、侧面视图和背面视图。画面布局：图像左侧为主体上半身特写，图像右侧并排展示主体的正面、侧面和背面三个全身视图。纯白色背景，画面仅展示主体上半身特写和三视图。这不是角色设定图纸，禁止绘制身高标注线、尺寸标注线、网格线和参考线，画面中不能出现任何文字、字母、数字和水印"
 
+// charNoBackgroundSuffix 角色无背景约束（对齐 LuxReal 角色卡纯色底）：
+// 无论是否三视图模式都强制追加，防止模型把剧本中场景/环境描述渲染进角色画面。
+const charNoBackgroundSuffix = "。角色背景为纯净单一浅灰色背景，无任何环境、场景、房间、街道、家具、窗外景色或人物，画面仅展示角色本人"
+
 // bodyMetricRe 身体数据模式（身高/体重/体脂/三围/年龄）：纯数字度量对图像生成无视觉
 // 价值，反而诱导模型把数字渲染进画面。剥离后再组装提示词。
 var bodyMetricRe = regexp.MustCompile(
@@ -83,6 +87,10 @@ var bodyMetricRe = regexp.MustCompile(
 
 // punctSquashRe 连续分隔标点压缩（剥离数据后残留"，,"等）。
 var punctSquashRe = regexp.MustCompile(`[，。；,;]\s*[，。；,;]+`)
+
+// loneWuRe 剥离标签后残留的孤立"无"项（拆分 LLM 对无实体/无配饰资产填"无"），
+// 仅匹配作为独立项的"无"（后跟分隔标点），不误伤"无人""无边"等正常词汇。
+var loneWuRe = regexp.MustCompile(`，无(?=[，。；,;]|$)`)
 
 // stripBodyMetrics 剥离提示词中的身体数据描述并整理标点。
 func stripBodyMetrics(s string) string {
@@ -110,6 +118,7 @@ func flattenBracketLabels(s string) string {
 		return s
 	}
 	out := bracketLabelRe.ReplaceAllString(s, "，")
+	out = loneWuRe.ReplaceAllString(out, "")
 	out = punctSquashRe.ReplaceAllString(out, "，")
 	out = strings.TrimLeft(out, "，。；、 ")
 	return out
@@ -234,13 +243,16 @@ func (h *AssetHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 	// 弹窗参数透传：临时提示词（图改图）优先于资产默认提示词
 	target.Gen = params.Gen
 	// 基线提示词清洗：剥离身体数据（身高/体重/年龄）+ 剥离【字段名】结构化标签
-	// （标签模板是"画面内文字"的最强诱导源，必须转自然语言短句）
-	prompt := flattenBracketLabels(stripBodyMetrics(target.Prompt))
+	// （标签模板是"画面内文字"的最强诱导源，必须转自然语言短句）。
+	// 清洗对最终 prompt 统一执行（含弹窗临时提示词）：此前 Gen.Prompt 绕过清洗，
+	// 原始【身份】【服装】模板文本直喂模型 → 画面渲染出字段标签文字（实测 1179/1180）。
+	basePrompt := target.Prompt
+	if params.Gen != nil && params.Gen.Prompt != "" {
+		basePrompt = params.Gen.Prompt
+	}
+	prompt := flattenBracketLabels(stripBodyMetrics(basePrompt))
 	aspect, resolution := "R9_16", "1K"
 	if params.Gen != nil {
-		if params.Gen.Prompt != "" {
-			prompt = params.Gen.Prompt
-		}
 		if params.Gen.AspectRatio != "" {
 			aspect = params.Gen.AspectRatio
 		}
@@ -292,6 +304,11 @@ func (h *AssetHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 	// 且未显式指定比例时用 16:9 横幅（竖图放不下 1 特写 + 3 视图）。场景/道具不追加。
 	useDefaultComp := params.Gen != nil && params.Gen.UseDefaultComposition
 	if params.TargetKind == "CHARACTER_VARIANT" {
+		// 着装约束：服装描述混在长句中段易被模型忽略（实测出图缺衣/着装漂移），
+		// 显式声明"按描述着装且完整得体"兜底。
+		if !strings.Contains(prompt, "着装") {
+			prompt += "。角色严格按上述服装描述着装，服装完整得体"
+		}
 		if params.Gen == nil {
 			useDefaultComp = true // 批量生成（无弹窗参数）时按官方默认开启
 		}
@@ -303,6 +320,12 @@ func (h *AssetHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 			if params.Gen == nil || params.Gen.AspectRatio == "" {
 				aspect = "16:9"
 			}
+		}
+		// 角色无背景铁律：任何模式下（三视图/弹窗/图改图）都强制注入，
+		// 防止模型把剧本中的场景、环境描述渲染进角色画面。
+		if !strings.Contains(prompt, "纯白色背景") && !strings.Contains(prompt, "纯色背景") &&
+			!strings.Contains(prompt, "单色背景") && !strings.Contains(prompt, "无背景") {
+			prompt += charNoBackgroundSuffix
 		}
 	}
 

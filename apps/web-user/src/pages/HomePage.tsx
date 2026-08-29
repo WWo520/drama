@@ -17,6 +17,7 @@ import ProfilePanel from "../components/ProfilePanel";
 import { useAvatarUrl } from "../hooks/useAvatarUrl";
 import { cachedGet, invalidateCachedGet } from "../utils/cachedApi";
 import { useAuthStore } from "../stores/authStore";
+import { getGlobalStyle, setGlobalStyle } from "../stores/styleStore";
 import "./home.css";
 
 // 封面素材（ImageGen 生成，替代设计稿渐变占位）
@@ -129,11 +130,11 @@ export default function HomePage() {
   const [creating, setCreating] = useState(false);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [points, setPoints] = useState<number | null>(null);
-  // 风格选择弹层（GET /style-library 真数据；失败回退设计稿固定 10 项）
+  // 风格选择弹层（GET /style-library 真数据；失败回退设计稿固定 10 项；全局持久化，后续页面同步）
   const [styleOpen, setStyleOpen] = useState(false);
   const [stylePos, setStylePos] = useState<{ top: number; left: number } | null>(null);
-  const [styleName, setStyleName] = useState("通用写实");
-  const [styleCode, setStyleCode] = useState<string>("");
+  const [styleName, setStyleName] = useState(() => getGlobalStyle().name);
+  const [styleCode, setStyleCode] = useState<string>(() => getGlobalStyle().code);
   const [styleLib, setStyleLib] = useState<{ code: string; name: string; thumb?: string }[]>([]);
   // 项目卡 … 下拉菜单（打开/重命名/复制/导出/删除）
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -149,7 +150,7 @@ export default function HomePage() {
 
   // 页面标题
   useEffect(() => {
-    document.title = "AI创作 - EmptyBroken";
+    document.title = "AI创作 - 导演台";
   }, []);
 
   // 模型配置：GET /models 加载可用模型（T2V 视频 / T2I 图片），GET /me/preferences 恢复已保存选择
@@ -702,6 +703,16 @@ export default function HomePage() {
       const data = await api.post<{ project_id: string }>("/projects", {
         title,
         source_script_text: script.trim(),
+        // 项目配置快照：模型/分辨率/时长/风格贯穿后续 Step2/Step3 默认值
+        config: {
+          video_model: videoModel,
+          image_model: imageModel.character,
+          resolution,
+          aspect_ratio: ratio,
+          video_duration: videoDuration,
+          style_code: styleCode,
+          style_name: styleName,
+        },
       });
       // 选中非默认风格时同步应用到项目（POST /projects/:id/apply-style；失败不阻断进入）
       if (styleCode) {
@@ -947,6 +958,7 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
       onClick={() => {
         setStyleCode(s.code);
         setStyleName(s.name);
+        setGlobalStyle({ code: s.code, name: s.name });
         setStyleOpen(false);
       }}
     >
@@ -1031,9 +1043,20 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
             </Link>
           </nav>
 
-          <div className="flex-1" style={{ minHeight: 40 }} />
+          <div className="flex-1" style={{ minHeight: 16 }} />
 
-          {/* 头像(点击展开面板，LuxReal 对齐版 pp-panel) */}
+          {/* Wallet：积分图案 + 积分数值 + 充值按钮（同一组件，充值按钮缩小版；位于头像上方） */}
+          <div className="sidebar-wallet">
+            <span className="sidebar-credits">
+              <span className="sidebar-credits-badge">
+                <Coins size={14} className="sidebar-credits-icon" />
+              </span>
+              <span className="sidebar-credits-value">{points === null ? "…" : points.toLocaleString()}</span>
+            </span>
+            <Link to="/points" className="sidebar-recharge" title="充值">充值</Link>
+          </div>
+
+          {/* 头像(点击展开面板，LuxReal 对齐版 pp-panel；置于侧边栏最底部) */}
           <div className="pp-anchor" style={{ marginBottom: 4 }}>
             <div
               id="sidebarAvatar"
@@ -1055,24 +1078,12 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
             </div>
             <ProfilePanel open={profileOpen} onClose={() => setProfileOpen(false)} />
           </div>
-
-          {/* 积分（真实余额，金色徽章 Coins 图标 + 数字） */}
-          <span className="sidebar-credits">
-            <span className="sidebar-credits-badge">
-              <Coins size={16} className="sidebar-credits-icon" />
-            </span>
-            {points === null ? "…" : points.toLocaleString()}
-          </span>
-          {/* 充值 */}
-          <Link to="/points" className="sidebar-recharge" title="充值">
-            充值
-          </Link>
         </aside>
 
         {/* ===== 主内容区 ===== */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           <main data-scroll-region="primary" className="overflow-y-auto flex-1">
-            <div id="agent-view">
+            <div id="agent-view" className="flex flex-col min-h-full">
               {/* 窄居中区:标题 + Tab + 输入 */}
               <div className="w-[88%] max-w-[1400px] mx-auto px-6">
                 {/* 品牌标题（逐字拆分：光束扫过时逐字缓慢照亮，见 home.css fl-letter） */}
@@ -1086,8 +1097,8 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
                         <span className="text-text-secondary truncate">{notice.content}</span>
                       </div>
                     )}
-                    <h1 className="brand-title select-none" aria-label="EmptyBroken">
-                      {"EmptyBroken".split("").map((ch, i) => (
+                    <h1 className="brand-title select-none" aria-label="导演台">
+                      {"导演台".split("").map((ch, i) => (
                         <span key={i} className="brand-letter" aria-hidden style={{ animationDelay: `${i * 0.12}s` }}>
                           {ch}
                         </span>
@@ -1481,7 +1492,7 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
               </div>
 
               {/* ===== 宽区:精选推荐轮播(照搬设计稿) ===== */}
-              <div className="w-[80%] mx-auto px-4 pb-8 mt-2">
+              <div className="w-[80%] mx-auto px-4 pb-[64px] mt-2">
                 <section id="recommendation-banners" className="mb-6 mt-6">
                   <div className="flex items-center gap-2 mb-4">
                     <ThumbsUp size={16} className="text-[var(--luxreal-primary)]" />
@@ -1548,7 +1559,7 @@ async function parsePdfToText(arrayBuffer: ArrayBuffer): Promise<string> {
                 {/* 底部页脚(照搬设计稿) */}
                 <footer className="site-footer">
                   <span>专业短剧模式：新增 Seedance2.0 模型！</span>
-                  <a href="#">加入 EmptyBroken 官方社群</a>
+                  <a href="#">加入导演台官方社群</a>
                   <div className="flex items-center gap-2">
                     <a href="#" className="text-white">中文</a>
                     <span className="text-[var(--luxreal-border)]">|</span>

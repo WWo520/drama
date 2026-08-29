@@ -5,8 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  ChevronDown, Clock, Download, FileText, Film, Loader2, Maximize, Pause, PictureInPicture2, Play,
-  RefreshCw, RotateCcw, RotateCw, Volume2, Wand2, X,
+  Clock, Download, FileText, Film, Loader2, Maximize, Pause, PictureInPicture2, Play,
+  RefreshCw, RotateCcw, RotateCw, Volume2, Wand2,
 } from "lucide-react";
 
 import {
@@ -28,6 +28,7 @@ import WorkbenchShell from "../layouts/WorkbenchShell";
 import ProjectLoadError from "../components/ProjectLoadError";
 import { useStepState } from "../hooks/useStepState";
 import { matchTaskTypes, useWsDrivenPoll } from "../hooks/useWsDrivenPoll";
+import { downloadToLocal } from "../utils/download";
 import "./step4.css";
 
 // 错误文案：ApiError 走错误码映射（05 C 章），避免弹出后端原始报文
@@ -658,18 +659,23 @@ export default function Step4Page() {
       .catch((err) => toast.error(errMsg(err, "重新合成失败")));
   };
 
-  // 校验下载链接（fetch 探测；403/404 视为过期走重试）
-  const handleDownload = (e: ExportItem) => {
+  // 校验并下载到本地（GET 探测；403/404 视为过期走重试；成功走 blob 保存，不跳转页面）
+  const handleDownload = async (e: ExportItem) => {
     if (!e.output_url) return;
-    fetch(e.output_url, { method: "HEAD" })
-      .then((resp) => {
-        if (resp.status === 403 || resp.status === 404) {
-          handleDownloadError(e);
-        } else {
-          window.open(e.output_url, "_blank", "noopener");
-        }
-      })
-      .catch(() => window.open(e.output_url, "_blank", "noopener"));
+    try {
+      const resp = await fetch(e.output_url);
+      if (resp.status === 403 || resp.status === 404) {
+        handleDownloadError(e);
+        return;
+      }
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      await downloadToLocal(e.output_url, `${proj?.title || "合成视频"}-${e.resolution || "P720"}.mp4`);
+      toast.success("视频已开始下载");
+    } catch {
+      // fetch 失败（跨域受限等）→ 回退触发下载，不跳转
+      await downloadToLocal(e.output_url, `${proj?.title || "合成视频"}-${e.resolution || "P720"}.mp4`);
+      toast.success("视频已开始下载");
+    }
   };
 
   // 合成导出（3.4.1：MP4_H264 + 清晰度 + 合规水印）
@@ -1124,24 +1130,13 @@ export default function Step4Page() {
                     )}
                   </div>
                   {e.status === "SUCCESS" && e.output_url && (
-                    <a
+                    <button
                       className="btn-export-download"
-                      href={e.output_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(ev) => {
-                        // 异步校验签名 URL；过期则拦截默认行为走重试
-                        fetch(e.output_url, { method: "HEAD" }).then((resp) => {
-                          if (resp.status === 403 || resp.status === 404) {
-                            ev.preventDefault();
-                            handleDownloadError(e);
-                          }
-                        }).catch(() => undefined);
-                      }}
+                      onClick={() => void handleDownload(e)}
                     >
                       <Download size={12} />
                       下载
-                    </a>
+                    </button>
                   )}
                   {e.status === "FAILED" && (
                     <button

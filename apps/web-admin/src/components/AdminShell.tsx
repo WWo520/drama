@@ -80,7 +80,7 @@ export default function AdminShell() {
             </svg>
           </div>
           <span className="text-white font-bold text-lg tracking-wide">
-            Empty Broken <span className="text-amber-gold">Admin</span>
+            导演台 <span className="text-amber-gold">Admin</span>
           </span>
         </div>
 

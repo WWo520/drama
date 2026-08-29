@@ -37,6 +37,8 @@ type ProjectRow struct {
 	LastOpenedAt      string
 	CreatedAt         string
 	UpdatedAt         string
+	// Config 项目级配置快照（video_model/resolution/aspect_ratio/video_duration/image_model/style_*）
+	Config map[string]any
 }
 
 // Repo creation 数据访问。
@@ -75,24 +77,30 @@ func (r *Repo) DefaultSpaceID(ctx context.Context, userID int64) (int64, string,
 	return id, uuid, err
 }
 
-// CreateProject 创建项目事务：项目 + 第 1 集（05 3.0.2 创建即进 Step1）。
-func (r *Repo) CreateProject(ctx context.Context, spaceID, ownerID int64, spaceUUID, title, scriptText string) (*ProjectRow, error) {
+// CreateProject 创建项目事务：项目（含配置快照）+ 第 1 集（05 3.0.2 创建即进 Step1）。
+func (r *Repo) CreateProject(ctx context.Context, spaceID, ownerID int64, spaceUUID, title, scriptText string, config map[string]any) (*ProjectRow, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
 
+	cfgJSON := "{}"
+	if len(config) > 0 {
+		if b, err := json.Marshal(config); err == nil {
+			cfgJSON = string(b)
+		}
+	}
 	var p ProjectRow
 	err = tx.QueryRow(ctx, `
-		INSERT INTO projects (space_id, owner_user_id, title, source_script_text)
-		VALUES ($1, $2, $3, NULLIF($4, ''))
+		INSERT INTO projects (space_id, owner_user_id, title, source_script_text, config)
+		VALUES ($1, $2, $3, NULLIF($4, ''), $5::jsonb)
 		RETURNING id, project_uuid::text, title, project_type::text, current_step::text, status::text,
 		          total_episode_count, total_duration_sec,
 		          to_char(last_opened_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		          to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		          to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
-		spaceID, ownerID, title, scriptText,
+		spaceID, ownerID, title, scriptText, cfgJSON,
 	).Scan(&p.ID, &p.ProjectUUID, &p.Title, &p.ProjectType, &p.CurrentStep, &p.Status,
 		&p.TotalEpisodeCount, &p.TotalDurationSec, &p.LastOpenedAt, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
@@ -101,6 +109,7 @@ func (r *Repo) CreateProject(ctx context.Context, spaceID, ownerID int64, spaceU
 	p.SpaceID = spaceID
 	p.SpaceUUID = spaceUUID
 	p.OwnerID = ownerID
+	p.Config = config
 
 	// 自动创建第 1 集（D.1 顺序 6：episodes）
 	if _, err := tx.Exec(ctx, `
@@ -180,13 +189,15 @@ func (r *Repo) ListProjects(ctx context.Context, spaceID int64, page, pageSize i
 // GetProject 项目详情（按 uuid + 空间成员校验）。
 func (r *Repo) GetProject(ctx context.Context, projectUUID string, userID int64) (*ProjectRow, error) {
 	var p ProjectRow
+	var cfgRaw string
 	err := r.pool.QueryRow(ctx, `
 		SELECT p.id, p.project_uuid::text, p.title, p.cover_image_url, p.project_type::text,
 		       p.current_step::text, p.status::text, p.total_episode_count, p.total_duration_sec,
 		       to_char(p.last_opened_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		       to_char(p.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		       to_char(p.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
-		       s.space_uuid::text, p.space_id, p.owner_user_id, COALESCE(p.source_script_text, '')
+		       s.space_uuid::text, p.space_id, p.owner_user_id, COALESCE(p.source_script_text, ''),
+		       COALESCE(p.config::text, '{}')
 		FROM projects p
 		JOIN spaces s ON s.id = p.space_id
 		JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $2 AND m.deleted_at IS NULL
@@ -194,14 +205,47 @@ func (r *Repo) GetProject(ctx context.Context, projectUUID string, userID int64)
 		projectUUID, userID,
 	).Scan(&p.ID, &p.ProjectUUID, &p.Title, &p.CoverImageURL, &p.ProjectType,
 		&p.CurrentStep, &p.Status, &p.TotalEpisodeCount, &p.TotalDurationSec,
-		&p.LastOpenedAt, &p.CreatedAt, &p.UpdatedAt, &p.SpaceUUID, &p.SpaceID, &p.OwnerID, &p.SourceScriptText)
+		&p.LastOpenedAt, &p.CreatedAt, &p.UpdatedAt, &p.SpaceUUID, &p.SpaceID, &p.OwnerID, &p.SourceScriptText,
+		&cfgRaw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	_ = json.Unmarshal([]byte(cfgRaw), &p.Config)
 	return &p, nil
+}
+
+// UpsertProjectConfig 合并写项目配置快照（PATCH /projects/:id/config）。
+func (r *Repo) UpsertProjectConfig(ctx context.Context, projectID int64, patch map[string]any) error {
+	b, err := json.Marshal(patch)
+	if err != nil {
+		return err
+	}
+	_, err = r.pool.Exec(ctx, `
+		UPDATE projects SET config = COALESCE(config, '{}'::jsonb) || $2::jsonb, updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL`, projectID, string(b))
+	return err
+}
+
+// ProjectStyleName 按 ID 读项目配置快照中的风格名（资产生成风格兜底链末端）。
+// 无 config / 无 style_name 时返回空串。
+func (r *Repo) ProjectStyleName(ctx context.Context, projectID int64) (string, error) {
+	var raw []byte
+	err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(config, '{}'::jsonb) FROM projects WHERE id = $1 AND deleted_at IS NULL`, projectID).Scan(&raw)
+	if err != nil {
+		return "", err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return "", nil
+	}
+	if s, ok := m["style_name"].(string); ok {
+		return s, nil
+	}
+	return "", nil
 }
 
 // GetProjectIncludingDeleted 项目详情（含软删，供恢复接口使用，权限校验同 GetProject）。
@@ -259,6 +303,19 @@ func (r *Repo) Restore(ctx context.Context, id int64) error {
 func (r *Repo) TouchLastOpened(ctx context.Context, id int64) error {
 	_, err := r.pool.Exec(ctx, `UPDATE projects SET last_opened_at = NOW() WHERE id = $1`, id)
 	return err
+}
+
+// HasActiveSplitTask 同项目是否已有未完结的拆分任务（任务级互斥防线：
+// 项目状态与任务状态可能脱节——如手工修数/回滚竞态，直接查任务表兜底）。
+func (r *Repo) HasActiveSplitTask(ctx context.Context, projectID int64) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM generation_tasks
+			WHERE task_type = 'SCRIPT_SPLIT' AND project_id = $1
+			  AND status IN ('PENDING','QUEUED','RUNNING')
+		)`, projectID).Scan(&exists)
+	return exists, err
 }
 
 // TransitionStatus 状态机原子转移：FOR UPDATE 锁行 → 校验 → 更新（03 A.2 触发条件）。

@@ -149,7 +149,7 @@ export default function AdminLoginPage() {
           <div className="brand-logo-mark">
             <Video />
           </div>
-          <span className="brand-name">Empty Broken</span>
+          <span className="brand-name">导演台</span>
           <span className="brand-badge">Admin</span>
         </div>
 
@@ -157,7 +157,7 @@ export default function AdminLoginPage() {
         <div className="brand-hero">
           <div className="hero-label">
             <span className="hero-label-dot"></span>
-            Empty Broken · 管理系统
+            导演台 · 管理系统
           </div>
           <h1 className="hero-title">
             智能创作
@@ -165,7 +165,7 @@ export default function AdminLoginPage() {
             <span className="highlight">高效运营</span>
           </h1>
           <p className="hero-subtitle">
-            一站式 Empty Broken 内容管理后台，支持剧本审核、作品管理、数据分析、用户运营等全链路功能，助力平台高效运转。
+            一站式导演台内容管理后台，支持剧本审核、作品管理、数据分析、用户运营等全链路功能，助力平台高效运转。
           </p>
 
           <div className="feature-grid">
@@ -186,7 +186,7 @@ export default function AdminLoginPage() {
 
         {/* Brand Footer */}
         <div className="brand-footer">
-          <span>&copy; 2024 Empty Broken. All rights reserved.</span>
+          <span>&copy; 2024 导演台 保留所有权利</span>
           <div className="brand-footer-links">
             <a href="#">服务条款</a>
             <a href="#">隐私政策</a>
@@ -202,7 +202,7 @@ export default function AdminLoginPage() {
         <div className="login-card">
           <div className="login-header">
             <h2 className="login-title">管理后台</h2>
-            <p className="login-subtitle">Empty Broken 管理后台</p>
+            <p className="login-subtitle">导演台管理后台</p>
           </div>
 
           <form onSubmit={submit} noValidate>

@@ -36,6 +36,7 @@ import AssetProgress from "../components/AssetProgress";
 import { useStepState } from "../hooks/useStepState";
 import { matchTaskTypes, useWsDrivenPoll } from "../hooks/useWsDrivenPoll";
 import { cachedGet, invalidateCachedGet } from "../utils/cachedApi";
+import { getGlobalStyle, setGlobalStyle, STYLE_CHANGED_EVENT } from "../stores/styleStore";
 import "./step2.css";
 
 // 错误文案：ApiError 走错误码映射（05 C 章），避免弹出后端原始报文
@@ -464,8 +465,10 @@ export default function Step2Page() {
 
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchRange, setBatchRange] = useState<BatchRange>("all");
-  // 风格/每张数量（对齐设计稿视觉态；后端暂不接收参数，按项目风格与默认张数生成）
-  const [batchStyle, setBatchStyle] = useState("武侠仙侠");
+  // 风格/每张数量（风格全局同步：初始值来自首页全局风格，切换实时跟随；后端暂不接收参数，按项目风格与默认张数生成）
+  const [batchStyle, setBatchStyle] = useState(() => getGlobalStyle().name);
+  // 风格库真源（GET /style-library，与首页同源；失败回退默认 4 项）
+  const [styleOptions, setStyleOptions] = useState<string[]>(["武侠仙侠", "都市现代", "古风宫廷", "科幻未来"]);
   const [batchCount, setBatchCount] = useState(4);
   // 批量弹窗选中的图片模型（""=自动路由），真实透传到生成任务
   const [batchModel, setBatchModel] = useState("");
@@ -507,6 +510,24 @@ export default function Step2Page() {
         /* 模型加载失败：按钮保持默认展示 */
       }
     })();
+  }, []);
+
+  // 风格库真源（GET /style-library，与首页同源）+ 全局风格实时同步（首页/资产弹窗切换时跟随）
+  useEffect(() => {
+    void cachedGet<{ items: { style_code: string; name: string }[] }>("/style-library", 60000)
+      .then((r) => {
+        const names = (r.items || []).map((s) => s.name).filter(Boolean);
+        if (names.length) setStyleOptions(names);
+      })
+      .catch(() => { /* 回退默认选项 */ });
+  }, []);
+  useEffect(() => {
+    const onStyleChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ name: string }>).detail;
+      if (detail?.name) setBatchStyle(detail.name);
+    };
+    window.addEventListener(STYLE_CHANGED_EVENT, onStyleChanged);
+    return () => window.removeEventListener(STYLE_CHANGED_EVENT, onStyleChanged);
   }, []);
 
   // 选择模型 → 保存到 /me/preferences（创作页模型配置共用同一偏好）
@@ -594,6 +615,12 @@ export default function Step2Page() {
   const notSplit =
     !!proj && ["DRAFT", "SCRIPT_SPLITTING", "SCRIPT_SPLIT_FAILED", "CANCELLED"].includes(proj.status);
 
+  // 顶部风格徽标：优先项目配置快照的 style_name，回退 tags，最后"通用写实"
+  const cfgStyleName = (() => {
+    const sn = (proj?.config as Record<string, unknown> | undefined)?.style_name;
+    return typeof sn === "string" && sn ? sn : proj?.tags?.[0] || "通用写实";
+  })();
+
   // 加载项目 + 剧集
   useEffect(() => {
     void (async () => {
@@ -601,6 +628,10 @@ export default function Step2Page() {
         const p = await projectsApi.detail(projectId);
         setLoadError(false);
         setProj(p);
+        // 项目配置快照 → 批量资产生成默认值（image_model / style_name）
+        const cfg = (p.config ?? {}) as Record<string, unknown>;
+        if (typeof cfg.image_model === "string" && cfg.image_model) setBatchModel(cfg.image_model);
+        if (typeof cfg.style_name === "string" && cfg.style_name) setBatchStyle(cfg.style_name);
         const eps = await splitApi.episodes(projectId);
         setEpisodes(eps.items ?? []);
         if (eps.items.length > 0) setActiveEpisode(eps.items[0].episode_id);
@@ -752,6 +783,13 @@ export default function Step2Page() {
       });
       toast.success(`已提交 ${data.created} 个生成任务`);
       setBatchOpen(false);
+      // 回写项目配置快照：弹窗所选图片模型/风格成为本项目后续默认值
+      void projectsApi
+        .updateConfig(projectId, {
+          ...(batchModel ? { image_model: batchModel } : {}),
+          ...(batchStyle ? { style_name: batchStyle } : {}),
+        })
+        .catch(() => {});
       void loadAssets();
     } catch (e) {
       toast.error(errMsg(e, "批量生成失败"));
@@ -1006,7 +1044,7 @@ export default function Step2Page() {
             )}
           </div>
           <button className="flex items-center gap-1 text-xs rounded-lg px-2.5 py-1 text-white/80 transition-colors hover:text-white" style={{ background: "#1E1E24", border: "1px solid #2A2A35" }}>
-            {proj?.tags?.[0] || "武侠仙侠"}
+            {cfgStyleName}
             <ChevronDown size={12} />
           </button>
           <button
@@ -1392,19 +1430,21 @@ export default function Step2Page() {
                   <ChevronDown size={16} className="text-[#6B7088] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 </div>
               </div>
-              {/* Style（视觉态；默认跟随项目风格） */}
+              {/* Style（全局同步：与首页风格一致，切换写回全局） */}
               <div>
                 <label className="text-xs text-[#8B8B9A] mb-1.5 block">风格</label>
                 <div className="relative">
                   <select
-                    value={batchStyle}
-                    onChange={(e) => setBatchStyle(e.target.value)}
+                    value={styleOptions.includes(batchStyle) ? batchStyle : styleOptions[0]}
+                    onChange={(e) => {
+                      setBatchStyle(e.target.value);
+                      setGlobalStyle({ code: "", name: e.target.value });
+                    }}
                     className="w-full h-9 px-3 rounded-lg bg-[#0D0D14] border border-[#2A2A3E] text-white text-sm focus:border-[#4C7FF8] focus:outline-none transition-colors appearance-none cursor-pointer"
                   >
-                    <option>武侠仙侠</option>
-                    <option>都市现代</option>
-                    <option>古风宫廷</option>
-                    <option>科幻未来</option>
+                    {styleOptions.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
                   </select>
                   <ChevronDown size={16} className="text-[#6B7088] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 </div>

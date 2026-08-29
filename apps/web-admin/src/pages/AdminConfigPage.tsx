@@ -55,7 +55,7 @@ const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?
 
 // 设计稿静态默认值（无后端配置项时展示；重置默认也回到此值）
 const DEFAULTS = {
-  platform_name: "Empty Broken",
+  platform_name: "导演台",
   platform_subtitle: "AI 驱动的短剧创作平台",
   platform_domain: "emptybroken.com",
   icp_no: "京ICP备2026000000号",
@@ -71,6 +71,7 @@ const DEFAULTS = {
   ai_cost_video: 50,
   ai_cost_tts: 10,
   ai_cost_cover: 5,
+  split_max_tokens: 32768,
   storage_provider: "阿里云 OSS",
   storage_region: "oss-cn-beijing",
   storage_bucket: "emptybroken-prod",
@@ -108,6 +109,7 @@ const FIELD_META: { key: keyof FormState; group: string; desc: string }[] = [
   { key: "ai_cost_video", group: "ai_limits", desc: "单次消耗积分(视频)" },
   { key: "ai_cost_tts", group: "ai_limits", desc: "单次消耗积分(配音)" },
   { key: "ai_cost_cover", group: "ai_limits", desc: "单次消耗积分(封面)" },
+  { key: "split_max_tokens", group: "ai_limits", desc: "剧本拆分单次输出上限(max_tokens)" },
   { key: "storage_provider", group: "storage", desc: "存储服务商" },
   { key: "storage_region", group: "storage", desc: "存储区域" },
   { key: "storage_bucket", group: "storage", desc: "Bucket 名称" },
@@ -134,6 +136,14 @@ const AI_LIMIT_FIELDS: { key: keyof FormState; label: string }[] = [
   { key: "ai_cost_tts", label: "单次消耗积分(配音)" },
   { key: "ai_cost_cover", label: "单次消耗积分(封面)" },
 ];
+
+// 剧本拆分 max_tokens 样例（预设值；保存后 worker 30s 内生效）
+const SPLIT_MAX_TOKEN_SAMPLES = [
+  { value: 8192, label: "8192 — 短剧本（约 5000 字内）" },
+  { value: 16384, label: "16384 — 中等剧本" },
+  { value: 32768, label: "32768 — 推荐（默认）" },
+  { value: 65536, label: "65536 — 超长剧本" },
+] as const;
 
 export default function AdminConfigPage() {
   const [tab, setTab] = useState<TabKey>("basic");
@@ -384,6 +394,45 @@ export default function AdminConfigPage() {
                     </div>
                   ))}
                 </div>
+                <div className="mt-5 grid grid-cols-2 gap-5">
+                  <div>
+                    <label className="block text-sm text-text-secondary mb-1.5">
+                      剧本拆分最大输出 (max_tokens)
+                    </label>
+                    <select
+                      className="input-field"
+                      value={
+                        SPLIT_MAX_TOKEN_SAMPLES.some((s) => s.value === Number(form.split_max_tokens))
+                          ? Number(form.split_max_tokens)
+                          : "custom"
+                      }
+                      onChange={(e) => {
+                        if (e.target.value !== "custom") setField("split_max_tokens", Number(e.target.value));
+                      }}
+                    >
+                      {SPLIT_MAX_TOKEN_SAMPLES.map((s) => (
+                        <option key={s.value} value={s.value}>
+                          {s.label}
+                        </option>
+                      ))}
+                      <option value="custom">自定义…</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-text-secondary mb-1.5">
+                      自定义数值（选「自定义…」时填写）
+                    </label>
+                    <input
+                      type="number"
+                      className="input-field"
+                      value={Number(form.split_max_tokens)}
+                      onChange={(e) => setField("split_max_tokens", Number(e.target.value) || 0)}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-text-muted mt-3">
+                  剧本拆分 AI 单次输出的 token 上限，输出被截断时调大；保存后约 30 秒生效。
+                </p>
               </div>
 
               {/* 存储配置 */}

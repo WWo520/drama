@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +45,22 @@ func (s *Store) Bool(ctx context.Context, key string) (bool, error) {
 	if err != nil {
 		// 存量值可能是 "1"/"0"（旧格式兜底）
 		return raw == "1", nil
+	}
+	return v, nil
+}
+
+// Int 读取整数配置（config_value 可能是 jsonb 数字或字符串，均兼容）；
+// DB 查询失败返回默认值 + err，未配置/解析失败返回默认值 + nil。
+func (s *Store) Int(ctx context.Context, key string, def int) (int, error) {
+	raw, ok, err := s.get(ctx, key)
+	if err != nil || !ok {
+		return def, err
+	}
+	// 兼容存成 jsonb 字符串 `"32768"` 的历史格式
+	raw = strings.Trim(strings.TrimSpace(raw), `"`)
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return def, nil
 	}
 	return v, nil
 }

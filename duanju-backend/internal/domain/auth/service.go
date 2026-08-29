@@ -106,7 +106,11 @@ func (s *Service) countLoginFail(c *gin.Context, key string) {
 
 // Refresh 用 Refresh Token 换新 Access（05 1.3，Cookie 携带）。
 func (s *Service) Refresh(c *gin.Context) {
-	refreshStr, err := c.Cookie("refresh_token")
+	refreshStr, err := c.Cookie(refreshCookieName(c))
+	if err != nil || refreshStr == "" {
+		// 兼容存量会话：回退读旧共享 cookie
+		refreshStr, err = c.Cookie("refresh_token")
+	}
 	if err != nil || refreshStr == "" {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请重新登录")
 		return
@@ -167,7 +171,12 @@ func (s *Service) Logout(c *gin.Context) {
 			}
 		}
 	}
-	if refreshStr, err := c.Cookie("refresh_token"); err == nil && refreshStr != "" {
+	refreshStr, rerr := c.Cookie(refreshCookieName(c))
+	if rerr != nil || refreshStr == "" {
+		// 兼容存量会话：回退读旧共享 cookie
+		refreshStr, rerr = c.Cookie("refresh_token")
+	}
+	if rerr == nil && refreshStr != "" {
 		if claims, perr := s.jwtMgr.Parse(refreshStr); perr == nil {
 			if jti, jerr := jwt.JTI(claims); jerr == nil {
 				ttl := 7 * 24 * time.Hour
@@ -175,7 +184,10 @@ func (s *Service) Logout(c *gin.Context) {
 			}
 		}
 	}
-	c.SetCookie("refresh_token", "", -1, "/", "", true, true)
+	// 清除所有已知 cookie 名（含两端各自 realm 名与旧共享名，防残留）
+	for _, name := range []string{"refresh_token", "refresh_token_user", "refresh_token_admin"} {
+		c.SetCookie(name, "", -1, "/", "", true, true)
+	}
 	httpx.OK(c, nil)
 }
 
@@ -245,6 +257,21 @@ func (s *Service) UpdateMe(c *gin.Context, req *UpdateMeReq) {
 	httpx.OK(c, toBrief(u))
 }
 
+// refreshCookieName 按应用域（X-App-Realm 请求头）隔离 Refresh Cookie 名。
+// 用户端(5173)/管理端(5174) 同 host 不同端口时，浏览器 Cookie 按 host 隔离不区分端口，
+// 同名 refresh cookie 会互相覆盖 → 静默 refresh 换绑成最后登录的账号（串号根因）。
+// 未携带 realm 头的旧客户端回退旧名，保证存量会话平滑过渡。
+func refreshCookieName(c *gin.Context) string {
+	switch c.GetHeader("X-App-Realm") {
+	case "admin":
+		return "refresh_token_admin"
+	case "user":
+		return "refresh_token_user"
+	default:
+		return "refresh_token"
+	}
+}
+
 // issueTokens 签发双 Token 并写 Refresh Cookie。
 func (s *Service) issueTokens(c *gin.Context, u *UserRow, msg string) {
 	fp := c.ClientIP() + "|" + c.Request.UserAgent()
@@ -255,7 +282,12 @@ func (s *Service) issueTokens(c *gin.Context, u *UserRow, msg string) {
 	}
 	// 生产环境 Secure=true（HTTPS），开发环境 http 本地可携带
 	secure := s.env == "production"
-	c.SetCookie("refresh_token", refresh, int((7*24*time.Hour).Seconds()), "/", "", secure, true)
+	name := refreshCookieName(c)
+	c.SetCookie(name, refresh, int((7 * 24 * time.Hour).Seconds()), "/", "", secure, true)
+	if name != "refresh_token" {
+		// 迁移清理：清掉可能残留的共享旧 cookie，防止继续被另一端覆盖
+		c.SetCookie("refresh_token", "", -1, "/", "", true, true)
+	}
 	c.Set(middleware.CtxUserID, u.ID)
 	c.Set(middleware.CtxUserUUID, u.UserUUID)
 	httpx.OK(c, LoginResp{

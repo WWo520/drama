@@ -177,9 +177,20 @@ export default function NotificationsPage() {
           {/* Divider（设计稿本段独有） */}
           <div className="w-8 h-px" style={{ background: "var(--luxreal-border)", margin: "8px 0" }} />
 
-          <div className="flex-1" style={{ minHeight: 16 }} />
+          <div className="flex-1" style={{ minHeight: 12 }} />
 
-          {/* 头像（点击展开面板，LuxReal 对齐版 ProfilePanel） */}
+          {/* Wallet：积分图案 + 积分数值 + 充值按钮（同一组件，充值按钮缩小版；位于头像上方） */}
+          <div className="sidebar-wallet">
+            <span className="sidebar-credits">
+              <span className="sidebar-credits-badge">
+                <Coins size={14} className="sidebar-credits-icon" />
+              </span>
+              <span className="sidebar-credits-value">{points === null ? "…" : points.toLocaleString()}</span>
+            </span>
+            <Link to="/points" className="sidebar-recharge" title="充值">充值</Link>
+          </div>
+
+          {/* 头像（点击展开面板，LuxReal 对齐版 ProfilePanel；置于侧边栏最底部） */}
           <div className="pp-anchor" style={{ marginBottom: 6 }}>
             <div
               className="sidebar-avatar"
@@ -200,18 +211,6 @@ export default function NotificationsPage() {
             </div>
             <ProfilePanel open={profileOpen} onClose={() => setProfileOpen(false)} />
           </div>
-
-          {/* 积分（真实余额，金色徽章 Coins 图标 + 数字） */}
-          <span className="sidebar-credits">
-            <span className="sidebar-credits-badge">
-              <Coins size={16} className="sidebar-credits-icon" />
-            </span>
-            {points === null ? "…" : points.toLocaleString()}
-          </span>
-          {/* 充值 */}
-          <Link to="/points" className="sidebar-recharge" title="充值">
-            充值
-          </Link>
         </aside>
 
         {/* ===== 主内容区 ===== */}

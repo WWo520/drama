@@ -83,9 +83,20 @@ export default function AppShell({
         </nav>
 
         {/* Spacer to push lower nav down */}
-        <div className="flex-1" style={{ minHeight: 40 }} />
+        <div className="flex-1" style={{ minHeight: 16 }} />
 
-        {/* Avatar（点击开关头像资料面板，LuxReal 对齐版 pp-panel） */}
+        {/* Wallet：积分图案 + 积分数值 + 充值按钮（同一组件，充值按钮缩小版；位于头像上方） */}
+        <div className="sidebar-wallet">
+          <span className="sidebar-credits">
+            <span className="sidebar-credits-badge">
+              <Coins size={14} className="sidebar-credits-icon" />
+            </span>
+            <span className="sidebar-credits-value">{points === null ? "…" : points.toLocaleString()}</span>
+          </span>
+          <Link to="/points" className="sidebar-recharge" title="充值">充值</Link>
+        </div>
+
+        {/* Avatar（点击开关头像资料面板，LuxReal 对齐版 pp-panel；置于侧边栏最底部） */}
         <div className="pp-anchor" style={{ marginBottom: 4 }}>
           <div
             id="sidebarAvatar"
@@ -107,16 +118,6 @@ export default function AppShell({
           </div>
           <ProfilePanel open={profileOpen} onClose={() => setProfileOpen(false)} />
         </div>
-
-        {/* Credits number（金色徽章 Coins 图标 + 余额） */}
-        <span className="sidebar-credits">
-          <span className="sidebar-credits-badge">
-            <Coins size={16} className="sidebar-credits-icon" />
-          </span>
-          {points === null ? "…" : points.toLocaleString()}
-        </span>
-        {/* Recharge link */}
-        <Link to="/points" className="sidebar-recharge" title="充值">充值</Link>
       </aside>
 
       {/* 主内容区 */}

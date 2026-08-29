@@ -23,15 +23,17 @@ func NewVideoStore(pool *pgxpool.Pool) *VideoStore {
 
 var _ agent.VideoStore = (*VideoStore)(nil)
 
-// LoadShotRefs 加载镜头参考图 URL 列表（F10：shot_asset_refs 优先，否则继承 nu_asset_links）。
+// LoadShotRefs 加载镜头参考图 URL 列表（F10：shot_asset_refs 优先；缺 SCENE 时从 nu_asset_links 补齐继承）。
 // 参考图来源（业务表口径，Step2 生成图片的落点）：
 //
 //	角色 → character_variants.main_image_url（首个变体）；场景 → scenes.main_image_url；道具 → props.main_image_url。
 //
-// 注意：assets 表为通用资产注册表（无 main_image_url 列），不可作取图来源。
+// 注意：assets 表为通用资产表（无 main_image_url 列），不可作取图来源。
 // 排序：角色图优先、场景次之（对齐 18 - 视频制作：主体一致性权重最高）。
+// 场景补齐（防场景漂移）：对话/特写镜头常只命中角色（背景描述未写场景名导致匹配不中），
+// 此类镜头若整组不回退会丢失场景参考 → 画面漂移到别的地点（用户实测"餐厅对话答话人不在餐厅"根因）。
+// 故镜头级缺 SCENE 关联时自动继承叙事单元级场景链（同一单元=同一地点）；角色/道具仍以镜头级为准（对话轮换主体各异）。
 func (s *VideoStore) LoadShotRefs(ctx context.Context, shotID int64, narrativeUnitID int64) ([]string, error) {
-	// 1. 优先查镜头级覆盖（shot_asset_refs）
 	rows, err := s.pool.Query(ctx, `
 		SELECT t.url FROM (
 			SELECT COALESCE(cv.main_image_url, sc.main_image_url, p.main_image_url, '') AS url,
@@ -45,13 +47,19 @@ func (s *VideoStore) LoadShotRefs(ctx context.Context, shotID int64, narrativeUn
 			LEFT JOIN scenes sc ON sar.asset_kind='SCENE' AND sc.id=sar.asset_id AND sc.deleted_at IS NULL
 			LEFT JOIN props p ON sar.asset_kind='PROP' AND p.id=sar.asset_id AND p.deleted_at IS NULL
 			WHERE sar.shot_id=$1
+			UNION ALL
+			SELECT COALESCE(sc.main_image_url, '') AS url, 2 AS ord, nal.id AS rid
+			FROM nu_asset_links nal
+			JOIN scenes sc ON nal.asset_kind='SCENE' AND sc.id=nal.asset_id AND sc.deleted_at IS NULL
+			WHERE nal.narrative_unit_id=$2 AND nal.asset_kind='SCENE'
+			  AND NOT EXISTS (SELECT 1 FROM shot_asset_refs x WHERE x.shot_id=$1 AND x.asset_kind='SCENE')
 		) t WHERE t.url IS NOT NULL AND t.url != ''
-		ORDER BY t.ord, t.rid`, shotID)
+		ORDER BY t.ord, t.rid`, shotID, narrativeUnitID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var urls []string
+	urls := []string{}
 	for rows.Next() {
 		var url string
 		if err := rows.Scan(&url); err != nil {
@@ -59,39 +67,7 @@ func (s *VideoStore) LoadShotRefs(ctx context.Context, shotID int64, narrativeUn
 		}
 		urls = append(urls, url)
 	}
-	if len(urls) > 0 {
-		return urls, nil // 镜头级覆盖存在，直接返回
-	}
-
-	// 2. 镜头级无覆盖，继承叙事单元级（nu_asset_links）
-	rows2, err := s.pool.Query(ctx, `
-		SELECT t.url FROM (
-			SELECT COALESCE(cv.main_image_url, sc.main_image_url, p.main_image_url, '') AS url,
-			       CASE nal.asset_kind WHEN 'CHARACTER' THEN 1 WHEN 'SCENE' THEN 2 ELSE 3 END AS ord, nal.id AS rid
-			FROM nu_asset_links nal
-			LEFT JOIN characters c ON nal.asset_kind='CHARACTER' AND c.id=nal.asset_id AND c.deleted_at IS NULL
-			LEFT JOIN LATERAL (
-			    SELECT main_image_url FROM character_variants
-			    WHERE character_id=c.id AND deleted_at IS NULL ORDER BY id LIMIT 1
-			) cv ON TRUE
-			LEFT JOIN scenes sc ON nal.asset_kind='SCENE' AND sc.id=nal.asset_id AND sc.deleted_at IS NULL
-			LEFT JOIN props p ON nal.asset_kind='PROP' AND p.id=nal.asset_id AND p.deleted_at IS NULL
-			WHERE nal.narrative_unit_id=$1
-		) t WHERE t.url IS NOT NULL AND t.url != ''
-		ORDER BY t.ord, t.rid`, narrativeUnitID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows2.Close()
-	urls = []string{}
-	for rows2.Next() {
-		var url string
-		if err := rows2.Scan(&url); err != nil {
-			continue
-		}
-		urls = append(urls, url)
-	}
-	return urls, nil
+	return urls, rows.Err()
 }
 
 // LoadShot 镜头信息。
@@ -118,12 +94,12 @@ func (s *VideoStore) LoadShot(ctx context.Context, shotID int64) (*agent.ShotInf
 
 // RefAsset 参考资产配对定义在 agent 包（接口归属方），此处仅实现。
 
-// LoadShotRefAssets 加载镜头参考资产配对列表（镜头级 shot_asset_refs 优先，回退单元级 nu_asset_links）。
+// LoadShotRefAssets 加载镜头参考资产配对列表（镜头级 shot_asset_refs 优先；缺 SCENE 时从 nu_asset_links 补齐，
+// 口径与 LoadShotRefs 的场景补齐一致——防"餐厅对话答话人不在餐厅"式场景漂移）。
 // 仅返回有参考图的资产（与 LoadShotRefs 取图口径一致：角色→首个变体、场景/道具→自身 main_image_url），
 // 排序角色→场景→道具（主体一致性权重最高）。名称+URL 同源同序，供提示词 <Picture N> 显式绑定。
 func (s *VideoStore) LoadShotRefAssets(ctx context.Context, shotID int64, narrativeUnitID int64) []agent.RefAsset {
-	// 1. 镜头级覆盖
-	refs := s.queryRefAssets(ctx, `
+	refs := s.queryRefAssets2(ctx, `
 		SELECT t.kind, t.name, t.url FROM (
 			SELECT sar.asset_kind::text AS kind, COALESCE(c.name, sc.base_name, p.name, '') AS name,
 			       COALESCE(cv.main_image_url, sc.main_image_url, p.main_image_url, '') AS url,
@@ -137,11 +113,18 @@ func (s *VideoStore) LoadShotRefAssets(ctx context.Context, shotID int64, narrat
 			LEFT JOIN scenes sc ON sar.asset_kind='SCENE' AND sc.id=sar.asset_id AND sc.deleted_at IS NULL
 			LEFT JOIN props p ON sar.asset_kind='PROP' AND p.id=sar.asset_id AND p.deleted_at IS NULL
 			WHERE sar.shot_id=$1
-		) t WHERE t.name != '' AND t.url != '' ORDER BY t.ord, t.rid`, shotID)
+			UNION ALL
+			SELECT 'SCENE' AS kind, sc.base_name AS name, COALESCE(sc.main_image_url, '') AS url,
+			       2 AS ord, nal.id AS rid
+			FROM nu_asset_links nal
+			JOIN scenes sc ON nal.asset_kind='SCENE' AND sc.id=nal.asset_id AND sc.deleted_at IS NULL
+			WHERE nal.narrative_unit_id=$2 AND nal.asset_kind='SCENE'
+			  AND NOT EXISTS (SELECT 1 FROM shot_asset_refs x WHERE x.shot_id=$1 AND x.asset_kind='SCENE')
+		) t WHERE t.name != '' AND t.url != '' ORDER BY t.ord, t.rid`, shotID, narrativeUnitID)
 	if len(refs) > 0 {
 		return refs
 	}
-	// 2. 回退叙事单元级
+	// 镜头级完全无关联 → 整组继承叙事单元级
 	return s.queryRefAssets(ctx, `
 		SELECT t.kind, t.name, t.url FROM (
 			SELECT nal.asset_kind::text AS kind, COALESCE(c.name, sc.base_name, p.name, '') AS name,
@@ -176,10 +159,28 @@ func (s *VideoStore) queryRefAssets(ctx context.Context, sql string, arg int64) 
 	return out
 }
 
-// LoadShotAssetNames 加载镜头关联资产名（镜头级 shot_asset_refs 优先，回退单元级 nu_asset_links；
-// 对齐 LuxReal @资产引用：视频 prompt 中以 @名 显式标记引用资产）。
+// queryRefAssets2 双参版本（镜头级 shot_id + 单元级 narrative_unit_id 场景补齐查询）。
+func (s *VideoStore) queryRefAssets2(ctx context.Context, sql string, shotID, narrativeUnitID int64) []agent.RefAsset {
+	rows, err := s.pool.Query(ctx, sql, shotID, narrativeUnitID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := make([]agent.RefAsset, 0)
+	for rows.Next() {
+		var r agent.RefAsset
+		if err := rows.Scan(&r.Kind, &r.Name, &r.URL); err != nil {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// LoadShotAssetNames 加载镜头关联资产名（镜头级 shot_asset_refs 优先；缺 SCENE 时从 nu_asset_links 补齐，
+// 口径与 LoadShotRefs 的场景补齐一致；对齐 LuxReal @资产引用：视频 prompt 中以 @名 显式标记引用资产）。
 func (s *VideoStore) LoadShotAssetNames(ctx context.Context, shotID int64, narrativeUnitID int64) []string {
-	names := s.queryAssetNames(ctx, `
+	names := s.queryAssetNames2(ctx, `
 		SELECT t.name FROM (
 			SELECT COALESCE(c.name, sc.base_name, p.name, '') AS name,
 			       CASE sar.asset_kind WHEN 'CHARACTER' THEN 1 WHEN 'SCENE' THEN 2 ELSE 3 END AS ord, sar.id AS rid
@@ -188,7 +189,13 @@ func (s *VideoStore) LoadShotAssetNames(ctx context.Context, shotID int64, narra
 			LEFT JOIN scenes sc ON sar.asset_kind='SCENE' AND sc.id=sar.asset_id AND sc.deleted_at IS NULL
 			LEFT JOIN props p ON sar.asset_kind='PROP' AND p.id=sar.asset_id AND p.deleted_at IS NULL
 			WHERE sar.shot_id=$1
-		) t WHERE t.name != '' ORDER BY t.ord, t.rid`, shotID)
+			UNION ALL
+			SELECT sc.base_name AS name, 2 AS ord, nal.id AS rid
+			FROM nu_asset_links nal
+			JOIN scenes sc ON nal.asset_kind='SCENE' AND sc.id=nal.asset_id AND sc.deleted_at IS NULL
+			WHERE nal.narrative_unit_id=$2 AND nal.asset_kind='SCENE'
+			  AND NOT EXISTS (SELECT 1 FROM shot_asset_refs x WHERE x.shot_id=$1 AND x.asset_kind='SCENE')
+		) t WHERE t.name != '' ORDER BY t.ord, t.rid`, shotID, narrativeUnitID)
 	if len(names) > 0 {
 		return names
 	}
@@ -206,6 +213,26 @@ func (s *VideoStore) LoadShotAssetNames(ctx context.Context, shotID int64, narra
 
 func (s *VideoStore) queryAssetNames(ctx context.Context, sql string, arg int64) []string {
 	rows, err := s.pool.Query(ctx, sql, arg)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	out := make([]string, 0, 4)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil || name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+// queryAssetNames2 双参版本（镜头级 shot_id + 单元级 narrative_unit_id 场景补齐查询）。
+func (s *VideoStore) queryAssetNames2(ctx context.Context, sql string, shotID, narrativeUnitID int64) []string {
+	rows, err := s.pool.Query(ctx, sql, shotID, narrativeUnitID)
 	if err != nil {
 		return nil
 	}

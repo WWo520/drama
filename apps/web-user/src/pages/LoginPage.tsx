@@ -8,6 +8,7 @@ import { Eye, EyeOff, Lock, ShieldCheck, Smile, User } from "lucide-react";
 
 import { api, ApiError, errorMessage } from "@duanju/api-client";
 import { useAuthStore } from "../stores/authStore";
+import { clearCachedGet } from "../utils/cachedApi";
 import "./login.css";
 
 interface AuthResp {
@@ -41,9 +42,9 @@ export default function LoginPage() {
   const setAuth = useAuthStore((s) => s.setAuth);
   const particlesRef = useRef<HTMLDivElement>(null);
 
-  // 页面标题（对齐设计稿 title"登录注册 - Empty Broken"）
+  // 页面标题
   useEffect(() => {
-    document.title = "登录注册 - Empty Broken";
+    document.title = "登录注册 - 导演台";
   }, []);
 
   // 浮动粒子（照搬设计稿：35 个，含 p-large/p-blue 变体、随机尺寸 2~7px、透明度 0.3~1.0）
@@ -121,6 +122,7 @@ export default function LoginPage() {
           : await api.post<AuthResp>("/auth/register", { ...parsed, password, nickname: nickname.trim() || "创作者" });
       if (remember) localStorage.setItem("access_token", resp.access_token);
       else sessionStorage.setItem("access_token", resp.access_token);
+      clearCachedGet(); // 缓存无用户维度，切换账号登录后防止读到上一账号数据
       setAuth(resp.access_token, {
         user_uuid: resp.user.user_id,
         email: resp.user.email ?? "",
@@ -168,7 +170,7 @@ export default function LoginPage() {
               <polygon points="5 3 19 12 5 21 5 3" />
             </svg>
           </div>
-          <span className="logo-text">Empty Broken</span>
+          <span className="logo-text">导演台</span>
         </div>
         <h1 className="hero-title">
           用 AI 重塑

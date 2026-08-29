@@ -50,7 +50,7 @@ func (s *Service) Create(c *gin.Context, req *CreateProjectReq) {
 			return
 		}
 	}
-	p, err := s.repo.CreateProject(c.Request.Context(), spaceID, uid, spaceUUID, req.Title, req.SourceScriptText)
+	p, err := s.repo.CreateProject(c.Request.Context(), spaceID, uid, spaceUUID, req.Title, req.SourceScriptText, req.Config)
 	if err != nil {
 		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "创建项目失败")
 		return
@@ -115,6 +115,30 @@ func (s *Service) Get(c *gin.Context, projectUUID string) {
 		return
 	}
 	httpx.OK(c, toProjectDTO(p))
+}
+
+// UpdateConfig 合并更新项目配置快照（PATCH /projects/:id/config）。
+func (s *Service) UpdateConfig(c *gin.Context, projectUUID string) {
+	uid := userID(c)
+	if uid == 0 {
+		httpx.Fail(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "请先登录")
+		return
+	}
+	var patch map[string]any
+	if err := c.ShouldBindJSON(&patch); err != nil || len(patch) == 0 {
+		httpx.Fail(c, http.StatusBadRequest, httpx.CodeBadRequest, "参数错误")
+		return
+	}
+	p, err := s.repo.GetProject(c.Request.Context(), projectUUID, uid)
+	if err != nil {
+		httpx.Fail(c, http.StatusNotFound, httpx.CodeProjectNotFound, "项目不存在或无权限")
+		return
+	}
+	if err := s.repo.UpsertProjectConfig(c.Request.Context(), p.ID, patch); err != nil {
+		httpx.Fail(c, http.StatusInternalServerError, httpx.CodeInternal, "更新项目配置失败")
+		return
+	}
+	httpx.OK(c, gin.H{"updated": true})
 }
 
 // Update 更新项目（3.0.4）。
@@ -233,6 +257,12 @@ func (s *Service) SplitScript(c *gin.Context, projectUUID string) {
 		return
 	default:
 		httpx.Fail(c, http.StatusConflict, 30001, "当前项目阶段不允许重新拆分（请回到资产阶段前操作）")
+		return
+	}
+	// 任务级互斥兜底：项目状态可能与任务状态脱节（手工修数/回滚竞态），
+	// 直接查任务表防止同项目拆分任务叠加引发 LLM 额度挤兑
+	if active, err := s.repo.HasActiveSplitTask(c.Request.Context(), p.ID); err == nil && active {
+		httpx.Fail(c, http.StatusConflict, 30001, "该剧本已有拆分任务进行中，请等待完成后再试")
 		return
 	}
 	// 状态机原子转移
@@ -1170,6 +1200,7 @@ func toProjectDTO(p *ProjectRow) ProjectDTO {
 		Status:            p.Status,
 		TotalEpisodeCount: p.TotalEpisodeCount,
 		TotalDurationSec:  p.TotalDurationSec,
+		Config:            p.Config,
 		LastOpenedAt:      p.LastOpenedAt,
 		CreatedAt:         p.CreatedAt,
 		UpdatedAt:         p.UpdatedAt,

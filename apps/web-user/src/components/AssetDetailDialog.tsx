@@ -11,6 +11,7 @@ import { api, assetsApi } from "@duanju/api-client";
 
 import { matchTaskTypes, useWsDrivenPoll } from "../hooks/useWsDrivenPoll";
 import { cachedGet } from "../utils/cachedApi";
+import { getGlobalStyle, setGlobalStyle, STYLE_CHANGED_EVENT } from "../stores/styleStore";
 
 // 公共风格库（LuxReal 27 项对齐）
 const STYLES = [
@@ -73,6 +74,19 @@ interface ModelOption {
   name: string;
   cost_points: number;
   enabled: boolean;
+}
+
+// 资产库导入项（角色/场景/道具主图 + 角色形象变体图）
+interface LibraryItem {
+  url: string;
+  label: string;
+  group: "角色" | "场景" | "道具";
+}
+// 角色精简项（资产库导入用，含形象变体）
+interface CharacterLite {
+  name: string;
+  main_image_url: string;
+  variants?: { name: string; main_image_url: string }[];
 }
 
 // presign 直传 → 回执 → 返回可访问 URL
@@ -157,7 +171,7 @@ export default function AssetDetailDialog({
   const [prompt, setPrompt] = useState("");
   const [useDefaultComp, setUseDefaultComp] = useState(true);
   const [modelCode, setModelCode] = useState("");
-  const [styleName, setStyleName] = useState("通用写实");
+  const [styleName, setStyleName] = useState(() => getGlobalStyle().name);
   const [ratio, setRatio] = useState(kind === "PROP" ? "1:1" : "16:9");
   const [resolution, setResolution] = useState("1K");
   const [sceneTod, setSceneTod] = useState(""); // 场景时段（SCENE）
@@ -175,6 +189,49 @@ export default function AssetDetailDialog({
   const [modelOpen, setModelOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const refFileRef = useRef<HTMLInputElement>(null);
+
+  // 参考图来源菜单（加号）：本地上传 / 资产库导入
+  const [refMenuOpen, setRefMenuOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
+
+  // 加载资产库图片（角色含形象变体 / 场景 / 道具主图），供「通过资产库导入」选择
+  const openLibrary = async () => {
+    setLibraryOpen(true);
+    if (libraryItems.length) return;
+    setLibraryLoading(true);
+    try {
+      const [chars, scenes, props] = await Promise.all([
+        assetsApi.characters(episodeId).catch(() => ({ items: [] as CharacterLite[] })),
+        assetsApi.scenes(episodeId).catch(() => ({ items: [] })),
+        assetsApi.props(episodeId).catch(() => ({ items: [] })),
+      ]);
+      const items: LibraryItem[] = [];
+      for (const c of (chars as { items: CharacterLite[] }).items || []) {
+        if (c.main_image_url) items.push({ url: c.main_image_url, label: c.name, group: "角色" });
+        for (const v of c.variants || []) {
+          if (v.main_image_url) items.push({ url: v.main_image_url, label: `${c.name}·${v.name}`, group: "角色" });
+        }
+      }
+      for (const s of (scenes as { items: { base_name: string; main_image_url: string }[] }).items || []) {
+        if (s.main_image_url) items.push({ url: s.main_image_url, label: s.base_name, group: "场景" });
+      }
+      for (const p of (props as { items: { name: string; main_image_url: string }[] }).items || []) {
+        if (p.main_image_url) items.push({ url: p.main_image_url, label: p.name, group: "道具" });
+      }
+      setLibraryItems(items);
+    } finally {
+      setLibraryLoading(false);
+    }
+  };
+
+  // 从资产库导入参考图（去重）
+  const importFromLibrary = (item: LibraryItem) => {
+    setRefImages((prev) => (prev.includes(item.url) ? prev : [...prev, item.url]));
+    toast.success("已从资产库导入参考图");
+    setLibraryOpen(false);
+  };
 
   const isChar = kind === "CHARACTER_VARIANT";
 
@@ -221,6 +278,33 @@ export default function AssetDetailDialog({
       .then((r) => setModels((r.items || []).filter((m) => m.enabled)))
       .catch(() => { /* 回退空列表 */ });
   }, []);
+
+  // 风格库真源（GET /style-library，与首页同源；失败回退公共风格库常量）
+  const [styleOptions, setStyleOptions] = useState<string[]>(STYLES);
+  useEffect(() => {
+    void cachedGet<{ items: { style_code: string; name: string }[] }>("/style-library", 60000)
+      .then((r) => {
+        const names = (r.items || []).map((s) => s.name).filter(Boolean);
+        if (names.length) setStyleOptions(names);
+      })
+      .catch(() => { /* 回退 STYLES */ });
+  }, []);
+
+  // 全局风格同步：首页/其他页面切换风格时实时跟随（双向：本页切换也写回全局）
+  useEffect(() => {
+    const onStyleChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ name: string }>).detail;
+      if (detail?.name) setStyleName(detail.name);
+    };
+    window.addEventListener(STYLE_CHANGED_EVENT, onStyleChanged);
+    return () => window.removeEventListener(STYLE_CHANGED_EVENT, onStyleChanged);
+  }, []);
+
+  const changeStyle = (name: string) => {
+    setStyleName(name);
+    setStyleOpen(false);
+    setGlobalStyle({ code: "", name });
+  };
 
   const showReset = !!data?.edited_prompt || (data ? prompt !== data.default_prompt : false);
 
@@ -421,49 +505,6 @@ export default function AssetDetailDialog({
      ? (data?.variants?.find((v) => v.id === activeVariant)?.main_image_url || "")
      : (data?.main_image_url || "");
 
-   // ---- 形象视图管理 + 删除形象（对齐 LuxReal「未命名形象」编辑区） ----
-   const activeVariantData = isChar
-     ? (data?.variants?.find((v) => v.id === activeVariant) ?? data?.variants?.[0] ?? null)
-     : null;
-   const variantViews = Array.isArray(activeVariantData?.multi_view_images) ? activeVariantData.multi_view_images : [];
-   const viewFileRef = useRef<HTMLInputElement>(null);
-
-   const addVariantView = async (file: File) => {
-     if (!activeVariantData) return;
-     try {
-       const url = await uploadFile(file);
-       await api.post(`/character-variants/${activeVariantData.id}/views`, { image_url: url });
-       toast.success("已新增视图");
-       void loadData();
-     } catch {
-       toast.error("新增视图失败");
-     }
-   };
-
-   const deleteVariantView = async (idx: number) => {
-     if (!activeVariantData) return;
-     try {
-       await api.delete(`/character-variants/${activeVariantData.id}/views/${idx}`);
-       void loadData();
-     } catch {
-       toast.error("删除视图失败");
-     }
-   };
-
-   const deleteVariant = async () => {
-     if (!activeVariantData) return;
-     if (!window.confirm(`确定删除形象「${activeVariantData.name || "未命名形象"}」吗？此操作不可恢复。`)) return;
-     try {
-       await api.delete(`/character-variants/${activeVariantData.id}`);
-       toast.success("已删除形象");
-       setActiveVariant(null);
-       void loadData();
-       onChanged();
-     } catch {
-       toast.error("删除形象失败");
-     }
-   };
-
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" onClick={onClose}>
       <div
@@ -568,13 +609,35 @@ export default function AssetDetailDialog({
             {/* 提示词区 */}
             <div className="rounded-xl bg-[#1E1E24] border border-[#2A2A35] p-3 flex flex-col gap-2">
               <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  onClick={() => refFileRef.current?.click()}
-                  className="w-7 h-7 rounded border border-dashed border-[#3A3A4A] flex items-center justify-center text-[#8B8B9A] hover:border-[#4C7FF8] hover:text-[#4C7FF8]"
-                  title="添加参考图"
-                >
-                  <Plus size={14} />
-                </button>
+                {/* 加号菜单：本地上传参考图 / 通过资产库导入 */}
+                <div className="relative">
+                  <button
+                    onClick={() => setRefMenuOpen((v) => !v)}
+                    className="w-7 h-7 rounded border border-dashed border-[#3A3A4A] flex items-center justify-center text-[#8B8B9A] hover:border-[#4C7FF8] hover:text-[#4C7FF8]"
+                    title="添加参考图"
+                  >
+                    <Plus size={14} />
+                  </button>
+                  {refMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setRefMenuOpen(false)} />
+                      <div className="absolute top-full mt-1 left-0 w-44 rounded-lg bg-[#1E1E24] border border-[#2A2A35] shadow-xl z-20 py-1">
+                        <button
+                          onClick={() => { setRefMenuOpen(false); refFileRef.current?.click(); }}
+                          className="block w-full text-left px-3 py-2 text-xs text-white/80 hover:bg-white/5"
+                        >
+                          本地上传参考图
+                        </button>
+                        <button
+                          onClick={() => { setRefMenuOpen(false); void openLibrary(); }}
+                          className="block w-full text-left px-3 py-2 text-xs text-white/80 hover:bg-white/5"
+                        >
+                          通过资产库导入
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
                 {refImages.map((u, i) => (
                   <span key={u} className="flex items-center gap-1 px-1.5 py-1 rounded bg-[#2A2A4A] text-[#4C7FF8] text-xs">
                     <img src={u} alt="" className="w-5 h-5 rounded object-cover" />
@@ -611,45 +674,6 @@ export default function AssetDetailDialog({
                 )}
               </div>
             </div>
-
-            {/* 形象视图（多视图管理）+ 删除形象（对齐 LuxReal「未命名形象」编辑区） */}
-            {isChar && activeVariantData && (
-              <div className="rounded-xl bg-[#1E1E24] border border-[#2A2A35] p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-[#8B8B9A]">形象视图</span>
-                  <button
-                    onClick={() => viewFileRef.current?.click()}
-                    className="px-2 py-1 rounded bg-[#4C7FF8]/15 text-xs text-[#4C7FF8] hover:bg-[#4C7FF8]/25 flex items-center gap-1"
-                  >
-                    <Plus size={12} /> 新增视图
-                  </button>
-                </div>
-                {variantViews.length === 0 ? (
-                  <div className="text-xs text-[#3A3A4A] py-4 text-center">暂无视图，可「新增视图」为该形象添加多张视图</div>
-                ) : (
-                  <div className="grid grid-cols-3 gap-2">
-                    {variantViews.map((u, i) => (
-                      <div key={`${u}-${i}`} className="relative aspect-square rounded overflow-hidden bg-[#16161C] border border-[#2A2A35] group">
-                        <img src={u} alt="" className="w-full h-full object-cover" />
-                        <button
-                          onClick={() => void deleteVariantView(i)}
-                          className="absolute top-1 right-1 w-5 h-5 rounded bg-black/60 text-white/80 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="删除视图"
-                        >
-                          <X size={10} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <button
-                  onClick={() => void deleteVariant()}
-                  className="mt-3 w-full px-3 py-1.5 rounded-lg border border-[#3A3A4A] text-xs text-red-400/80 hover:border-red-400/50 hover:text-red-400 transition-colors"
-                >
-                  删除当前形象
-                </button>
-              </div>
-            )}
 
             {/* 底部工具栏 */}
             <div className="flex items-center gap-2 flex-wrap">
@@ -688,8 +712,8 @@ export default function AssetDetailDialog({
                 </button>
                 {styleOpen && (
                   <div className="absolute bottom-full mb-1 left-0 w-40 max-h-56 overflow-auto rounded-lg bg-[#1E1E24] border border-[#2A2A35] shadow-xl z-10">
-                    {STYLES.map((s) => (
-                      <button key={s} onClick={() => { setStyleName(s); setStyleOpen(false); }} className="block w-full text-left px-3 py-1.5 text-xs text-white/80 hover:bg-white/5">
+                    {styleOptions.map((s) => (
+                      <button key={s} onClick={() => changeStyle(s)} className="block w-full text-left px-3 py-1.5 text-xs text-white/80 hover:bg-white/5">
                         {s}
                       </button>
                     ))}
@@ -880,14 +904,55 @@ export default function AssetDetailDialog({
           e.target.value = "";
         }}
       />
-      <input
-        ref={viewFileRef} type="file" accept="image/*" className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) void addVariantView(f);
-          e.target.value = "";
-        }}
-      />
+
+      {/* 资产库导入弹层（选择角色/场景/道具图片作为参考图） */}
+      {libraryOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-6" onClick={() => setLibraryOpen(false)}>
+          <div
+            className="bg-[#16161C] border border-[#2A2A35] rounded-2xl w-full max-w-2xl max-h-[70vh] flex flex-col shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[#2A2A35]">
+              <span className="text-white font-semibold text-sm">从资产库导入参考图</span>
+              <button onClick={() => setLibraryOpen(false)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#8B8B9A] hover:bg-white/5 hover:text-white">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto min-h-0 p-4">
+              {libraryLoading ? (
+                <div className="text-center text-xs text-[#6B7088] py-10">加载资产库中…</div>
+              ) : libraryItems.length === 0 ? (
+                <div className="text-center text-xs text-[#3A3A4A] py-10">资产库暂无可用图片</div>
+              ) : (
+                (["角色", "场景", "道具"] as const).map((group) => {
+                  const items = libraryItems.filter((it) => it.group === group);
+                  if (!items.length) return null;
+                  return (
+                    <div key={group} className="mb-4 last:mb-0">
+                      <div className="text-xs text-[#8B8B9A] mb-2">{group}</div>
+                      <div className="grid grid-cols-5 gap-2">
+                        {items.map((it) => (
+                          <button
+                            key={`${group}-${it.url}`}
+                            onClick={() => importFromLibrary(it)}
+                            className="relative aspect-square rounded-lg overflow-hidden border border-[#2A2A35] hover:border-[#4C7FF8] transition-colors group"
+                            title={it.label}
+                          >
+                            <img src={it.url} alt={it.label} className="w-full h-full object-cover" />
+                            <span className="absolute bottom-0 inset-x-0 px-1 py-0.5 bg-black/60 text-[10px] text-white/80 truncate opacity-0 group-hover:opacity-100 transition-opacity">
+                              {it.label}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

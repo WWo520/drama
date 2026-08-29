@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { api } from "@duanju/api-client";
 import { useAuthStore } from "../stores/authStore";
 import { setAvatarUrlCache, useAvatarUrl } from "../hooks/useAvatarUrl";
+import { clearCachedGet } from "../utils/cachedApi";
 
 interface SpaceItem {
   space_id: string;
@@ -74,6 +75,7 @@ export default function ProfilePanel({ open, onClose }: { open: boolean; onClose
     } catch {
       /* 登出失败也清本地态 */
     }
+    clearCachedGet(); // 缓存无用户维度，防止下个账号读到本账号数据
     clearAuth();
     localStorage.removeItem("access_token");
     sessionStorage.removeItem("access_token");
@@ -312,6 +314,16 @@ export default function ProfilePanel({ open, onClose }: { open: boolean; onClose
           <FileText size={16} />
           平台条款与条件
         </a>
+      </div>
+
+      {/* 底部备案信息（对齐 LuxReal 官网页脚规范） */}
+      <div className="pp-footer">
+        <div>© 2026 导演台</div>
+        <div>
+          <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">京ICP备2026000000号-1</a>
+          <span className="pp-footer-sep">|</span>
+          <span>京公网安备 11010502099999号</span>
+        </div>
       </div>
     </div>
   );

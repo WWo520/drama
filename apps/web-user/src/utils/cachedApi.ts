@@ -27,3 +27,8 @@ export function cachedGet<T>(url: string, ttlMs = 30000): Promise<T> {
 export function invalidateCachedGet(url: string) {
   cache.delete(url);
 }
+
+/** 登录/登出时清空全部缓存（缓存 key 无用户维度，切换账号后防止读到上一账号数据） */
+export function clearCachedGet() {
+  cache.clear();
+}

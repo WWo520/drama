@@ -41,6 +41,8 @@ export interface CreateProjectReq {
   title: string;
   source_script_text?: string;
   tags?: string[];
+  /** 项目配置快照（模型/分辨率/时长/风格），贯穿 Step2/Step3 默认值 */
+  config?: Record<string, unknown>;
 }
 
 // 状态 → 徽章文案/颜色（前端映射，03 A.1）
@@ -80,4 +82,7 @@ export const projectsApi = {
   restore: (projectId: string) => api.post<null>(`/projects/${projectId}`),
   // 3.0.7 最近打开
   touch: (projectId: string) => api.post<null>(`/projects/${projectId}/last-opened`),
+  // 项目配置快照合并更新（PATCH /projects/:id/config）
+  updateConfig: (projectId: string, patch: Record<string, unknown>) =>
+    api.patch<{ updated: boolean }>(`/projects/${projectId}/config`, patch),
 };

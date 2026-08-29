@@ -736,7 +736,7 @@ export default function AdminAuditPage() {
 
       {/* Footer */}
       <div className="mt-8 pt-4 border-t border-[#2A2A3E] text-center">
-        <p className="text-xs text-text-muted">Empty Broken Admin v1.0 · © 2025 Empty Broken 创作平台</p>
+        <p className="text-xs text-text-muted">导演台 Admin v1.0 · © 2025 导演台创作平台</p>
       </div>
     </>
   );

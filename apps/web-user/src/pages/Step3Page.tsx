@@ -119,6 +119,16 @@ const MODEL_OPTIONS = [
 ];
 // MiniMax H3 分辨率枚举（V2 接口仅 768P/2K；自部署仅 768P，2K 需官方 API）
 const H3_RESOLUTIONS = ["768P", "2K"];
+// 后端枚举 → 前端显示值（项目配置快照可能存 P720 等枚举）
+const normRes = (v?: string) =>
+  v === "P480" ? "480P" : v === "P720" ? "720P" : v === "P1080" ? "1080P" : v;
+// 首页/管理端模型 model_key → 弹窗选项 key（Seedance 系命名差异；MiniMax-H3 两边一致）
+const VIDEO_MODEL_KEY_ALIAS: Record<string, string> = {
+  seedance25: "2.5",
+  seedance20: "2.0",
+  seedance15: "1.5",
+};
+const resolveModelKey = (v?: string) => (v ? VIDEO_MODEL_KEY_ALIAS[v] ?? v : "");
 
 // 卡片状态徽章（对齐设计稿配色）
 function CardStatusBadge({ status }: { status: string }) {
@@ -540,6 +550,8 @@ function GenVideoModal({
   submitting,
   onClose,
   onConfirm,
+  defaultModel,
+  defaultResolution,
 }: {
   beat: BeatSummary;
   cards: VideoCard[];
@@ -547,9 +559,22 @@ function GenVideoModal({
   submitting: boolean;
   onClose: () => void;
   onConfirm: (opts: { resolution?: string; video_model?: string; model_key?: string; redo?: boolean }) => void;
+  /** 项目配置快照默认值（video_model/resolution） */
+  defaultModel?: string;
+  defaultResolution?: string;
 }) {
-  const [model, setModel] = useState("2.5");
-  const [resolution, setResolution] = useState("1080P");
+  // 初始值：项目配置快照 → 未配置/不合法时回退原默认（Seedance 2.5 / 1080P）
+  const initModel =
+    resolveModelKey(defaultModel) && MODEL_OPTIONS.some((m) => m.key === resolveModelKey(defaultModel))
+      ? resolveModelKey(defaultModel)
+      : "2.5";
+  const initResolution = (() => {
+    const r = normRes(defaultResolution);
+    const list = initModel === "MiniMax-H3" ? H3_RESOLUTIONS : ["480P", "720P", "1080P"];
+    return r && list.includes(r) ? r : initModel === "MiniMax-H3" ? "768P" : "1080P";
+  })();
+  const [model, setModel] = useState(initModel);
+  const [resolution, setResolution] = useState(initResolution);
   const [fps, setFps] = useState("24fps");
   const [advOpen, setAdvOpen] = useState(true);
   const [adv, setAdv] = useState({ lens: true, box3d: false, subtitle: false, voice: false });
@@ -800,6 +825,8 @@ function BatchVideoModal({
   submitting,
   onClose,
   onConfirm,
+  defaultModel,
+  defaultResolution,
 }: {
   beats: BeatSummary[];
   cardsMap: Record<string, VideoCard[]>;
@@ -807,10 +834,23 @@ function BatchVideoModal({
   submitting: boolean;
   onClose: () => void;
   onConfirm: (ids: string[], opts: { resolution?: string; model_key?: string; video_model?: string }) => void;
+  /** 项目配置快照默认值（video_model/resolution） */
+  defaultModel?: string;
+  defaultResolution?: string;
 }) {
+  // 初始值：项目配置快照 → 未配置/不合法时回退原默认（Seedance 2.5 / 1080P）
+  const initModel =
+    resolveModelKey(defaultModel) && MODEL_OPTIONS.some((m) => m.key === resolveModelKey(defaultModel))
+      ? resolveModelKey(defaultModel)
+      : MODEL_OPTIONS[0].key;
+  const initResolution = (() => {
+    const r = normRes(defaultResolution);
+    const list = initModel === "MiniMax-H3" ? H3_RESOLUTIONS : ["480P", "720P", "1080P"];
+    return r && list.includes(r) ? r : initModel === "MiniMax-H3" ? "768P" : "1080P";
+  })();
   const [selected, setSelected] = useState<Set<string>>(new Set(defaultSelected));
-  const [model, setModel] = useState(MODEL_OPTIONS[0].key);
-  const [resolution, setResolution] = useState("1080P");
+  const [model, setModel] = useState(initModel);
+  const [resolution, setResolution] = useState(initResolution);
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -957,6 +997,15 @@ function BatchVideoModal({
 export default function Step3Page() {
   const { projectId = "" } = useParams();
   const [proj, setProj] = useState<ProjectDetail | null>(null);
+  // 项目配置快照 → 视频生成弹窗默认模型/分辨率
+  const cfgVideoModel = (() => {
+    const v = (proj?.config as Record<string, unknown> | undefined)?.video_model;
+    return typeof v === "string" ? v : "";
+  })();
+  const cfgResolution = (() => {
+    const v = (proj?.config as Record<string, unknown> | undefined)?.resolution;
+    return typeof v === "string" ? v : "";
+  })();
   const [episodes, setEpisodes] = useState<EpisodeLite[]>([]);
   const [activeEpisode, setActiveEpisode] = useState<string | null>(null);
   const [beats, setBeats] = useState<BeatSummary[]>([]);
@@ -1234,6 +1283,15 @@ export default function Step3Page() {
       const r = await videoApi.generateBeat(genTarget.beat_id, opts);
       toast.success(`已提交 ${r.created}/${r.total} 个成片卡视频任务`);
       setGenTarget(null);
+      // 回写项目配置快照：弹窗所选模型/分辨率成为本项目后续默认值
+      if (opts?.model_key || opts?.resolution) {
+        void projectsApi
+          .updateConfig(projectId, {
+            ...(opts.model_key ? { video_model: opts.model_key } : {}),
+            ...(opts.resolution ? { resolution: normRes(opts.resolution) } : {}),
+          })
+          .catch(() => {});
+      }
       setExpandedIds((prev) => new Set(prev).add(genTarget.beat_id));
       void loadCards(beats);
       try {
@@ -1523,6 +1581,15 @@ export default function Step3Page() {
         toast.success(
           `已为 ${unitCount} 个单元提交视频生成${plannedCount > 0 ? `（自动规划 ${plannedCount} 个）` : ""}，共 ${createdTotal} 个任务，每张完成即实时上屏`,
         );
+        // 回写项目配置快照：弹窗所选模型/分辨率成为本项目后续默认值
+        if (opts?.model_key || opts?.resolution) {
+          void projectsApi
+            .updateConfig(projectId, {
+              ...(opts.model_key ? { video_model: opts.model_key } : {}),
+              ...(opts.resolution ? { resolution: normRes(opts.resolution) } : {}),
+            })
+            .catch(() => {});
+        }
       }
       setBatchVideoTarget(null);
       void loadCards(beats);
@@ -1594,12 +1661,20 @@ export default function Step3Page() {
       {/* Settings Bar（视频模型/分辨率/比例/风格 + 高级设置） */}
       <div className="flex items-center justify-between px-6 py-2 flex-shrink-0">
         <div className="flex items-center gap-3 mx-auto" style={{ maxWidth: "85%", width: "100%" }}>
-          {[
-            { label: "视频模型", value: "Seedance 2.5" },
-            { label: "分辨率", value: "1080P" },
-            { label: "比例", value: "16:9" },
-            { label: "风格", value: proj?.tags?.[0] || "武侠古风" },
-          ].map((it) => (
+          {(() => {
+            // 项目配置快照 → 设置条显示值（与生成弹窗默认值同源）
+            const cfgStr = (k: string) => {
+              const v = (proj?.config as Record<string, unknown> | undefined)?.[k];
+              return typeof v === "string" ? v : "";
+            };
+            const videoModelName = MODEL_OPTIONS.find((m) => m.key === resolveModelKey(cfgVideoModel))?.name ?? (cfgVideoModel || "Seedance 2.5");
+            return [
+              { label: "视频模型", value: videoModelName },
+              { label: "分辨率", value: normRes(cfgResolution) || "1080P" },
+              { label: "比例", value: cfgStr("aspect_ratio") || "16:9" },
+              { label: "风格", value: cfgStr("style_name") || proj?.tags?.[0] || "默认风格" },
+            ];
+          })().map((it) => (
             <div key={it.label} className="flex items-center gap-2">
               <span className="text-xs text-[#6B7088]">{it.label}</span>
               <div
@@ -2035,6 +2110,8 @@ export default function Step3Page() {
           cardsMap={cardsMap}
           defaultSelected={batchVideoTarget}
           submitting={batchVideoSubmitting}
+          defaultModel={cfgVideoModel}
+          defaultResolution={cfgResolution}
           onClose={() => !batchVideoSubmitting && setBatchVideoTarget(null)}
           onConfirm={(ids, opts) => void confirmBatchVideos(ids, opts)}
         />

@@ -81,8 +81,16 @@ const http = axios.create({
   withCredentials: true, // refresh_token HttpOnly Cookie
 });
 
-// 请求拦截：注入 access_token
+// 应用域标记：用户端/管理端同 host 部署时（浏览器 Cookie 按 host 隔离、不区分端口），
+// 后端按 X-App-Realm 头将 refresh Cookie 隔离为不同名字，防止两端登录互相覆盖导致串号。
+let appRealm = "user";
+export function setAppRealm(realm: "user" | "admin") {
+  appRealm = realm;
+}
+
+// 请求拦截：注入 access_token + X-App-Realm
 http.interceptors.request.use((config) => {
+  config.headers["X-App-Realm"] = appRealm;
   const token = localStorage.getItem("access_token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -98,7 +106,7 @@ async function refreshAccessToken(): Promise<string | null> {
     const resp = await axios.post<ApiResponse<{ access_token: string }>>(
       "/api/v1/auth/refresh",
       {},
-      { withCredentials: true },
+      { withCredentials: true, headers: { "X-App-Realm": appRealm } },
     );
     if (resp.data.code === 0 && resp.data.data) {
       localStorage.setItem("access_token", resp.data.data.access_token);

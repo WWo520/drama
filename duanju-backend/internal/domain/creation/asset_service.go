@@ -679,6 +679,8 @@ func (s *AssetService) BatchGenerate(c *gin.Context, req *BatchGenerateReq) {
 	created := 0
 	frozen := 0
 	freezeNeeded := 0
+	// 风格兜底链末端：批量弹窗未选风格时回退项目配置快照（首页/Step2 所选风格贯穿资产生成）
+	projStyle, _ := s.repo.ProjectStyleName(c.Request.Context(), projectID)
 	count := req.PerAssetCount
 	if count < 1 {
 		count = 1
@@ -692,18 +694,35 @@ func (s *AssetService) BatchGenerate(c *gin.Context, req *BatchGenerateReq) {
 		if reused, _ := s.ops.IsAssetUsedBefore(c.Request.Context(), projectID, item.Kind, item.TargetID); reused {
 			cost = 0
 		}
-		// 批量弹窗顶层模型/风格透传：item 无独立 gen 时套用全批量参数
+		// 批量弹窗顶层模型/风格透传：item 无独立 gen 时套用全批量参数。
+		// 风格兜底链：item 弹窗显式风格 > 批量弹窗公共风格 > 项目 config.style_name 快照；
+		// 全空时 asset_handler 注入写实兜底词（修复批量生成不带项目风格、与剧本类型不符）。
 		gen := item.Gen.toAgent()
-		if req.ModelCode != "" || req.StyleName != "" {
+		effStyle := req.StyleName
+		if effStyle == "" {
+			effStyle = projStyle
+		}
+		if (req.ModelCode != "" || effStyle != "") && gen == nil {
+			gen = &agent.GenParams{}
+		}
+		if gen != nil {
+			if gen.ModelCode == "" {
+				gen.ModelCode = req.ModelCode
+			}
+			if gen.StyleName == "" {
+				gen.StyleName = effStyle
+			}
+		}
+		// 批量生成（item 未携带弹窗参数）时角色默认开启三视图构图（对齐 asset_handler
+		// 「无弹窗参数默认开启」规则）：此前仅 gen 完全为 nil 时生效，批量弹窗一旦选择了
+		// 模型/风格（风格有默认值，恒非空），gen 被顶层参数拼装为非 nil 且
+		// UseDefaultComposition=false → 三视图模板未追加，角色图退化为 N 张独立单图。
+		// item.Gen 由单资产弹窗构造时按弹窗声明，勿覆盖。
+		if item.Kind == "CHARACTER_VARIANT" && item.Gen == nil {
 			if gen == nil {
 				gen = &agent.GenParams{}
 			}
-			if req.ModelCode != "" && gen.ModelCode == "" {
-				gen.ModelCode = req.ModelCode
-			}
-			if req.StyleName != "" && gen.StyleName == "" {
-				gen.StyleName = req.StyleName
-			}
+			gen.UseDefaultComposition = true
 		}
 		// 每张数量：同一目标创建 count 个任务（各自计费），实现「每资产多张」
 		for i := 0; i < count; i++ {

@@ -44,24 +44,32 @@ func outlineSystemPrompt(episodeDurationMin, minUnits, minEpisodes int) string {
 2. 叙事单元判据：叙事单元是一集之中按场景与画面连贯性切分出的最小拍摄单元——严禁把一整集剧情压缩成一个单元；切分下刀点优先选择：情绪转折点、说话人切换、动作段落结束、场景/时间切换；
 3. 每集目标时长约 %[1]d 分钟：每集叙事单元数量不少于 %[2]d 个（按目标时长折算），通常 4~8 个；
 4. 单元时长铁律：单个叙事单元 duration_sec 不得超过 30 秒；摘录字数÷4 ≈ duration_sec，摘录超过约 120 字的段落必然超 30 秒，必须继续切分为多个单元；
-5. script_original_text 必须从剧本原文中逐字摘录该单元对应的真实原文片段，不得改写、缩写或省略为空；全部叙事单元的摘录按剧情顺序拼接后必须完整覆盖剧本原文，不得遗漏任何段落；
+5. script_original_text 必须从剧本原文中逐字摘录该单元对应的真实原文片段，不得改写、缩写或省略为空；全部叙事单元的摘录按剧情顺序拼接后必须完整覆盖剧本原文，不得遗漏任何段落；episodes 与 narrative_units 必须严格按剧本从开头到结尾的先后顺序输出（先出现的先输出），禁止乱序或交错；
 6. 角色≤6 人、场景≤8 个；scenes 每项 code/base_name、props 每项 code/name 均不得为空；scenes 的 base_name 必须为 2~6 字场景简称（如"公寓"、"办公室"、"古玩街"，须与剧本中的地点称呼一致），禁止写成短语或长句描述（详细环境描述只写进 base_prompt）；
-7. 角色/场景/道具按集抽取：每项必须携带 origin_episode_id（首次出现集数的 1-based 序号），不区分叙事单元；category 仅限 WEAPON/CLOTHING_ACCESSORY/FOOD_DRINK/STATIONERY_BOOK/JEWELRY_ORNAMENT/FURNITURE_DECOR/ELECTRONIC_APPLIANCE/VEHICLE/TOOL_MUSICAL_INSTRUMENT/TOY/PLANT_FLOWER/ANIMAL_PET/LIGHTING_SOURCE/DOCUMENT_SCROLL_MAP/FLAG_BANNER/OTHER；
-8. 只输出合法 JSON，不要任何解释文字。`, episodeDurationMin, minUnits, minEpisodes)
+7. 角色/场景/道具按集抽取：每项必须携带 origin_episode_id（首次出现集数的 1-based 序号），不区分叙事单元；category 仅限 WEAPON/CLOTHING_ACCESSORY/FOOD_DRINK/STATIONERY_BOOK/JEWELRY_ORNAMENT/FURNITURE_DECOR/ELECTRONIC_APPLIANCE/VEHICLE/TOOL_MUSICAL_INSTRUMENT/TOY/PLANT_FLOWER/ANIMAL_PET/LIGHTING_SOURCE/DOCUMENT_SCROLL_MAP/FLAG_BANNER/OTHER，必须逐字取用，禁止自创类别；
+8. 输出顺序从头到尾推进、保证已输出部分始终是合法 JSON 的前缀（即使内容很长也不得中途放弃结构）；除 JSON 外不要任何解释文字。`, episodeDurationMin, minUnits, minEpisodes)
 }
 
 // shotDesignSystemPrompt 段B（镜头设计）：为单集叙事单元设计 shot_groups。
-func shotDesignSystemPrompt() string {
+// unitCount 为本集叙事单元总数——历史失败根因是模型漏掉个别 index 触发整集重跑
+// （如"交易达成-2 缺少镜头"），故把「units 恰好 N 项」作为首要硬约束传入。
+func shotDesignSystemPrompt(unitCount int) string {
 	return fmt.Sprintf(`你是短剧分镜专家。为给定一集的每个叙事单元设计镜头块（shot_groups），只输出合法 JSON：
 {"units":[{"index":单元序号,"shot_groups":[{"title":"镜头块标题","duration_sec":秒,"shots":[{"duration_sec":秒,"shot_size":"景别枚举","camera_movement":"运镜枚举","camera_angle":"视角枚举","subject_description":"主体描述","background_description":"背景描述","local_light_description":"光影描述","dialogue_text":"台词","ambient_sound":"环境音"}]}]}]}
+
+【首要硬约束——完整性】
+- 输入共有 %d 个叙事单元，输出的 units 数组必须恰好 %d 项：index=1,2,…,%d 逐个出现，一项不缺、一项不多；
+- 每个 index 的 shot_groups 至少 1 块（哪怕该单元只有一句台词或数秒画面，也要给出 1 个镜头块）；
+- 输出前逐项核对：units 的 index 集合 == {1,…,%d}，缺任何一个都视为无效输出。
 
 【规则】
 1. 每个叙事单元 1~3 个镜头块、每块 2~4 个镜头；块与镜头 duration_sec 必须为正整数；
 2. 块时长加总必须恰好等于所属单元的 duration_sec；
 3. %s；
-4. subject_description 40~120 字：人物肢体动作/表情微表情/服饰外观/与他人或道具的空间关系；background_description 写环境层次（近景陈设/中景动线/远景氛围）；local_light_description 写光源方向、明暗对比与面部落点；台词照抄摘录原文并以"角色名："开头（无台词时以纯画面动作撑满时长）；ambient_sound 写短文本（如"键盘敲击声渐弱"）；
-5. 镜头顺序遵循摘录的动作时间线；units 数组必须覆盖输入的每一个叙事单元（index 从 1 开始对应），不得遗漏；
-6. 不要任何解释文字，不要 markdown。`, enumRuleSentence())
+4. subject_description 40~120 字：人物肢体动作/表情微表情/服饰外观/与他人或道具的空间关系；background_description 开头必须写明本镜头所在场景地点（使用场景清单中的 base_name 称呼，如"餐厅内"），再写环境层次（近景陈设/中景动线/远景氛围）；同一叙事单元内所有镜头必须发生在同一地点，禁止镜头间场景漂移；local_light_description 写光源方向、明暗对比与面部落点；台词照抄摘录原文并以"角色名："开头（无台词时以纯画面动作撑满时长）；ambient_sound 写短文本（如"键盘敲击声渐弱"）；
+5. 镜头顺序遵循摘录的动作时间线；
+6. shot_size/camera_movement/camera_angle 必须从给定枚举中逐字原样取值——这是字段级硬校验，自创词（如"推拉镜头"、"俯拍特写"这类组合词）会导致该镜头块整体作废；拿不准时选语义最接近的合法值，不要造词；
+7. 不要任何解释文字，不要 markdown。`, unitCount, unitCount, unitCount, unitCount, enumRuleSentence())
 }
 
 // enumRuleSentence 枚举约束句（与 splitter.go 合法值集合同源生成，避免双份维护漂移）。
@@ -123,6 +131,26 @@ type SplitHandler struct {
 	// progress 可选进度上报（Execute 注入的闭包；worker main 里写 DB + WS 桥）。
 	// 阶段化真实文案取代前端假动画轮换（用户实测反馈"等待 27 分钟像卡死"）。
 	progress func(pct int, msg string)
+	// maxTokensResolver 拆分段 A/B 的单次输出上限解析器（管理端 platform_configs.split_max_tokens 可配，
+	// 运行时实时读取；nil 或返回非正值时回退 defaultMaxTokens）。
+	maxTokensResolver func(ctx context.Context) int
+}
+
+// defaultMaxTokens 拆分 LLM 单次输出上限兜底值（未配置时使用）。
+const defaultMaxTokens = 32768
+
+// DefaultSplitMaxTokens 对外暴露的默认值（worker 装配 resolver 时作兜底入参）。
+const DefaultSplitMaxTokens = defaultMaxTokens
+
+// resolveMaxTokens 解析拆分输出上限（30s TTL 缓存，线程安全，可并发调用）。
+func (h *SplitHandler) resolveMaxTokens(ctx context.Context) int {
+	if h.maxTokensResolver == nil {
+		return defaultMaxTokens
+	}
+	if v := h.maxTokensResolver(ctx); v > 0 {
+		return v
+	}
+	return defaultMaxTokens
 }
 
 func NewSplitHandler(llm LLMClient, store SplitStore) *SplitHandler {
@@ -130,8 +158,16 @@ func NewSplitHandler(llm LLMClient, store SplitStore) *SplitHandler {
 	return &SplitHandler{llm: llm, store: store, maxTry: 4}
 }
 
+// parallelEpisodeDesignConcurrency 镜头设计并发数（控制同时对多个剧集调用 API）
+const parallelEpisodeDesignConcurrency = 2
+
 // SetProgressReporter 注入拆分进度上报（nil 不上报）。
 func (h *SplitHandler) SetProgressReporter(fn func(pct int, msg string)) { h.progress = fn }
+
+// SetMaxTokensResolver 注入拆分输出上限解析器（管理端可配；nil 回退默认值）。
+func (h *SplitHandler) SetMaxTokensResolver(fn func(ctx context.Context) int) {
+	h.maxTokensResolver = fn
+}
 
 // report 进度容错上报。
 func (h *SplitHandler) report(pct int, msg string) {
@@ -207,7 +243,7 @@ func (h *SplitHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 		resp, err := h.llm.Chat(ctx, model.CapLLM, &model.ChatRequest{
 			Prompt:      params.ScriptText,
 			System:      outlineSystemPrompt(params.EpisodeDurationMin, minUnits, minEpisodes) + extraHint,
-			MaxTokens:   16384,
+			MaxTokens:   h.resolveMaxTokens(ctx), // 管理端可配（platform_configs.split_max_tokens），防长剧本输出被截断
 			Temperature: 0.3,
 			JSONMode:    true,
 			// deepseek-v4-* 默认开推理：推理烧光 token 预算导致截断/空内容，显式关闭。
@@ -251,12 +287,36 @@ func (h *SplitHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 	result = NormalizeEpisodeCount(result, minEpisodes)
 	normalizeUnitDurations(result)
 
-	// ①.7 段B：逐集镜头设计（每集独立小请求；单集失败整体失败回滚状态）
+	// ①.7 段 B：逐集镜头设计（并发并行处理；单集失败整体失败回滚状态）
 	totalEps := len(result.Episodes)
+	if totalEps > 1 {
+		log.Printf("split: 开始 %d集并发镜头设计 (并发数=%d)", totalEps, parallelEpisodeDesignConcurrency)
+	}
+
+	done := make(chan error, totalEps)
+	sem := make(chan struct{}, parallelEpisodeDesignConcurrency) // 控制并发数
+
+	var epIdxList []int
 	for ei := range result.Episodes {
-		h.report(15+ei*55/max(totalEps, 1),
-			fmt.Sprintf("正在设计第 %d/%d 集的分镜镜头…", ei+1, totalEps))
-		if err := h.designEpisodeShots(ctx, ei, &result.Episodes[ei]); err != nil {
+		epIdxList = append(epIdxList, ei)
+	}
+
+	for _, ei := range epIdxList {
+		sem <- struct{}{} // 获取令牌
+		go func(epIndex int, eps *[]EpisodeSplit) {
+			defer func() { <-sem; done <- nil }()
+
+			h.report(15+epIndex*55/max(totalEps, 1),
+				fmt.Sprintf("正在设计第 %d/%d 集的分镜镜头…", epIndex+1, totalEps))
+			if err := h.designEpisodeShots(ctx, epIndex, &(*eps)[epIndex]); err != nil {
+				done <- fmt.Errorf("第%d集镜头设计失败：%w", epIndex+1, err)
+			}
+		}(ei, &result.Episodes)
+	}
+
+	// 等待所有剧集完成
+	for range epIdxList {
+		if err := <-done; err != nil {
 			_ = h.store.MarkSplitFailed(ctx, derefProjectID(t))
 			return nil, err
 		}
@@ -348,14 +408,17 @@ func (h *SplitHandler) designEpisodeShots(ctx context.Context, epIndex int, ep *
 		fmt.Fprintf(&b, "[单元%d] 标题：%s｜时长：%d 秒｜原文摘录：%s\n",
 			i+1, u.Title, int(u.DurationSec), u.ScriptOriginalText)
 	}
+	// 尾部重申完整性硬约束（与 system 首要硬约束呼应；历史失败=漏 index 整集重跑）
+	fmt.Fprintf(&b, "\n【自查】输出 units 必须恰好 %d 项（index=1..%d，每个 index 的 shot_groups ≥1 块），缺一即无效。\n",
+		len(ep.NarrativeUnits), len(ep.NarrativeUnits))
 	prompt := b.String()
-	system := shotDesignSystemPrompt()
+	system := shotDesignSystemPrompt(len(ep.NarrativeUnits))
 	var lastErr error
 	for attempt := 1; attempt <= h.maxTry; attempt++ {
 		resp, err := h.llm.Chat(ctx, model.CapLLM, &model.ChatRequest{
 			Prompt:      prompt,
 			System:      system,
-			MaxTokens:   16384, // 单集体量上限；段B实际输出远小于该值
+			MaxTokens:   h.resolveMaxTokens(ctx), // 与段 A 同源配置，防止分段输出被截断
 			Temperature: 0.3,
 			JSONMode:    true,
 			NoThinking:  true,
@@ -479,6 +542,8 @@ func (h *SplitHandler) expandAssetPrompt(ctx context.Context, assetType, name, b
 - 发型、妆容
 - 服装材质、款式、配色、配饰
 【格式】使用列举式短语，以分号分隔，总字数≥100 字
+
+【铁律】只描述人物本体（身材/五官/发型/妆容/服装），严禁出现任何背景、场景、环境、房间、街道、室内外空间描述，严禁出现任何环境物件（桌子、窗户、沙发、电脑等），严禁出现“站在”“位于”“背景是”等场景导向词汇。人物背景由构图阶段统一处理。
 
 注意：不要 JSON、Markdown 或任何解释，只返回优化后的提示词本身。`
 	case "scene":

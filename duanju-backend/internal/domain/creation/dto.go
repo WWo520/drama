@@ -13,6 +13,7 @@ type ProjectDTO struct {
 	Status         string `json:"status"`
 	TotalEpisodeCount int `json:"total_episode_count"`
 	TotalDurationSec  int `json:"total_duration_sec"`
+	Config         map[string]any `json:"config"` // 项目级配置快照（模型/分辨率/风格等）
 	LastOpenedAt   string `json:"last_opened_at"`
 	CreatedAt      string `json:"created_at"`
 	UpdatedAt      string `json:"updated_at"`
@@ -20,9 +21,10 @@ type ProjectDTO struct {
 
 // CreateProjectReq 创建项目（3.0.2）。
 type CreateProjectReq struct {
-	Title            string `json:"title" binding:"required,min=1,max=256"`
-	SourceScriptText string `json:"source_script_text" binding:"omitempty,max=50000"` // ≤5 万字（20004）
-	SpaceID          string `json:"space_id" binding:"omitempty"`                     // 缺省用默认空间
+	Title            string         `json:"title" binding:"required,min=1,max=256"`
+	SourceScriptText string         `json:"source_script_text" binding:"omitempty,max=50000"` // ≤5 万字（20004）
+	SpaceID          string         `json:"space_id" binding:"omitempty"`                     // 缺省用默认空间
+	Config           map[string]any `json:"config"`                                           // 首页配置快照（可选）
 }
 
 // UpdateProjectReq 更新项目（3.0.4）。

@@ -40,6 +40,21 @@ function beatStatusBadge(status: string): { label: string; cls: string; running?
 
 const DURATION_OPTIONS = ["自动", "5秒", "10秒", "15秒", "20秒", "自定义"];
 
+// 视频模型 key → 显示名（首页快照可能存首页 key（seedance25/MiniMax-H3 等）或 Step3 回写的弹窗 key（2.5 等））
+const VIDEO_MODEL_DISPLAY: Record<string, string> = {
+  seedance25: "Seedance 2.5",
+  "2.5": "Seedance 2.5",
+  seedance20: "Seedance 2.0",
+  "2.0": "Seedance 2.0",
+  seedance20fast: "Seedance 2.0 Fast",
+  seedance15: "Seedance 1.5",
+  "1.5": "Seedance 1.5",
+  klingo3: "KlingO3",
+  "MiniMax-H3": "MiniMax H3",
+};
+// 后端分辨率枚举 → 显示值（快照可能存 P720 等枚举）
+const displayRes = (v: string) => (v === "P480" ? "480P" : v === "P720" ? "720P" : v === "P1080" ? "1080P" : v);
+
 // 台词说话人着色（按首次出现顺序分配，对齐 luxreal 设计稿剧本原文区台词配色）
 const SPEAKER_COLORS = ["#4C7FF8", "#8B5CF6", "#10B981", "#F59E0B", "#EC4899", "#22D3EE"];
 
@@ -307,6 +322,15 @@ export default function Step1Page() {
   // 可重新拆分阶段：拆分成功后的资产阶段（后端状态机限定；视频阶段后不可重拆）
   const canResplit = proj?.status === "PARTIAL_ASSETS" || proj?.status === "ALL_ASSETS_READY";
 
+  // 项目配置快照 → 设置条显示值（首页所选模型/分辨率/画幅/风格贯穿全流程）
+  const cfg = (proj?.config ?? {}) as Record<string, unknown>;
+  const cfgStr = (k: string) => (typeof cfg[k] === "string" ? (cfg[k] as string) : "");
+  const cfgVideoModel = VIDEO_MODEL_DISPLAY[cfgStr("video_model")] || cfgStr("video_model") || "Seedance 2.5";
+  const cfgResolution = displayRes(cfgStr("resolution")) || "1080P";
+  const cfgRatio = cfgStr("aspect_ratio") || "9:16";
+  const cfgStyleName = cfgStr("style_name") || "默认风格";
+  const cfgDuration = cfgStr("video_duration") === "auto" || !cfgStr("video_duration") ? "自动时长" : cfgStr("video_duration");
+
   // 项目加载失败（404/无权限/后端异常）整页降级，避免无限“加载中…”
   if (loadError) return <ProjectLoadError />;
 
@@ -367,23 +391,23 @@ export default function Step1Page() {
                 className="settings-chip flex items-center gap-1 text-xs rounded-lg px-2.5 py-1 text-white/80 transition-colors hover:text-white"
                 onClick={() => toast.info("模型配置请从创作首页进入")}
               >
-                Seedance 2.5
+                {cfgVideoModel}
                 <ChevronDown size={12} />
               </button>
               <button className="settings-chip flex items-center gap-1 text-xs rounded-lg px-2.5 py-1 text-white/80 transition-colors hover:text-white" onClick={() => toast.info("分辨率切换将在后续版本开放")}>
-                1080P
+                {cfgResolution}
                 <ChevronDown size={12} />
               </button>
               <button className="settings-chip flex items-center gap-1 text-xs rounded-lg px-2.5 py-1 text-white/80 transition-colors hover:text-white" onClick={() => toast.info("画幅切换将在后续版本开放")}>
-                9:16
+                {cfgRatio}
                 <ChevronDown size={12} />
               </button>
               <button className="settings-chip flex items-center gap-1 text-xs rounded-lg px-2.5 py-1 text-white/80 transition-colors hover:text-white" onClick={() => toast.info("风格切换将在后续版本开放")}>
-                武侠仙侠
+                {cfgStyleName}
                 <ChevronDown size={12} />
               </button>
               <button className="settings-chip flex items-center gap-1 text-xs rounded-lg px-2.5 py-1 text-white/80 transition-colors hover:text-white" onClick={() => toast.info("时长策略将在后续版本开放")}>
-                自动时长
+                {cfgDuration}
                 <ChevronDown size={12} />
               </button>
             </div>

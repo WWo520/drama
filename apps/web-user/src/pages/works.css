@@ -132,26 +132,43 @@ html {
 }
 
 /* Sidebar Credits & Recharge（金色徽章 + 主蓝渐变对齐 G-04） */
+/* Sidebar Wallet（积分 + 充值 同一组件：金色徽章 + 数值 + 小按钮；宽度受限不超侧边栏） */
+.sidebar-wallet {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    margin: 4px 0 6px;
+    padding: 7px 4px 6px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    flex-shrink: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+}
 .sidebar-credits {
-    font-size: 11px;
-    font-weight: 500;
+    font-size: 12px;
+    font-weight: 600;
     color: #F0F0F5;
     line-height: 1.2;
-    margin: 4px 0 2px;
     flex-shrink: 0;
     display: inline-flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
     background: transparent;
     border: none;
     padding: 0;
+    max-width: 100%;
 }
 .sidebar-credits-badge {
-    width: 30px;
-    height: 30px;
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
     background: linear-gradient(135deg, #F8C95C 0%, #E89B2D 55%, #C9761A 100%);
     display: inline-flex;
@@ -164,12 +181,21 @@ html {
     color: #FFF8E7;
     flex-shrink: 0;
 }
+.sidebar-credits-value {
+    color: #F8E3A8;
+    font-size: 10px;
+    font-weight: 700;
+    max-width: 52px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 .sidebar-recharge {
-    font-size: 14px;
+    font-size: 11px;
     font-weight: 500;
     color: #fff;
     background: linear-gradient(107.06deg, #1A7AF8 0%, #0049F5 100%);
-    padding: 7px 18px;
+    padding: 3px 12px;
     border-radius: 9999px;
     cursor: pointer;
     text-decoration: none;
@@ -488,7 +514,7 @@ html {
   max-width: calc(100% - 48px);
   padding: 3px 8px;
   border-radius: 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: #fff;
   background: rgba(0, 0, 0, 0.55);
@@ -527,9 +553,9 @@ html {
   padding: 10px 12px 12px;
 }
 .project-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: #E8E8F0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #F2F2F8;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

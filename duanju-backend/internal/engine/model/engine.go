@@ -11,12 +11,18 @@ import (
 
 // ModelEngine 模型路由引擎。
 type ModelEngine struct {
-	providers map[string]Provider
-	store     KeyStore
-	mu        sync.Mutex
+	providers  map[string]Provider
+	store      KeyStore
+	mu         sync.Mutex
 	semaphores map[int64]*keySemaphore // keyID → 信号量
-	coolDown  map[int64]time.Time      // keyID → 冷却截止
+	coolDown   map[int64]time.Time     // keyID → 冷却截止
 }
+
+// 信号量全满时的排队等待参数：300ms 轮询、总上限 15s（超载"慢一点"而非"直接死"）。
+const (
+	waitForSlotStep  = 300 * time.Millisecond
+	waitForSlotTotal = 15 * time.Second
+)
 
 type keySemaphore struct {
 	ch chan struct{}
@@ -41,41 +47,53 @@ func (e *ModelEngine) Chat(ctx context.Context, capability Capability, req *Chat
 	if err != nil {
 		return nil, err
 	}
-	var lastErr error
-	for _, k := range keys {
-		if !e.keyUsable(k.ID) {
-			continue
-		}
-		p, ok := e.providers[k.ProviderName]
-		if !ok {
-			// 厂商名未注册（DB 配置厂商名多样，如 deepseek）：回退 OpenAI 兼容通道
-			p, ok = e.providers["openai-compat"]
-		}
-		if !ok {
-			continue
-		}
-		if !e.acquire(k.ID, k.Concurrency) {
-			continue // 信号量满，试下一个 Key
-		}
-		resp, callErr := p.Chat(ctx, k, req)
-		e.release(k.ID)
-		if callErr == nil {
-			return resp, nil
-		}
-		lastErr = callErr
-		if isRetryable(callErr) {
-			// 429/5xx/超时 → 标记冷却，自动切下一个 Key（01 C.2.2 ④）
-			e.markCooldown(k.ID)
-			e.store.MarkKeyUnavailable(ctx, k.ID, callErr.Error())
-			continue
-		}
-		// 4xx 用户侧错误（prompt 违规等）→ 直接报错不切换
-		return nil, callErr
-	}
-	if lastErr == nil {
+	if len(keys) == 0 {
 		return nil, ErrNoAvailableKey
 	}
-	return nil, fmt.Errorf("%w: %v", ErrProviderAllFailed, lastErr)
+	var lastErr error
+	// 所有 key 信号量满时不立即失败：排队等待重试（多用户/多任务挤兑时"慢一点"而非"直接死"）
+	for deadline := time.Now().Add(waitForSlotTotal); ; time.Sleep(waitForSlotStep) {
+		lastErr = nil
+		for _, k := range keys {
+			if !e.keyUsable(k.ID) {
+				continue
+			}
+			p, ok := e.providers[k.ProviderName]
+			if !ok {
+				// 厂商名未注册（DB 配置厂商名多样，如 deepseek）：回退 OpenAI 兼容通道
+				p, ok = e.providers["openai-compat"]
+			}
+			if !ok {
+				continue
+			}
+			if !e.acquire(k.ID, k.Concurrency) {
+				continue // 信号量满，试下一个 Key
+			}
+			resp, callErr := p.Chat(ctx, k, req)
+			e.release(k.ID)
+			if callErr == nil {
+				return resp, nil
+			}
+			lastErr = callErr
+			if isRetryable(callErr) {
+				// 429/5xx/超时 → 标记冷却，自动切下一个 Key（01 C.2.2 ④）
+				e.markCooldown(k.ID)
+				e.store.MarkKeyUnavailable(ctx, k.ID, callErr.Error())
+				continue
+			}
+			// 4xx 用户侧错误（prompt 违规等）→ 直接报错不切换
+			return nil, callErr
+		}
+		if lastErr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrProviderAllFailed, lastErr)
+		}
+		if time.Now().After(deadline) {
+			return nil, ErrNoAvailableKey
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 }
 
 // GenerateImage 图片生成路由。
@@ -84,38 +102,50 @@ func (e *ModelEngine) GenerateImage(ctx context.Context, capability Capability, 
 	if err != nil {
 		return nil, err
 	}
-	var lastErr error
-	for _, k := range keys {
-		if !e.keyUsable(k.ID) {
-			continue
-		}
-		p, ok := e.providers[k.ProviderName]
-		if !ok {
-			p, ok = e.providers["openai-compat"]
-		}
-		if !ok {
-			continue
-		}
-		if !e.acquire(k.ID, k.Concurrency) {
-			continue
-		}
-		resp, callErr := p.GenerateImage(ctx, k, req)
-		e.release(k.ID)
-		if callErr == nil {
-			return resp, nil
-		}
-		lastErr = callErr
-		if isRetryable(callErr) {
-			e.markCooldown(k.ID)
-			e.store.MarkKeyUnavailable(ctx, k.ID, callErr.Error())
-			continue
-		}
-		return nil, callErr
-	}
-	if lastErr == nil {
+	if len(keys) == 0 {
 		return nil, ErrNoAvailableKey
 	}
-	return nil, fmt.Errorf("%w: %v", ErrProviderAllFailed, lastErr)
+	var lastErr error
+	// 所有 key 信号量满时排队等待重试（上限 waitForSlotTotal）
+	for deadline := time.Now().Add(waitForSlotTotal); ; time.Sleep(waitForSlotStep) {
+		lastErr = nil
+		for _, k := range keys {
+			if !e.keyUsable(k.ID) {
+				continue
+			}
+			p, ok := e.providers[k.ProviderName]
+			if !ok {
+				p, ok = e.providers["openai-compat"]
+			}
+			if !ok {
+				continue
+			}
+			if !e.acquire(k.ID, k.Concurrency) {
+				continue
+			}
+			resp, callErr := p.GenerateImage(ctx, k, req)
+			e.release(k.ID)
+			if callErr == nil {
+				return resp, nil
+			}
+			lastErr = callErr
+			if isRetryable(callErr) {
+				e.markCooldown(k.ID)
+				e.store.MarkKeyUnavailable(ctx, k.ID, callErr.Error())
+				continue
+			}
+			return nil, callErr
+		}
+		if lastErr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrProviderAllFailed, lastErr)
+		}
+		if time.Now().After(deadline) {
+			return nil, ErrNoAvailableKey
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 }
 
 // GenerateVideo 视频生成路由（异步提交，返回外部任务 ID）。
@@ -124,38 +154,50 @@ func (e *ModelEngine) GenerateVideo(ctx context.Context, capability Capability, 
 	if err != nil {
 		return nil, err
 	}
-	var lastErr error
-	for _, k := range keys {
-		if !e.keyUsable(k.ID) {
-			continue
-		}
-		p, ok := e.providers[k.ProviderName]
-		if !ok {
-			p, ok = e.providers["openai-compat"]
-		}
-		if !ok {
-			continue
-		}
-		if !e.acquire(k.ID, k.Concurrency) {
-			continue
-		}
-		resp, callErr := p.GenerateVideo(ctx, k, req)
-		e.release(k.ID)
-		if callErr == nil {
-			return resp, nil
-		}
-		lastErr = callErr
-		if isRetryable(callErr) {
-			e.markCooldown(k.ID)
-			e.store.MarkKeyUnavailable(ctx, k.ID, callErr.Error())
-			continue
-		}
-		return nil, callErr
-	}
-	if lastErr == nil {
+	if len(keys) == 0 {
 		return nil, ErrNoAvailableKey
 	}
-	return nil, fmt.Errorf("%w: %v", ErrProviderAllFailed, lastErr)
+	var lastErr error
+	// 所有 key 信号量满时排队等待重试（上限 waitForSlotTotal）
+	for deadline := time.Now().Add(waitForSlotTotal); ; time.Sleep(waitForSlotStep) {
+		lastErr = nil
+		for _, k := range keys {
+			if !e.keyUsable(k.ID) {
+				continue
+			}
+			p, ok := e.providers[k.ProviderName]
+			if !ok {
+				p, ok = e.providers["openai-compat"]
+			}
+			if !ok {
+				continue
+			}
+			if !e.acquire(k.ID, k.Concurrency) {
+				continue
+			}
+			resp, callErr := p.GenerateVideo(ctx, k, req)
+			e.release(k.ID)
+			if callErr == nil {
+				return resp, nil
+			}
+			lastErr = callErr
+			if isRetryable(callErr) {
+				e.markCooldown(k.ID)
+				e.store.MarkKeyUnavailable(ctx, k.ID, callErr.Error())
+				continue
+			}
+			return nil, callErr
+		}
+		if lastErr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrProviderAllFailed, lastErr)
+		}
+		if time.Now().After(deadline) {
+			return nil, ErrNoAvailableKey
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 }
 
 // acquire 单 Key 信号量并发控制（非阻塞，满则 false）。

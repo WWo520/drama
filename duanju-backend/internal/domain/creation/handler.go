@@ -49,6 +49,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, adminMW, auditMW gin.Handl
 		projects.POST("/:project_id/last-opened", h.touchLastOpened)
 		projects.POST("/:project_id/split-script", h.splitScript)
 		projects.GET("/:project_id/episodes", h.listEpisodes)
+		projects.PATCH("/:project_id/config", h.updateProjectConfig) // 项目配置快照合并更新
 	}
 	episodes := rg.Group("/episodes")
 	{
@@ -443,6 +444,10 @@ func (h *Handler) create(c *gin.Context) {
 
 func (h *Handler) get(c *gin.Context) {
 	h.svc.Get(c, c.Param("project_id"))
+}
+
+func (h *Handler) updateProjectConfig(c *gin.Context) {
+	h.svc.UpdateConfig(c, c.Param("project_id"))
 }
 
 func (h *Handler) update(c *gin.Context) {

@@ -107,9 +107,10 @@ const (
 
 // VideoHandler 视频生成 Worker。
 type VideoHandler struct {
-	store  VideoStore
-	engine VideoGenClient // 可为 nil：未注入时降级 mock（开发期）
-	env    string         // 08 审查 Major#16：生产环境禁止 mock 降级
+	store   VideoStore
+	engine  VideoGenClient // 可为 nil：未注入时降级 mock（开发期）
+	env     string         // 08 审查 Major#16：生产环境禁止 mock 降级
+	persist VideoPersister // 可选：生成视频转存自有对象存储（厂商临时 URL 1~2 天清理 → 视频 404 根因）
 }
 
 // VideoGenClient 视频生成能力（由 ModelEngine 实现注入）。
@@ -120,6 +121,9 @@ type VideoGenClient interface {
 func NewVideoHandler(store VideoStore, engine VideoGenClient, env string) *VideoHandler {
 	return &VideoHandler{store: store, engine: engine, env: env}
 }
+
+// SetPersister 注入视频持久化（nil 不转存）。
+func (h *VideoHandler) SetPersister(p VideoPersister) { h.persist = p }
 
 func (h *VideoHandler) Name() string { return "VIDEO_SEGMENT_GEN" }
 
@@ -174,7 +178,7 @@ func (h *VideoHandler) Execute(ctx context.Context, t *task.Task) ([]byte, error
 		log.Printf("video: shot %d 参考资产 %d 个 target=%s", shot.ShotID, len(refAssets), refAssets[0].Name)
 	}
 	return h.generateAndSave(ctx, t, genTarget{
-		Kind: "shot", ID: shot.ShotID, GroupID: shot.ShotGroupID,
+		Kind: "shot", ID: shot.ShotID, GroupID: shot.ShotGroupID, ProjectID: shot.ProjectID,
 		DurationSec: shot.DurationSec,
 		Prompt:      buildLegacyPrompt(shot, refAssets), RefURLs: refURLs,
 	}, params.Resolution, params.ModelKey)
@@ -232,7 +236,7 @@ func (h *VideoHandler) executeCard(ctx context.Context, t *task.Task, cardID int
 	}
 
 	return h.generateAndSave(ctx, t, genTarget{
-		Kind: "card", ID: card.CardID,
+		Kind: "card", ID: card.CardID, ProjectID: card.ProjectID,
 		DurationSec: duration, Prompt: prompt, RefURLs: refURLs,
 	}, resolution, modelKey)
 }
@@ -242,6 +246,7 @@ type genTarget struct {
 	Kind        string // "card" / "shot"
 	ID          int64  // card_id / shot_id
 	GroupID     int64  // shot 模式的镜头块 id
+	ProjectID   int64  // 转存自有存储的 objectKey 归属
 	DurationSec int
 	Prompt      string
 	RefURLs     []string
@@ -289,6 +294,9 @@ func (h *VideoHandler) generateAndSave(ctx context.Context, t *task.Task, g genT
 	if videoURL == "" {
 		videoURL = fmt.Sprintf("%s/sample.mp4?%s=%d&t=%d", mockCDNBase(), g.Kind, g.ID, time.Now().UnixMilli())
 	}
+	// 真实结果转存自有对象存储（厂商临时 URL 保留期 1~2 天 → 历史视频 404 根因）；
+	// 转存失败保留原 URL 不阻断；mock 占位地址自动跳过。
+	videoURL = persistGeneratedVideo(ctx, h.persist, g.ProjectID, g.Kind, g.ID, videoURL)
 	log.Printf("video: %s %d 视频 url=%s is_mock=%v refs=%d dur=%ds",
 		g.Kind, g.ID, videoURL, isMock, len(g.RefURLs), g.DurationSec)
 
@@ -422,6 +430,17 @@ func buildLegacyPrompt(s *ShotInfo, refs []RefAsset) string {
 		if len(bindings) > 0 {
 			b.WriteString("资产参考绑定：" + strings.Join(bindings, "、") +
 				"（画面须与对应参考图保持一致）\n\n")
+		}
+		// 场景锁定（与 buildLuxRealCardPrompt 铁律段同源，防对话/特写镜头场景漂移）
+		var sceneNames []string
+		for _, ra := range refs {
+			if ra.Kind == "SCENE" && ra.Name != "" {
+				sceneNames = append(sceneNames, ra.Name)
+			}
+		}
+		if len(sceneNames) > 0 {
+			b.WriteString("场景锁定：本段视频所有镜头必须发生在「" + strings.Join(sceneNames, "」「") +
+				"」场景内，不得切换到其他地点。\n\n")
 		}
 	}
 	b.WriteString(base)
@@ -565,8 +584,14 @@ func buildLuxRealCardPrompt(cards []cardShot, refs []RefAsset) string {
 	}
 	// [铁律段] 连贯性与一致性硬约束
 	b.WriteString("\n各镜头为同一时空连续叙事：人物的位置、朝向、动作状态必须逐镜衔接，" +
-		"前后镜头的起止画面不能跳变；人物形象、服饰与场景布局严格与对应参考图保持一致。" +
-		"严格按照每个镜头的时间戳顺序推进画面。")
+		"前后镜头的起止画面不能跳变；人物形象、服饰与场景布局严格与对应参考图保持一致。")
+	// 场景锁定（防场景漂移）：卡内已关联场景时显式禁止跨卡/跨镜切换地点
+	// （用户实测"餐厅对话答话人不在餐厅"——对话特写镜头缺场景约束时模型自由发挥地点）。
+	if len(scenes) > 0 {
+		b.WriteString("\n场景锁定：本段视频所有镜头必须发生在「" + strings.Join(scenes, "」「") +
+			"」场景内，环境布局、陈设、色调与光线保持连续，任何镜头（含人物特写）不得切换到其他地点或凭空出现新场景。")
+	}
+	b.WriteString("\n严格按照每个镜头的时间戳顺序推进画面。")
 	return b.String()
 }
 

@@ -29,6 +29,7 @@ import (
 	"github.com/duanju/backend/internal/pkg/cryptox"
 	"github.com/duanju/backend/internal/pkg/db"
 	"github.com/duanju/backend/internal/pkg/logger"
+	"github.com/duanju/backend/internal/pkg/platformcfg"
 	"github.com/duanju/backend/internal/pkg/redisx"
 	"github.com/duanju/backend/internal/repository"
 )
@@ -122,6 +123,13 @@ func main() {
 	// Agent 引擎（S1-B05）：SplitHandler 注册为 SCRIPT_SPLIT 执行器
 	splitStore := repository.NewSplitStore(pool)
 	splitHandler := agent.NewSplitHandler(modelEngine, splitStore)
+	// 拆分输出上限（max_tokens）管理端可配：platform_configs.split_max_tokens（30s 缓存实时生效），
+	// 未配置/读取失败回退代码默认 32768。
+	platformCfgStore := platformcfg.New(pool)
+	splitHandler.SetMaxTokensResolver(func(ctx context.Context) int {
+		v, _ := platformCfgStore.Int(ctx, "split_max_tokens", agent.DefaultSplitMaxTokens)
+		return v
+	})
 
 	// 18 - 视频制作 阶段二：分镜脚本独立生成（STORYBOARD_PLAN_V1_LUXCHAT，单叙事单元重跑分镜技能）
 	storyboardStore := repository.NewStoryboardStore(pool)
@@ -193,6 +201,7 @@ func main() {
 						}
 						assetHandler.SetPersister(mp)
 						shotRefHandler.SetPersister(mp)
+						videoHandler.SetPersister(mp)
 						lg.Info("资产图持久化已装配(MinIO)", logger.F(
 							"endpoint", imgEp, "bucket", imgBK, "public_base", imgPublic)...)
 					}
